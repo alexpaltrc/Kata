@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 authors = ["Alex Palacios"]
 publish = false
 
@@ -13,6 +13,8 @@ publish = false
 kata-capture = { path = "crates/capture" }
 kata-editor = { path = "crates/editor" }
 kata-ui = { path = "crates/ui" }
+windows = "0.62.2"
+windows-numerics = "0.3.1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -17,18 +17,20 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 ## Captura
 
 - La pantalla se congela al iniciar el recorte. Todos los monitores, con su escala propia.
-- Las pantallas HDR se convierten a colores estándar para que la captura se vea igual en cualquier lugar.
+- **Hoy:** GDI copia todo el escritorio de una vez. En el mismo instante se anotan las ventanas y monitores, para resaltarlos al pasar el cursor.
+- **Pendiente (fase 5):** convertir las pantallas HDR a colores estándar, para que la captura se vea igual en cualquier lugar.
 
 ## Guardado
 
 - **Formato:** PNG, con el codificador nativo de Windows (WIC).
 - **Sin bloqueos:** se guarda en segundo plano, así la app nunca se traba.
 - **Escritura atómica:** primero un archivo temporal, luego se reemplaza. Nunca queda una imagen a medias.
+- **Portapapeles:** se copia al instante, antes de guardar.
 
 ## Sonido
 
-- Un WAV de unos 80 ms dentro del ejecutable.
-- Ya está cargado en memoria, así que suena sin retraso.
+- Un toque suave de unos 120 ms, generado por código al arrancar. No hay archivos de audio.
+- Ya está en memoria, así que suena sin retraso.
 
 ## Distribución
 
@@ -37,9 +39,9 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 
 ## Metas de rendimiento
 
-| Medida | Meta |
-|---|---|
-| Memoria en reposo | < 15 MB |
-| CPU en reposo | 0 % |
-| Atajo → selección visible | < 100 ms |
-| Tamaño del ejecutable | < 5 MB |
+| Medida | Meta | Medido |
+|---|---|---|
+| Memoria en reposo | < 15 MB | Pendiente |
+| CPU en reposo | 0 % | Pendiente |
+| Atajo → selección visible | < 100 ms | Pendiente |
+| Tamaño del ejecutable | < 5 MB | 0.3 MB |

@@ -1,0 +1,171 @@
+//! Kata's glyph — four rounded corners framing a selection — drawn at any size.
+
+use std::{mem::size_of, ptr};
+
+use windows::{
+    Win32::{
+        Graphics::{
+            Direct2D::{
+                Common::{
+                    D2D_SIZE_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
+                    D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_OPEN, D2D1_PIXEL_FORMAT,
+                },
+                D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_SMALL, D2D1_RENDER_TARGET_PROPERTIES,
+                D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+                ID2D1PathGeometry,
+            },
+            Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+            Gdi::{
+                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection,
+                DIB_RGB_COLORS, DeleteObject,
+            },
+            Imaging::{
+                CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
+                WICBitmapCacheOnLoad,
+            },
+        },
+        System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
+        UI::WindowsAndMessaging::{CreateIconIndirect, HICON, ICONINFO},
+    },
+    core::Result,
+};
+use windows_numerics::Vector2;
+
+use crate::Graphics;
+
+/// The glyph as an icon of `size` × `size` pixels, white for dark surfaces or black
+/// for light ones. Needs COM on the calling thread.
+pub fn glyph_icon(graphics: &Graphics, size: u32, light_surface: bool) -> Result<HICON> {
+    let ink = if light_surface { 0.0 } else { 1.0 };
+    unsafe {
+        let wic: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let bitmap = wic.CreateBitmap(
+            size,
+            size,
+            &GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapCacheOnLoad,
+        )?;
+        let target = graphics.d2d.CreateWicBitmapRenderTarget(
+            &bitmap,
+            &D2D1_RENDER_TARGET_PROPERTIES {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+                ..Default::default()
+            },
+        )?;
+        let color = D2D1_COLOR_F {
+            r: ink,
+            g: ink,
+            b: ink,
+            a: 1.0,
+        };
+        let brush = target.CreateSolidColorBrush(&color, None)?;
+        let (glyph, stroke) = corners(graphics, size as f32)?;
+        target.BeginDraw();
+        target.Clear(None);
+        target.DrawGeometry(&glyph, &brush, stroke, None);
+        target.EndDraw(None, None)?;
+
+        let stride = size * 4;
+        let mut pixels = vec![0u8; (stride * size) as usize];
+        bitmap.CopyPixels(ptr::null(), stride, &mut pixels)?;
+        // Icons expect straight alpha; Direct2D draws premultiplied.
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            let alpha = u32::from(pixel[3]);
+            for channel in &mut pixel[..3] {
+                if let Some(straight) = (u32::from(*channel) * 255).checked_div(alpha) {
+                    *channel = straight as u8;
+                }
+            }
+        }
+        icon_from_pixels(size, &pixels)
+    }
+}
+
+/// The glyph's outline on a 16-unit grid scaled to `size`, and its stroke width.
+/// Straight strokes sit on pixel centers so they stay crisp at every size.
+fn corners(graphics: &Graphics, size: f32) -> Result<(ID2D1PathGeometry, f32)> {
+    let unit = size / 16.0;
+    let stroke = unit.round().max(1.0);
+    let near = (2.0 * unit).round() + stroke / 2.0;
+    let far = size - near;
+    let arm = 4.5 * unit;
+    let radius = 2.0 * unit;
+    let point = Vector2::new;
+    unsafe {
+        let path = graphics.d2d.CreatePathGeometry()?;
+        let sink = path.Open()?;
+        for (x, y, dx, dy) in [
+            (near, near, 1.0, 1.0),
+            (far, near, -1.0, 1.0),
+            (far, far, -1.0, -1.0),
+            (near, far, 1.0, -1.0),
+        ] {
+            sink.BeginFigure(point(x, y + dy * arm), D2D1_FIGURE_BEGIN_HOLLOW);
+            sink.AddLine(point(x, y + dy * radius));
+            sink.AddArc(&D2D1_ARC_SEGMENT {
+                point: point(x + dx * radius, y),
+                size: D2D_SIZE_F {
+                    width: radius,
+                    height: radius,
+                },
+                rotationAngle: 0.0,
+                sweepDirection: if dx * dy > 0.0 {
+                    D2D1_SWEEP_DIRECTION_CLOCKWISE
+                } else {
+                    D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE
+                },
+                arcSize: D2D1_ARC_SIZE_SMALL,
+            });
+            sink.AddLine(point(x + dx * arm, y));
+            sink.EndFigure(D2D1_FIGURE_END_OPEN);
+        }
+        sink.Close()?;
+        Ok((path, stroke))
+    }
+}
+
+/// Builds an icon from straight-alpha BGRA pixels.
+unsafe fn icon_from_pixels(size: u32, pixels: &[u8]) -> Result<HICON> {
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: size as i32,
+            biHeight: -(size as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    unsafe {
+        let mut bits = ptr::null_mut();
+        let color = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0)?;
+        ptr::copy_nonoverlapping(pixels.as_ptr(), bits.cast(), pixels.len());
+        // Alpha icons ignore the mask, but Windows still requires one.
+        let mask_rows = vec![0u8; (size.div_ceil(16) * 2 * size) as usize];
+        let mask = CreateBitmap(
+            size as i32,
+            size as i32,
+            1,
+            1,
+            Some(mask_rows.as_ptr().cast()),
+        );
+        let icon = CreateIconIndirect(&ICONINFO {
+            fIcon: true.into(),
+            xHotspot: 0,
+            yHotspot: 0,
+            hbmMask: mask,
+            hbmColor: color,
+        });
+        let _ = DeleteObject(color.into());
+        let _ = DeleteObject(mask.into());
+        icon
+    }
+}
