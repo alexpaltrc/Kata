@@ -30,10 +30,7 @@ use windows::{
                 DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteFactory, IDWriteTextFormat,
                 IDWriteTextLayout, IDWriteTypography,
             },
-            Dwm::{
-                DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DWMWINDOWATTRIBUTE,
-                DwmSetWindowAttribute,
-            },
+            Dwm::{DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED},
             Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
             Gdi::{InvalidateRect, UpdateWindow, ValidateRect},
         },
@@ -117,20 +114,14 @@ unsafe fn create(overlay: &RefCell<Overlay<'_>>) -> Result<HWND> {
 /// Shows the overlay with its first frame already drawn, so the switch from the live
 /// screen to the frozen one can't be seen.
 unsafe fn show(hwnd: HWND) {
+    window::set_attribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, BOOL::from(true));
+    window::set_attribute(hwnd, DWMWA_CLOAK, BOOL::from(true));
     unsafe {
-        set_flag(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, true);
-        set_flag(hwnd, DWMWA_CLOAK, true);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = UpdateWindow(hwnd);
-        set_flag(hwnd, DWMWA_CLOAK, false);
-        let _ = SetForegroundWindow(hwnd);
     }
-}
-
-unsafe fn set_flag(hwnd: HWND, attribute: DWMWINDOWATTRIBUTE, on: bool) {
-    let value = BOOL::from(on);
-    let size = size_of::<BOOL>() as u32;
-    let _ = unsafe { DwmSetWindowAttribute(hwnd, attribute, (&raw const value).cast(), size) };
+    window::set_attribute(hwnd, DWMWA_CLOAK, BOOL::from(false));
+    let _ = unsafe { SetForegroundWindow(hwnd) };
 }
 
 /// Runs the overlay's message loop until the user has chosen.
@@ -342,24 +333,19 @@ impl<'a> Overlay<'a> {
 
     fn frame(&self, now: Instant) -> Frame {
         let selection = self.from.lerp(&self.to, self.glide.value(now));
-        let touched = || {
-            self.shot
-                .monitors
-                .iter()
-                .filter(move |monitor| monitor.rect.intersect(&selection).is_some())
-        };
         Frame {
             presence: self.presence.value(now),
             selection,
             size: (self.to.width(), self.to.height()),
-            area: touched()
+            area: self
+                .shot
+                .monitors
+                .iter()
                 .map(|monitor| monitor.rect)
+                .filter(|rect| rect.intersect(&selection).is_some())
                 .reduce(|a, b| a.union(&b))
                 .unwrap_or_else(|| self.shot.image.bounds()),
-            scale: touched()
-                .map(|monitor| monitor.scale)
-                .reduce(f32::max)
-                .unwrap_or(1.0),
+            scale: self.shot.scale_at(selection),
         }
     }
 }

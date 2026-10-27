@@ -38,6 +38,15 @@ impl Image {
         &self.pixels
     }
 
+    pub fn pixels_mut(&mut self) -> &mut [u8] {
+        &mut self.pixels
+    }
+
+    /// Where pixel `(x, y)` starts in `pixels`.
+    pub const fn offset(&self, x: i32, y: i32) -> usize {
+        y as usize * self.stride() + x as usize * Self::BYTES_PER_PIXEL
+    }
+
     pub const fn stride(&self) -> usize {
         self.width as usize * Self::BYTES_PER_PIXEL
     }
@@ -52,10 +61,29 @@ impl Image {
         let row_len = rect.width() as usize * Self::BYTES_PER_PIXEL;
         let mut pixels = Vec::with_capacity(row_len * rect.height() as usize);
         for y in rect.top..rect.bottom {
-            let start = y as usize * self.stride() + rect.left as usize * Self::BYTES_PER_PIXEL;
+            let start = self.offset(rect.left, y);
             pixels.extend_from_slice(&self.pixels[start..start + row_len]);
         }
         Some(Self::new(rect.width() as u32, rect.height() as u32, pixels))
+    }
+
+    /// Copies `from` onto the part of the image inside `area`, with `from`'s top-left
+    /// corner placed at `at`.
+    pub fn paste(&mut self, from: &Self, at: (i32, i32), area: Rect) {
+        let placed = from.bounds().offset(at.0, at.1);
+        let Some(area) = area
+            .intersect(&self.bounds())
+            .and_then(|area| area.intersect(&placed))
+        else {
+            return;
+        };
+        let row_len = area.width() as usize * Self::BYTES_PER_PIXEL;
+        for y in area.top..area.bottom {
+            let source = from.offset(area.left - at.0, y - at.1);
+            let target = self.offset(area.left, y);
+            self.pixels[target..target + row_len]
+                .copy_from_slice(&from.pixels[source..source + row_len]);
+        }
     }
 }
 
@@ -95,5 +123,19 @@ mod tests {
     #[test]
     fn crop_outside_is_none() {
         assert_eq!(numbered().crop(Rect::new(10, 10, 20, 20)), None);
+    }
+
+    #[test]
+    fn paste_places_and_clips() {
+        let blank = || Image::new(4, 3, [7, 0, 0, 255].repeat(12));
+        let patch = numbered().crop(Rect::new(1, 1, 3, 3)).unwrap();
+
+        let mut image = blank();
+        image.paste(&patch, (3, 2), image.bounds());
+        assert_eq!(blues(&image), [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 5]);
+
+        let mut image = blank();
+        image.paste(&patch, (1, 1), Rect::new(0, 0, 2, 3));
+        assert_eq!(blues(&image), [7, 7, 7, 7, 7, 5, 7, 7, 7, 9, 7, 7]);
     }
 }

@@ -2,13 +2,15 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod editor;
 mod export;
 mod overlay;
+mod settings;
 mod sound;
 mod strings;
 mod tray;
 
-use std::{cell::RefCell, fmt::Display, mem::size_of, ptr, thread::JoinHandle};
+use std::{cell::RefCell, fmt::Display, mem::size_of, ptr};
 
 use kata_ui::{Graphics, theme, window};
 use tray::Tray;
@@ -133,8 +135,6 @@ struct App {
     tray: Tray,
     /// Explorer broadcasts it after restarting; the tray icon must be added again.
     taskbar_created: u32,
-    /// Captures still being written to disk. Kata waits for them before exiting.
-    saves: Vec<JoinHandle<()>>,
 }
 
 impl App {
@@ -156,7 +156,6 @@ impl App {
             graphics,
             tray,
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
-            saves: Vec::new(),
         })
     }
 
@@ -188,7 +187,8 @@ impl App {
         true
     }
 
-    /// Freezes the screen, lets the user choose an area and delivers it.
+    /// Freezes the screen, lets the user choose an area and opens it in the editor,
+    /// which delivers it.
     fn capture(&mut self) {
         let shot = match kata_capture::capture() {
             Ok(shot) => shot,
@@ -197,13 +197,20 @@ impl App {
                 return;
             }
         };
-        let chosen = overlay::select(&self.graphics, &shot).and_then(|area| shot.image.crop(area));
+        let Some(area) = overlay::select(&self.graphics, &shot) else {
+            return;
+        };
+        let Some(image) = shot.image.crop(area) else {
+            return;
+        };
+        let capture = editor::Capture {
+            image,
+            area: area.offset(shot.origin.0, shot.origin.1),
+            scale: shot.scale_at(area),
+        };
         drop(shot);
-        if let Some(image) = chosen {
-            sound::play();
-            self.saves.retain(|save| !save.is_finished());
-            self.saves.extend(export::deliver(self.hwnd, image));
-        }
+        sound::play();
+        editor::open(&self.graphics, self.hwnd, capture);
     }
 
     fn capture_after_tray(&self) {
@@ -223,9 +230,9 @@ impl Drop for App {
         unsafe {
             let _ = UnregisterHotKey(Some(self.hwnd), HOTKEY_ID);
         }
-        for save in self.saves.drain(..) {
-            let _ = save.join();
-        }
+        // The editor's last changes are written before Kata exits.
+        editor::close();
+        export::wait_for_saves();
     }
 }
 

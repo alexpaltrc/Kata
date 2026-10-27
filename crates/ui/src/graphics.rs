@@ -1,6 +1,6 @@
 use windows::{
     Win32::Graphics::{
-        Direct2D::{D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1CreateFactory, ID2D1Factory},
+        Direct2D::{D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1CreateFactory, ID2D1Factory1},
         DirectWrite::{DWRITE_FACTORY_TYPE_SHARED, DWriteCreateFactory, IDWriteFactory},
     },
     core::Result,
@@ -9,7 +9,7 @@ use windows::{
 /// The device-independent factories every window draws with. Cheap to clone.
 #[derive(Clone)]
 pub struct Graphics {
-    pub d2d: ID2D1Factory,
+    pub d2d: ID2D1Factory1,
     pub dwrite: IDWriteFactory,
 }
 

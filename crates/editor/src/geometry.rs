@@ -57,6 +57,16 @@ impl Rect {
         )
     }
 
+    /// Moved, not resized, as little as it takes to lie inside `bounds`.
+    pub fn moved_inside(&self, bounds: &Self) -> Self {
+        let shift =
+            |start: i32, len: i32, low: i32, high: i32| start.min(high - len).max(low) - start;
+        self.offset(
+            shift(self.left, self.width(), bounds.left, bounds.right),
+            shift(self.top, self.height(), bounds.top, bounds.bottom),
+        )
+    }
+
     /// The overlapping area, or `None` when the rectangles don't overlap.
     pub fn intersect(&self, other: &Self) -> Option<Self> {
         let rect = Self::new(
@@ -109,6 +119,17 @@ mod tests {
         assert!(rect.contains(9, 9));
         assert!(!rect.contains(10, 5));
         assert!(!rect.contains(5, 10));
+    }
+
+    #[test]
+    fn moved_inside_keeps_the_size() {
+        let bounds = Rect::new(0, 0, 100, 100);
+        assert_eq!(
+            Rect::new(90, -5, 110, 5).moved_inside(&bounds),
+            Rect::new(80, 0, 100, 10)
+        );
+        let inside = Rect::new(10, 10, 20, 20);
+        assert_eq!(inside.moved_inside(&bounds), inside);
     }
 
     #[test]

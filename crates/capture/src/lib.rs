@@ -45,6 +45,18 @@ pub struct Screenshot {
     pub monitors: Vec<Monitor>,
 }
 
+impl Screenshot {
+    /// The highest display scale among the monitors `area` touches.
+    pub fn scale_at(&self, area: Rect) -> f32 {
+        self.monitors
+            .iter()
+            .filter(|monitor| monitor.rect.intersect(&area).is_some())
+            .map(|monitor| monitor.scale)
+            .reduce(f32::max)
+            .unwrap_or(1.0)
+    }
+}
+
 /// Captures every monitor at once. The process must be per-monitor DPI aware.
 pub fn capture() -> Result<Screenshot> {
     let area = unsafe {

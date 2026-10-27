@@ -12,7 +12,7 @@ use windows::{
                 },
                 D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_SMALL, D2D1_RENDER_TARGET_PROPERTIES,
                 D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
-                ID2D1PathGeometry,
+                ID2D1PathGeometry1,
             },
             Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
             Gdi::{
@@ -89,7 +89,7 @@ pub fn glyph_icon(graphics: &Graphics, size: u32, light_surface: bool) -> Result
 
 /// The glyph's outline on a 16-unit grid scaled to `size`, and its stroke width.
 /// Straight strokes sit on pixel centers so they stay crisp at every size.
-fn corners(graphics: &Graphics, size: f32) -> Result<(ID2D1PathGeometry, f32)> {
+fn corners(graphics: &Graphics, size: f32) -> Result<(ID2D1PathGeometry1, f32)> {
     let unit = size / 16.0;
     let stroke = unit.round().max(1.0);
     let near = (2.0 * unit).round() + stroke / 2.0;

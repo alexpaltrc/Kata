@@ -1,14 +1,16 @@
 //! Delivers a capture: on the clipboard at once, and as a PNG file written in the
-//! background.
+//! background. Each new version of an edited capture does the same, replacing the
+//! last one.
 
 use std::{
     ffi::OsString,
     fs::{self, File},
     io,
-    mem::size_of,
+    mem::{self, size_of},
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
     ptr,
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -45,23 +47,122 @@ use windows::{
 
 use crate::report;
 
-/// Puts `image` on the clipboard and starts saving it. The returned thread ends
-/// once the file is written.
-pub fn deliver(owner: HWND, image: Image) -> Option<JoinHandle<()>> {
-    if let Err(error) = copy_to_clipboard(owner, &image) {
+/// Savers still writing captures of closed editors.
+static FINISHING: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// A capture's file. A thread of its own writes each version handed to it; when
+/// versions come faster than they're written, only the newest is.
+pub struct Output {
+    saver: Option<Saver>,
+}
+
+struct Saver {
+    slot: Arc<Slot>,
+    thread: JoinHandle<()>,
+}
+
+/// What the saver is waiting for.
+#[derive(Default)]
+struct Slot {
+    pending: Mutex<Pending>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct Pending {
+    next: Option<Image>,
+    /// No more versions will come.
+    closed: bool,
+}
+
+impl Output {
+    /// Puts `image` on the clipboard and starts saving it to a new file.
+    pub fn new(owner: HWND, image: Image) -> Self {
+        copy(owner, &image);
+        // Claiming the file here, in capture order, keeps quick captures from
+        // competing for the same name.
+        let Ok(path) = reserve_file().inspect_err(|error| report("save", error)) else {
+            return Self { saver: None };
+        };
+        let slot = Arc::new(Slot::default());
+        lock(&slot).next = Some(image);
+        let thread = thread::spawn({
+            let slot = Arc::clone(&slot);
+            move || write_versions(&path, &slot)
+        });
+        Self {
+            saver: Some(Saver { slot, thread }),
+        }
+    }
+
+    /// Replaces the file's contents with `image`, in the background.
+    pub fn save(&self, image: Image) {
+        if let Some(saver) = &self.saver {
+            lock(&saver.slot).next = Some(image);
+            saver.slot.changed.notify_one();
+        }
+    }
+}
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        if let Some(Saver { slot, thread }) = self.saver.take() {
+            lock(&slot).closed = true;
+            slot.changed.notify_one();
+            let mut finishing = FINISHING.lock().unwrap_or_else(PoisonError::into_inner);
+            finishing.retain(|thread| !thread.is_finished());
+            finishing.push(thread);
+        }
+    }
+}
+
+/// Waits until every capture is on disk.
+pub fn wait_for_saves() {
+    let finishing = mem::take(&mut *FINISHING.lock().unwrap_or_else(PoisonError::into_inner));
+    for thread in finishing {
+        let _ = thread.join();
+    }
+}
+
+fn lock(slot: &Slot) -> MutexGuard<'_, Pending> {
+    slot.pending.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Writes each version `slot` receives to `path` until it closes.
+fn write_versions(path: &Path, slot: &Slot) {
+    let mut written = false;
+    loop {
+        let image = {
+            let mut pending = lock(slot);
+            loop {
+                if let Some(image) = pending.next.take() {
+                    break image;
+                }
+                if pending.closed {
+                    // Never leave the empty file behind.
+                    if !written {
+                        let _ = fs::remove_file(path);
+                    }
+                    return;
+                }
+                pending = slot
+                    .changed
+                    .wait(pending)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        };
+        match save_png(path, &image) {
+            Ok(()) => written = true,
+            Err(error) => report("save", &error),
+        }
+    }
+}
+
+/// Puts `image` on the clipboard.
+pub fn copy(owner: HWND, image: &Image) {
+    if let Err(error) = copy_to_clipboard(owner, image) {
         report("clipboard", &error);
     }
-    // Claiming the file here, in capture order, keeps quick captures from
-    // competing for the same name.
-    let path = reserve_file()
-        .inspect_err(|error| report("save", error))
-        .ok()?;
-    Some(thread::spawn(move || {
-        if let Err(error) = save_png(&path, &image) {
-            let _ = fs::remove_file(&path);
-            report("save", &error);
-        }
-    }))
 }
 
 /// Opens the captures folder in File Explorer.

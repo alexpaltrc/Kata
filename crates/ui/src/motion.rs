@@ -83,6 +83,19 @@ impl Animation {
         Self::new(value, value, Duration::ZERO, Easing::DECELERATE)
     }
 
+    /// Heads for `to` from wherever this animation is now, unless it already is.
+    pub fn retarget(&self, to: f32, duration: Duration, easing: Easing) -> Self {
+        if to == self.to {
+            return *self;
+        }
+        Self::new(self.value(Instant::now()), to, duration, easing)
+    }
+
+    /// Where it's heading.
+    pub fn target(&self) -> f32 {
+        self.to
+    }
+
     pub fn value(&self, now: Instant) -> f32 {
         let eased = self.easing.apply(self.progress(now));
         self.from + (self.to - self.from) * eased
