@@ -1,0 +1,11 @@
+[package]
+name = "kata-ui"
+description = "Fluent controls, motion and theming on Direct2D and DirectComposition."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

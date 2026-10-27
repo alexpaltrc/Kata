@@ -1,0 +1,8 @@
+/target/
+
+# Packages and signing certificates never go into the repository.
+*.msix
+*.msixbundle
+*.pfx
+
+.claude/settings.local.json

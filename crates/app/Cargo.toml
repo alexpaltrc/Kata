@@ -1,0 +1,20 @@
+[package]
+name = "kata"
+description = "Screenshots for manuals, guides and how-tos."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "Kata"
+path = "src/main.rs"
+
+[dependencies]
+kata-capture.workspace = true
+kata-editor.workspace = true
+kata-ui.workspace = true
+
+[lints]
+workspace = true

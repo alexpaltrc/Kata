@@ -1,0 +1,11 @@
+[package]
+name = "kata-editor"
+description = "Editing document model: tools, undo history and autosave."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
