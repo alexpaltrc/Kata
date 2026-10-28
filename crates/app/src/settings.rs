@@ -17,7 +17,7 @@ pub struct Settings {
     pub open_editor: bool,
     /// Whether a sound confirms each capture.
     pub sound: bool,
-    /// Where captures go, when it isn't Pictures\Kata.
+    /// Where captures go, when it isn't the Pictures folder named after Kata.
     pub folder: Option<PathBuf>,
 }
 
@@ -26,7 +26,7 @@ impl Settings {
         Self {
             hotkey: registry::read_dword(KEY, w!("Hotkey"))
                 .and_then(Hotkey::decode)
-                .unwrap_or(Hotkey::DEFAULT),
+                .unwrap_or_default(),
             open_editor: read(w!("OpenEditor"), 1) != 0,
             sound: read(w!("Sound"), 1) != 0,
             folder: registry::read_string(KEY, w!("Folder")).map(PathBuf::from),

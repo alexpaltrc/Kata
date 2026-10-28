@@ -31,7 +31,7 @@ use windows::{
             },
         },
     },
-    core::{BOOL, PCWSTR, Result, w},
+    core::{BOOL, HSTRING, PCWSTR, Result},
 };
 
 /// How wide the caption buttons are, in DIPs, when Windows doesn't say.
@@ -212,10 +212,11 @@ impl WorkArea {
     }
 }
 
-/// Creates a hidden window of class `class`, whose client area of `client` pixels
-/// covers the title bar over Mica, centered in `work`.
+/// Creates a hidden window of class `class`, named `title` in the taskbar, whose
+/// client area of `client` pixels covers the title bar over Mica, centered in `work`.
 pub fn create(
     class: PCWSTR,
+    title: &str,
     proc: WindowProc,
     work: &WorkArea,
     client: (i32, i32),
@@ -238,7 +239,7 @@ pub fn create(
         let hwnd = CreateWindowExW(
             WS_EX_NOREDIRECTIONBITMAP,
             class,
-            w!("Kata"),
+            &HSTRING::from(title),
             WS_OVERLAPPEDWINDOW,
             work.rect.left + (work.width() - width) / 2,
             work.rect.top + (work.height() - height) / 2,

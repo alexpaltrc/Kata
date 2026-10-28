@@ -4,7 +4,7 @@ App de Windows 11, escrita en Rust, para tomar capturas de pantalla destinadas a
 
 Detalle del producto: [docs/producto.md](docs/producto.md). Decisiones técnicas: [docs/arquitectura.md](docs/arquitectura.md).
 
-Sigue el estándar personal de Alex (skill `alex-vibecode`). La nube no ve ese skill, así que lo esencial va aquí.
+Sigue siempre el estándar personal de Alex (skill `alex-vibecode`), en cada conversación, en la PC y en la nube, aunque nadie lo mencione. Manda su versión más reciente. La nube no ve ese skill, así que lo esencial va aquí.
 
 ## Prioridades (en este orden)
 
@@ -25,9 +25,9 @@ Ante cualquier duda, gana la opción más simple.
 
 ## Kata y Kata Dev
 
-Alex usa a diario **Kata**, la versión estable. Cada cambio se hace y se prueba en **Kata Dev**. Ninguna se abre desde `target/`. La primera versión estable sale al terminar la fase 5; hasta entonces, solo existe Kata Dev.
+Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada cambio se hace y se prueba en **Kata Dev**, que solo usa datos de prueba. Ninguna se abre desde `target/`.
 
-- **Separadas por completo:** `AlexPalacios.Kata` («Kata», icono azul) y `AlexPalacios.Kata.Dev` («Kata Dev», icono naranja). Las dos pueden estar abiertas a la vez, y cada una tiene sus propios ajustes. Son MSIX firmadas con el certificado `CN=Alex Palacios Dev`, confiado solo en la PC de Alex. Sin modo de desarrollador.
+- **Separadas por completo:** `AlexPalacios.Kata` («Kata») y `AlexPalacios.Kata.Dev` («Kata Dev»). Las dos pueden estar abiertas a la vez. Cada una tiene sus propios ajustes, y Kata Dev además su propio atajo (`Ctrl + Mayús + D`) y su propia carpeta (`Imágenes\Kata Dev`). Kata Dev se reconoce por la etiqueta «Dev» de su icono (también en la bandeja) y por el nombre de sus ventanas. Son MSIX firmadas con el certificado `CN=Alex Palacios Dev`, confiado solo en la PC de Alex. Sin modo de desarrollador.
 - **Al terminar cualquier cambio en la PC de Alex,** actualiza Kata Dev con `packaging/update-dev.ps1 -NoPull` y di en una línea que ya está. Si la cierras, vuelve a abrirla.
 - **La estable no se toca mientras se trabaja.** Solo cambia cuando Alex decide lanzar una versión: se sube el número en `Cargo.toml`, se instala con `packaging/build-msix.ps1 -Stable` y se vuelve a abrir si estaba abierta.
 - **Bajar y subir:** cada conversación, la de la PC y la de la nube, empieza bajando lo último de GitHub y termina subiendo su trabajo. Al volver a la de la PC, antes de nada: baja lo último, une a `main` el trabajo de la nube que esté en otra rama (si su CI pasó), actualiza Kata Dev con `packaging/update-dev.ps1` y di qué cambios llegaron.

@@ -46,7 +46,7 @@ use windows::{
 };
 
 use crate::{
-    export,
+    channel, export,
     hotkey::{self, Hotkey, Press},
     report,
     settings::Settings,
@@ -108,7 +108,8 @@ unsafe fn create(graphics: &Graphics, owner: HWND, page: Page) -> Result<HWND> {
             (SIZE.0.max(min.0) * work.scale).ceil() as i32,
             (SIZE.1.max(min.1) * work.scale).ceil() as i32,
         );
-        let hwnd = window::create(CLASS, window_proc, &work, client, !palette.light)?;
+        let title = channel::name();
+        let hwnd = window::create(CLASS, title, window_proc, &work, client, !palette.light)?;
         let size = window::client_size(hwnd);
         let surface = match Surface::new(graphics, hwnd, size) {
             Ok(surface) => surface,

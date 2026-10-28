@@ -50,6 +50,7 @@ use windows::{
 };
 
 use crate::{
+    channel,
     export::{self, Output},
     report,
     settings::EditorSettings,
@@ -130,7 +131,8 @@ unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Resul
                 .max((min.1 * scale).ceil()),
         );
         let client = (client.0 as i32, client.1 as i32);
-        let hwnd = window::create(CLASS, window_proc, &work, client, !palette.light)?;
+        let title = channel::name();
+        let hwnd = window::create(CLASS, title, window_proc, &work, client, !palette.light)?;
         let size = window::client_size(hwnd);
         let renderer = Renderer::new(&capture.image, capture.scale);
         let gpu = match Gpu::new(graphics, hwnd, size, renderer.output()) {

@@ -14,7 +14,7 @@ use windows::{
     core::Result,
 };
 
-use crate::strings::strings;
+use crate::{channel, strings::strings};
 
 const ID: i32 = 1;
 
@@ -36,13 +36,18 @@ pub enum Press {
     Hotkey(Hotkey),
 }
 
-impl Hotkey {
-    /// Ctrl + Shift + S.
-    pub const DEFAULT: Self = Self {
-        modifiers: HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_SHIFT.0),
-        key: b'S' as u32,
-    };
+impl Default for Hotkey {
+    /// Ctrl + Shift + S, or Ctrl + Shift + D in Kata Dev, so both can run at once.
+    fn default() -> Self {
+        let key = if channel::is_dev() { b'D' } else { b'S' };
+        Self {
+            modifiers: MOD_CONTROL | MOD_SHIFT,
+            key: u32::from(key),
+        }
+    }
+}
 
+impl Hotkey {
     /// The shortcut `key` makes with the modifiers held down along with it.
     pub fn pressed(key: VIRTUAL_KEY) -> Press {
         let held = |key: VIRTUAL_KEY| unsafe { GetKeyState(i32::from(key.0)) } < 0;
@@ -194,9 +199,10 @@ mod tests {
 
     #[test]
     fn encoding_round_trips() {
-        let encoded = Hotkey::DEFAULT.encode();
+        // Tests run outside any package, as Kata.
+        let encoded = Hotkey::default().encode();
         assert_eq!(encoded, 0x0006_0053);
-        assert_eq!(Hotkey::decode(encoded), Some(Hotkey::DEFAULT));
+        assert_eq!(Hotkey::decode(encoded), Some(Hotkey::default()));
     }
 
     #[test]

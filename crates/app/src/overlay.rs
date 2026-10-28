@@ -48,11 +48,11 @@ use windows::{
             },
         },
     },
-    core::{BOOL, PCWSTR, Result, w},
+    core::{BOOL, HSTRING, PCWSTR, Result, w},
 };
 use windows_numerics::Vector2;
 
-use crate::report;
+use crate::{channel, report};
 
 /// How dark the screen gets outside the selection.
 const DIM: f32 = 0.45;
@@ -106,7 +106,7 @@ unsafe fn create(overlay: &RefCell<Overlay<'_>>) -> Result<HWND> {
         CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             CLASS,
-            w!("Kata"),
+            &HSTRING::from(channel::name()),
             WS_POPUP,
             shot.origin.0,
             shot.origin.1,

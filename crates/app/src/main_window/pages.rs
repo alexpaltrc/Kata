@@ -14,7 +14,7 @@ use kata_ui::{
 };
 use windows::core::Result;
 
-use crate::{hotkey::Hotkey, settings::Settings, strings::strings};
+use crate::{channel, hotkey::Hotkey, settings::Settings, strings::strings};
 
 /// The title bar's height.
 pub const TITLE_BAR: f32 = 48.0;
@@ -95,7 +95,7 @@ impl Pages {
         let text = strings();
         let mut pages = Self {
             room: (0.0, 0.0),
-            title: fonts.caption("Kata")?,
+            title: fonts.caption(channel::name())?,
             capture: Button::new(fonts.label(text.new_capture)?, true),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?),
             hint: fonts.caption("")?,

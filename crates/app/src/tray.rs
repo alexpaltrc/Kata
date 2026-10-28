@@ -24,7 +24,7 @@ use windows::{
     core::{HSTRING, PCWSTR, Result},
 };
 
-use crate::strings::strings;
+use crate::{channel, strings::strings};
 
 /// The window message the icon reports its events with.
 pub const MESSAGE: u32 = WM_APP + 1;
@@ -145,7 +145,8 @@ impl Tray {
 
     fn redraw(&mut self, graphics: &Graphics) -> Result<()> {
         let (light, size) = self.wanted();
-        let icon = icon::glyph_icon(graphics, size as u32, light)?;
+        let tag = channel::is_dev().then_some("Dev");
+        let icon = icon::glyph_icon(graphics, size as u32, light, tag)?;
         self.destroy_icon();
         self.icon = icon;
         self.drawn_for = (light, size);
@@ -190,7 +191,7 @@ impl Drop for Tray {
 }
 
 fn tip(shortcut: &str) -> String {
-    format!("Kata · {shortcut}")
+    format!("{} · {shortcut}", channel::name())
 }
 
 fn notify(message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> Result<()> {

@@ -3,10 +3,11 @@
 
     powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1 [-Stable]
 
-  Two copies, apart in every way: Kata Dev (AlexPalacios.Kata.Dev, orange icon), where every change
-  is tried, and, with -Stable, Kata (AlexPalacios.Kata), the one Alex uses every day, which changes
-  only when he releases a version. Each identity installs only over itself, and Windows keeps each
-  package's settings apart and untouched by updates. Phase 6 makes the Store's Kata the stable one.
+  Two copies, apart in every way: Kata Dev (AlexPalacios.Kata.Dev, its icon labeled "Dev"), where
+  every change is tried, and, with -Stable, Kata (AlexPalacios.Kata), the one Alex uses every day,
+  which changes only when he releases a version. Each identity installs only over itself, and
+  Windows keeps each package's settings apart and untouched by updates. Phase 6 makes the Store's
+  Kata the stable one.
 
   Both are signed with the "Alex Palacios Dev" certificate, made on this PC and trusted only here;
   Developer Mode is never needed.
@@ -22,14 +23,12 @@ $Publisher = "CN=Alex Palacios Dev"
 if ($Stable) {
     $Name = "AlexPalacios.Kata"
     $DisplayName = "Kata"
-    # Windows' own blue, until phase 6 gives Kata its identity.
-    $Plate = [System.Drawing.Color]::FromArgb(0x00, 0x5F, 0xB8)
 } else {
     $Name = "AlexPalacios.Kata.Dev"
     $DisplayName = "Kata Dev"
-    # The Dev mark: the plate behind the glyph is orange.
-    $Plate = [System.Drawing.Color]::FromArgb(0xCA, 0x50, 0x10)
 }
+# Windows' own blue, until phase 6 gives Kata its identity.
+$Plate = [System.Drawing.Color]::FromArgb(0x00, 0x5F, 0xB8)
 
 # --- Version: MSIX wants four numbers. A stable release is Cargo's 0.1.0 as 0.1.0.0, so releasing
 # means raising it in Cargo.toml; a Dev build is 0.1.0.<n>, one past the Dev installed.
@@ -77,7 +76,8 @@ function Logo([string]$file, [int]$size, [double]$share) {
     $path.AddArc($bottom, $bottom, $corner, $corner, 0, 90)
     $path.AddArc($top, $bottom, $corner, $corner, 90, 90)
     $path.CloseFigure()
-    $g.FillPath((New-Object System.Drawing.SolidBrush $Plate), $path)
+    $brush = New-Object System.Drawing.SolidBrush $Plate
+    $g.FillPath($brush, $path)
 
     # The glyph on a 16-unit grid, as icon.rs draws it.
     $grid = $side * 0.62
@@ -100,8 +100,38 @@ function Logo([string]$file, [int]$size, [double]$share) {
     $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), ([single][Math]::Max(1, 1.25 * $unit))
     $g.DrawPath($pen, $glyph)
 
+    if (-not $Stable) {
+        # The Dev mark, as on the tray icon: the plate's lower part is a white label that says
+        # "Dev", kept apart from the corners it covers by a strip of plate.
+        [single]$height = [Math]::Round($side * 7 / 16)
+        [single]$label = [Math]::Round($top + $side - $height)
+        $lower = {
+            param([single]$y)
+            $part = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $part.AddLine($top, $y, $top + $side, $y)
+            $part.AddArc($bottom, $bottom, $corner, $corner, 0, 90)
+            $part.AddArc($top, $bottom, $corner, $corner, 90, 90)
+            $part.CloseFigure()
+            $part
+        }
+        $strip = & $lower ($label - [Math]::Max(1, [Math]::Round($side / 16)))
+        $tag = & $lower $label
+        $g.FillPath($brush, $strip)
+        $g.FillPath([System.Drawing.Brushes]::White, $tag)
+        # Centered by its ink, which a word without descenders needs.
+        $word = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $word.AddString("Dev", (New-Object System.Drawing.FontFamily "Segoe UI Semibold"), 0, 0.9 * $height,
+            (New-Object System.Drawing.PointF 0, 0), [System.Drawing.StringFormat]::GenericTypographic)
+        $ink = $word.GetBounds()
+        $move = New-Object System.Drawing.Drawing2D.Matrix
+        $move.Translate($top + ($side - $ink.Width) / 2 - $ink.X, $label + ($height - $ink.Height) / 2 - $ink.Y)
+        $word.Transform($move)
+        $g.FillPath($brush, $word)
+        $move.Dispose(); $word.Dispose(); $tag.Dispose(); $strip.Dispose()
+    }
+
     $bitmap.Save((Join-Path $assets $file), [System.Drawing.Imaging.ImageFormat]::Png)
-    $pen.Dispose(); $glyph.Dispose(); $path.Dispose(); $g.Dispose(); $bitmap.Dispose()
+    $pen.Dispose(); $glyph.Dispose(); $brush.Dispose(); $path.Dispose(); $g.Dispose(); $bitmap.Dispose()
 }
 foreach ($size in 16, 24, 32, 48, 256) {
     Logo "Square44x44Logo.targetsize-$size.png" $size 0.875
