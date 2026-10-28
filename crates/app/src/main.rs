@@ -228,7 +228,7 @@ impl App {
                 return;
             }
         };
-        let Some(area) = overlay::select(&self.graphics, &shot) else {
+        let Some(area) = overlay::select(&shot) else {
             return;
         };
         let Some(image) = shot.image.crop(area) else {

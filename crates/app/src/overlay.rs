@@ -62,11 +62,20 @@ const CLASS: PCWSTR = w!("Kata.Overlay");
 
 /// Lets the user choose an area of `shot`, in image coordinates. `None` when they
 /// cancel.
-pub fn select(graphics: &Graphics, shot: &Screenshot) -> Option<Rect> {
+pub fn select(shot: &Screenshot) -> Option<Rect> {
     let mut pointer = POINT::default();
     let _ = unsafe { GetCursorPos(&mut pointer) };
     let pointer = (pointer.x - shot.origin.0, pointer.y - shot.origin.1);
-    let overlay = RefCell::new(Overlay::new(graphics, shot, pointer));
+    // Direct2D keeps a factory's screen-sized buffers until the factory goes, so the
+    // overlay brings its own: Kata gives the memory back once the overlay closes.
+    let graphics = match Graphics::new() {
+        Ok(graphics) => graphics,
+        Err(error) => {
+            report("overlay", &error);
+            return None;
+        }
+    };
+    let overlay = RefCell::new(Overlay::new(&graphics, shot, pointer));
     let hwnd = match unsafe { create(&overlay) } {
         Ok(hwnd) => hwnd,
         Err(error) => {

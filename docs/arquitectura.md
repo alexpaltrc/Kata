@@ -18,6 +18,7 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 - La pantalla se congela al iniciar el recorte. Todos los monitores, con su escala propia.
 - **Hoy:** GDI copia todo el escritorio de una vez. En el mismo instante se anotan las ventanas y monitores, para resaltarlos al pasar el cursor.
 - **Pendiente (fase 5):** convertir las pantallas HDR a colores estándar, para que la captura se vea igual en cualquier lugar.
+- **Memoria:** la selección dibuja con su propia fábrica de Direct2D. Al cerrarse, Windows libera sus búferes del tamaño de la pantalla en unos segundos; con la fábrica compartida, se quedaban retenidos.
 
 ## Editor
 
@@ -56,9 +57,9 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 
 | Medida | Meta | Medido |
 |---|---|---|
-| Memoria en reposo | < 15 MB | Pendiente |
-| CPU en reposo | 0 % | Pendiente |
-| Atajo → selección visible | < 100 ms | Pendiente |
+| Memoria en reposo | < 15 MB | 10 MB (12 MB tras capturar) |
+| CPU en reposo | 0 % | 0 % |
+| Atajo → selección visible | < 100 ms | 30–40 ms |
 | Aplicar un desenfoque | < 16 ms | 7.8 ms |
 | Cuadro de la animación del Foco (captura 4K) | < 16 ms | 12 ms (peor caso) |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
