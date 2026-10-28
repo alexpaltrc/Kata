@@ -23,14 +23,14 @@ Ante cualquier duda, gana la opción más simple.
 - Explica todo para que lo entienda alguien no técnico.
 - Al cerrar cada fase o cambio, di exactamente qué probar.
 
-## La app de uso diario: Kata Dev
+## Kata y Kata Dev
 
-Alex usa **Kata Dev**, la MSIX instalada. Nunca se abre el `Kata.exe` de `target/`.
+Alex usa a diario **Kata**, la versión estable. Cada cambio se hace y se prueba en **Kata Dev**. Ninguna se abre desde `target/`. La primera versión estable sale al terminar la fase 5; hasta entonces, solo existe Kata Dev.
 
-- **Identidad propia:** `AlexPalacios.Kata.Dev`, «Kata Dev», icono naranja. Firmada con el certificado `CN=Alex Palacios Dev`, confiado solo en la PC de Alex. Sin modo de desarrollador.
-- **Sus ajustes:** Windows le da a cada paquete su propia copia del registro y la conserva en cada actualización.
-- **Actualizarla:** `packaging/update-dev.ps1`, el acceso directo «Actualizar Kata» del escritorio de Alex. Baja los cambios de GitHub, compila, instala encima y la abre.
-- **Al terminar cualquier cambio en la PC de Alex,** córrelo con `-NoPull -NoPause` y di en una línea que ya está actualizada. Si cierras la app, vuelve a abrirla.
+- **Separadas por completo:** `AlexPalacios.Kata` («Kata», icono azul) y `AlexPalacios.Kata.Dev` («Kata Dev», icono naranja). Las dos pueden estar abiertas a la vez, y cada una tiene sus propios ajustes. Son MSIX firmadas con el certificado `CN=Alex Palacios Dev`, confiado solo en la PC de Alex. Sin modo de desarrollador.
+- **Al terminar cualquier cambio en la PC de Alex,** actualiza Kata Dev con `packaging/update-dev.ps1 -NoPull` y di en una línea que ya está. Si la cierras, vuelve a abrirla.
+- **La estable no se toca mientras se trabaja.** Solo cambia cuando Alex decide lanzar una versión: se sube el número en `Cargo.toml`, se instala con `packaging/build-msix.ps1 -Stable` y se vuelve a abrir si estaba abierta.
+- **Bajar y subir:** cada conversación, la de la PC y la de la nube, empieza bajando lo último de GitHub y termina subiendo su trabajo. Al volver a la de la PC, antes de nada: baja lo último, une a `main` el trabajo de la nube que esté en otra rama (si su CI pasó), actualiza Kata Dev con `packaging/update-dev.ps1` y di qué cambios llegaron.
 
 ## Convenciones
 
@@ -49,7 +49,7 @@ Alex usa **Kata Dev**, la MSIX instalada. Nunca se abre el `Kata.exe` de `target
 | `crates/capture` | Captura multi-monitor (DPI mixto, HDR) |
 | `crates/editor` | Modelo de edición: herramientas, deshacer, guardado. Rust puro, sin APIs de Windows |
 | `crates/ui` | Controles Fluent, animaciones y tema (Direct2D y DirectComposition) |
-| `packaging/` | El paquete MSIX de Kata Dev y «Actualizar Kata» |
+| `packaging/` | Los paquetes MSIX de Kata y Kata Dev |
 | `docs/` | Producto y arquitectura |
 
 ## Comandos
@@ -59,7 +59,7 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p kata
-powershell -ExecutionPolicy Bypass -File packaging\update-dev.ps1 -NoPull -NoPause
+powershell -ExecutionPolicy Bypass -File packaging\update-dev.ps1 -NoPull
 ```
 
 ## Claude Code en la nube
@@ -69,4 +69,4 @@ La nube corre en Linux, así que no puede ejecutar Kata. Ahí:
 - `cargo test -p kata-editor` funciona, porque el editor es Rust puro.
 - `cargo check --workspace --target x86_64-pc-windows-msvc` revisa todo el código de Windows.
 - La CI de GitHub (Windows) es la verificación final. No des un cambio por terminado si la CI falla.
-- Al terminar, dile a Alex que lo traiga a su Kata Dev con «Actualizar Kata».
+- Al terminar, sube tu trabajo a GitHub. La conversación de la PC lo trae a Kata Dev.

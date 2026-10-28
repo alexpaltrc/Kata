@@ -21,6 +21,7 @@ use main_window::Page;
 use settings::Settings;
 use tray::Tray;
 use windows::{
+    ApplicationModel::Package,
     Win32::{
         Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM},
         System::{
@@ -39,7 +40,7 @@ use windows::{
             },
         },
     },
-    core::{Owned, PCWSTR, Result, w},
+    core::{HSTRING, Owned, PCWSTR, Result, h, w},
 };
 
 /// Shows the main window. Starting Kata again sends it to the Kata running.
@@ -60,9 +61,10 @@ fn main() -> Result<()> {
     }
     // Started at sign-in, Kata waits in the tray.
     let quiet = startup::at_sign_in();
-    let Some(_instance) = claim_single_instance()? else {
+    let name = instance_name();
+    let Some(_instance) = claim_single_instance(&name)? else {
         if !quiet {
-            show_running();
+            show_running(&name);
         }
         return Ok(());
     };
@@ -70,7 +72,7 @@ fn main() -> Result<()> {
     sound::prepare();
 
     let app = RefCell::new(None);
-    let hwnd = unsafe { create_window(&app)? };
+    let hwnd = unsafe { create_window(&app, &name)? };
     *app.borrow_mut() = Some(App::new(hwnd, Graphics::new()?)?);
     unsafe {
         if !quiet {
@@ -86,18 +88,27 @@ fn main() -> Result<()> {
     unsafe { DestroyWindow(hwnd) }
 }
 
+/// Names the single-instance lock and the resident window after Kata's package, so
+/// Kata and Kata Dev each run on their own. Run from the build, it's plain "Kata".
+fn instance_name() -> HSTRING {
+    Package::Current()
+        .and_then(|package| package.Id()?.FamilyName())
+        .unwrap_or_else(|_| h!("Kata").clone())
+}
+
 /// Holds the single-instance lock, or `None` when Kata is already running.
-fn claim_single_instance() -> Result<Option<Owned<HANDLE>>> {
+fn claim_single_instance(name: &HSTRING) -> Result<Option<Owned<HANDLE>>> {
+    let lock = HSTRING::from(format!(r"Local\{name}"));
     unsafe {
-        let lock = Owned::new(CreateMutexW(None, false, w!(r"Local\Kata"))?);
+        let lock = Owned::new(CreateMutexW(None, false, &lock)?);
         Ok((GetLastError() != ERROR_ALREADY_EXISTS).then_some(lock))
     }
 }
 
 /// Has the Kata already running show its main window.
-fn show_running() {
+fn show_running(name: &HSTRING) {
     unsafe {
-        let Ok(hwnd) = FindWindowW(CLASS, PCWSTR::null()) else {
+        let Ok(hwnd) = FindWindowW(CLASS, name) else {
             return;
         };
         // Its window may only come to the front with this process's leave.
@@ -110,7 +121,7 @@ fn show_running() {
 
 /// Kata's resident window. It's never shown: it receives the hotkey, tray and
 /// system messages.
-unsafe fn create_window(app: &RefCell<Option<App>>) -> Result<HWND> {
+unsafe fn create_window(app: &RefCell<Option<App>>, name: &HSTRING) -> Result<HWND> {
     unsafe {
         let instance = GetModuleHandleW(None)?.into();
         RegisterClassExW(&WNDCLASSEXW {
@@ -123,7 +134,7 @@ unsafe fn create_window(app: &RefCell<Option<App>>) -> Result<HWND> {
         CreateWindowExW(
             WS_EX_TOOLWINDOW,
             CLASS,
-            w!("Kata"),
+            name,
             WS_OVERLAPPED,
             0,
             0,

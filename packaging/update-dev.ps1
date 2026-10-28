@@ -1,23 +1,15 @@
 <#
-  "Actualizar Kata", the shortcut on Alex's desktop: brings in what was done on GitHub (from the
-  cloud or elsewhere), builds Kata Dev, installs it over the one in use and opens it again.
+  Brings Kata Dev up to date: brings in what was done on GitHub (from the cloud or elsewhere),
+  builds Kata Dev, installs it over the one in use and opens it again. Stable Kata is not touched.
 
-    powershell -ExecutionPolicy Bypass -File packaging\update-dev.ps1 [-NoPull] [-NoPause]
+    powershell -ExecutionPolicy Bypass -File packaging\update-dev.ps1 [-NoPull]
 #>
-param([switch]$NoPull, [switch]$NoPause)
+param([switch]$NoPull)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
-$Host.UI.RawUI.WindowTitle = "Actualizar Kata"
 
-function Finish([bool]$ok, [string]$message) {
-    Write-Host ""
-    Write-Host $message -ForegroundColor $(if ($ok) { "Green" } else { "Red" })
-    if (-not $NoPause) { Write-Host ""; Read-Host "Pulsa Enter para cerrar" | Out-Null }
-    exit $(if ($ok) { 0 } else { 1 })
-}
-
+Push-Location $repo
 try {
-    Push-Location $repo
     if (-not $NoPull) {
         Write-Host "Bajando los cambios de GitHub..."
         git pull --ff-only
@@ -28,9 +20,10 @@ try {
 
     $package = Get-AppxPackage -Name "AlexPalacios.Kata.Dev"
     Start-Process "explorer.exe" "shell:AppsFolder\$($package.PackageFamilyName)!App"
-    Finish $true "Listo: Kata Dev $($package.Version) instalada y abierta."
+    Write-Host "Listo: Kata Dev $($package.Version) instalada y abierta." -ForegroundColor Green
 } catch {
-    Finish $false "No se pudo actualizar: $($_.Exception.Message)"
+    Write-Host "No se pudo actualizar: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 } finally {
     Pop-Location
 }

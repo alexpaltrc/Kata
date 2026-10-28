@@ -1,36 +1,53 @@
 <#
-  Builds Kata Dev, Alex's daily copy, as an MSIX package, and installs it over the one in use.
+  Builds Kata as an MSIX package and installs it over the copy in use.
 
-    powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1
+    powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1 [-Stable]
 
-  Its own identity (AlexPalacios.Kata.Dev, shown as "Kata Dev") keeps it apart from the Store's
-  Kata, which phase 6 adds as a second channel. Signed with the "Alex Palacios Dev" certificate,
-  made on this PC and trusted only here; Developer Mode is never needed. Every build gets a fourth
-  number higher than the installed one, so it installs over it. Settings stay: Windows keeps the
-  package's registry apart, and an update never touches it.
+  Two copies, apart in every way: Kata Dev (AlexPalacios.Kata.Dev, orange icon), where every change
+  is tried, and, with -Stable, Kata (AlexPalacios.Kata), the one Alex uses every day, which changes
+  only when he releases a version. Each identity installs only over itself, and Windows keeps each
+  package's settings apart and untouched by updates. Phase 6 makes the Store's Kata the stable one.
+
+  Both are signed with the "Alex Palacios Dev" certificate, made on this PC and trusted only here;
+  Developer Mode is never needed.
 
   The package is written to target\msix\out\.
 #>
+param([switch]$Stable)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 $repo = Split-Path -Parent $PSScriptRoot
 $work = Join-Path $repo "target\msix"
-$Name = "AlexPalacios.Kata.Dev"
 $Publisher = "CN=Alex Palacios Dev"
-$DisplayName = "Kata Dev"
-# The Dev mark: the plate behind the glyph is orange.
-$Plate = [System.Drawing.Color]::FromArgb(0xCA, 0x50, 0x10)
-
-# --- Version: Cargo's 0.1.0 becomes the four numbers MSIX wants, 0.1.0.<n>, one past whatever is
-# installed.
-$numeric = (Select-String -Path (Join-Path $repo "Cargo.toml") -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-$revision = 1
-$installed = Get-AppxPackage -Name $Name
-if ($installed) {
-    $v = [version]$installed.Version
-    if ("$($v.Major).$($v.Minor).$($v.Build)" -eq $numeric) { $revision = $v.Revision + 1 }
+if ($Stable) {
+    $Name = "AlexPalacios.Kata"
+    $DisplayName = "Kata"
+    # Windows' own blue, until phase 6 gives Kata its identity.
+    $Plate = [System.Drawing.Color]::FromArgb(0x00, 0x5F, 0xB8)
+} else {
+    $Name = "AlexPalacios.Kata.Dev"
+    $DisplayName = "Kata Dev"
+    # The Dev mark: the plate behind the glyph is orange.
+    $Plate = [System.Drawing.Color]::FromArgb(0xCA, 0x50, 0x10)
 }
-$version = "$numeric.$revision"
+
+# --- Version: MSIX wants four numbers. A stable release is Cargo's 0.1.0 as 0.1.0.0, so releasing
+# means raising it in Cargo.toml; a Dev build is 0.1.0.<n>, one past the Dev installed.
+$numeric = (Select-String -Path (Join-Path $repo "Cargo.toml") -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+$installed = Get-AppxPackage -Name $Name
+if ($Stable) {
+    $version = "$numeric.0"
+    if ($installed -and [version]$installed.Version -ge [version]$version) {
+        throw "Kata $($installed.Version) is already installed: raise the version in Cargo.toml"
+    }
+} else {
+    $revision = 1
+    if ($installed) {
+        $v = [version]$installed.Version
+        if ("$($v.Major).$($v.Minor).$($v.Build)" -eq $numeric) { $revision = $v.Revision + 1 }
+    }
+    $version = "$numeric.$revision"
+}
 
 # --- Build.
 Push-Location $repo
@@ -144,9 +161,9 @@ if (-not (Trusted)) {
     $cer = Join-Path $work "dev.cer"
     Export-Certificate -Cert $cert -FilePath $cer | Out-Null
     Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -Command Import-Certificate -FilePath '$cer' -CertStoreLocation Cert:\LocalMachine\TrustedPeople"
-    if (-not (Trusted)) { throw "this PC does not trust the Alex Palacios Dev certificate, so Windows will not install Kata Dev" }
+    if (-not (Trusted)) { throw "this PC does not trust the Alex Palacios Dev certificate, so Windows will not install $DisplayName" }
 }
 
-# --- Install over the previous Kata Dev. Windows closes it if it is open.
+# --- Install over the previous copy. Windows closes it if it is open.
 Add-AppxPackage -Path $out -ForceApplicationShutdown -ForceUpdateFromAnyVersion
 Write-Host "installed: $DisplayName $version"

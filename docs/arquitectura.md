@@ -50,8 +50,10 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 
 - **Paquete:** MSIX para x64 y ARM64, con `runFullTrust` (bandeja y atajo global) y `StartupTask` (iniciar con Windows).
 - **Sin instalaciones extra:** el runtime de C va incluido dentro del ejecutable.
-- **Kata Dev:** la copia de uso diario de Alex. Es la misma app con otra identidad (`AlexPalacios.Kata.Dev`, «Kata Dev», icono naranja), firmada con un certificado de desarrollo confiado solo en su PC. Cada compilación sube el cuarto número de la versión para instalarse encima. `packaging/build-msix.ps1` la fabrica e instala; `packaging/update-dev.ps1` además baja los cambios de GitHub y la abre.
-- **Iconos:** por ahora, el símbolo de Kata (`crates/ui/src/icon.rs`) en blanco sobre una placa, dibujado al empaquetar. La identidad definitiva llega con la fase 6.
+- **Kata y Kata Dev:** dos copias instaladas, separadas por completo. Kata (`AlexPalacios.Kata`) es la que Alex usa a diario y solo cambia cuando él lanza una versión. Kata Dev (`AlexPalacios.Kata.Dev`) recibe cada cambio para probarlo. Ambas se firman con un certificado de desarrollo confiado solo en su PC. Con la fase 6, la estable pasa a ser la de la Store.
+- **Fabricarlas:** `packaging/build-msix.ps1` fabrica e instala Kata Dev, subiendo el cuarto número de la versión para instalarse encima; con `-Stable`, Kata, con el número de `Cargo.toml`. `packaging/update-dev.ps1` además baja los cambios de GitHub y abre Kata Dev.
+- **Abiertas a la vez:** cada copia nombra su candado de instancia única y su ventana residente con su paquete, así que una no le cede el paso a la otra. El atajo sí es de todo el sistema: si las dos usan el mismo, lo toma la que se abrió primero.
+- **Iconos:** por ahora, el símbolo de Kata (`crates/ui/src/icon.rs`) en blanco sobre una placa azul (Kata) o naranja (Kata Dev), dibujado al empaquetar. La identidad definitiva llega con la fase 6.
 
 ## Metas de rendimiento
 
