@@ -63,6 +63,17 @@ impl Toggle {
         self.on
     }
 
+    /// Switches it without a click.
+    pub fn set(&mut self, on: bool) {
+        if on != self.on {
+            self.on = on;
+            let state = if on { 1.0 } else { 0.0 };
+            self.state = self
+                .state
+                .retarget(state, motion::FAST, Easing::POINT_TO_POINT);
+        }
+    }
+
     fn area(&self) -> Area {
         Area::new(self.left, self.top, self.size.0, self.size.1)
     }
@@ -103,11 +114,7 @@ impl Control for Toggle {
         self.pressed = false;
         self.hovered = self.contains(point);
         if activated {
-            self.on = !self.on;
-            let state = if self.on { 1.0 } else { 0.0 };
-            self.state = self
-                .state
-                .retarget(state, motion::FAST, Easing::POINT_TO_POINT);
+            self.set(!self.on);
         }
         self.update_knob();
         activated

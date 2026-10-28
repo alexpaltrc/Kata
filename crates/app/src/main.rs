@@ -14,7 +14,7 @@ mod startup;
 mod strings;
 mod tray;
 
-use std::{cell::RefCell, env, fmt::Display, mem::size_of, ptr};
+use std::{cell::RefCell, fmt::Display, mem::size_of, ptr};
 
 use kata_ui::{Graphics, theme, window};
 use main_window::Page;
@@ -59,7 +59,7 @@ fn main() -> Result<()> {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
     }
     // Started at sign-in, Kata waits in the tray.
-    let quiet = env::args().any(|arg| arg == startup::ARGUMENT);
+    let quiet = startup::at_sign_in();
     let Some(_instance) = claim_single_instance()? else {
         if !quiet {
             show_running();

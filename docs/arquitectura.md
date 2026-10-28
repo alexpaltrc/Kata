@@ -35,9 +35,9 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 
 ## Ajustes
 
-- **Dónde viven:** en el registro del usuario, `HKCU\Software\Kata`, junto con lo que recuerda el editor. Sin archivos de configuración.
+- **Dónde viven:** en el registro del usuario, `HKCU\Software\Kata`, junto con lo que recuerda el editor. Sin archivos de configuración. Instalada, Windows le da a cada paquete su propia copia, así que Kata y Kata Dev no se mezclan.
 - **Atajo:** `RegisterHotKey`. Mientras se elige uno nuevo, el actual se suelta, para que pulsarlo no inicie una captura.
-- **Iniciar con Windows:** por ahora, la clave `Run` del usuario, con `--startup` para arrancar sin ventanas. En el paquete MSIX será la `StartupTask`.
+- **Iniciar con Windows:** la `StartupTask` del paquete. Windows abre Kata sin argumentos; Kata pregunta cómo la abrieron y, si fue al iniciar sesión, espera en la bandeja sin ventanas. Si se apaga en los ajustes de Windows, solo se vuelve a encender ahí. Sin instalar, Kata no inicia con Windows.
 - **Una sola instancia:** abrir Kata otra vez le pide a la que ya corre que muestre su ventana.
 
 ## Sonido
@@ -49,6 +49,8 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 
 - **Paquete:** MSIX para x64 y ARM64, con `runFullTrust` (bandeja y atajo global) y `StartupTask` (iniciar con Windows).
 - **Sin instalaciones extra:** el runtime de C va incluido dentro del ejecutable.
+- **Kata Dev:** la copia de uso diario de Alex. Es la misma app con otra identidad (`AlexPalacios.Kata.Dev`, «Kata Dev», icono naranja), firmada con un certificado de desarrollo confiado solo en su PC. Cada compilación sube el cuarto número de la versión para instalarse encima. `packaging/build-msix.ps1` la fabrica e instala; `packaging/update-dev.ps1` además baja los cambios de GitHub y la abre.
+- **Iconos:** por ahora, el símbolo de Kata (`crates/ui/src/icon.rs`) en blanco sobre una placa, dibujado al empaquetar. La identidad definitiva llega con la fase 6.
 
 ## Metas de rendimiento
 

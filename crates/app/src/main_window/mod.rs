@@ -371,7 +371,10 @@ impl Main {
                 }
             }
             Part::Folder => self.change_folder(),
-            Part::Startup => startup::set(self.pages.startup()),
+            Part::Startup => {
+                let on = startup::set(self.pages.startup());
+                self.pages.set_startup(on);
+            }
         }
     }
 

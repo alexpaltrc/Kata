@@ -284,6 +284,10 @@ impl Pages {
         self.startup.is_on()
     }
 
+    pub fn set_startup(&mut self, on: bool) {
+        self.startup.set(on);
+    }
+
     fn cards_top(&self) -> f32 {
         TITLE_BAR + EDGE
     }

@@ -20,6 +20,7 @@ windows-numerics.workspace = true
 [dependencies.windows]
 workspace = true
 features = [
+    "ApplicationModel_Activation",
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Graphics_Direct2D",

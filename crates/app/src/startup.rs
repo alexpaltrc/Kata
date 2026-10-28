@@ -1,32 +1,49 @@
-//! Starting Kata when the user signs in to Windows, through the user's Run key.
+//! Starting Kata when the user signs in to Windows, through the package's startup
+//! task. Only installed Kata has one: run from the build, it never starts with Windows.
 
-use std::{env, ffi::OsString};
+use windows::{
+    ApplicationModel::{Activation::ActivationKind, AppInstance, StartupTask, StartupTaskState},
+    core::{Result, h},
+};
 
-use windows::core::{PCWSTR, w};
+use crate::report;
 
-use crate::{registry, report};
-
-const RUN: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
-const NAME: PCWSTR = w!("Kata");
-/// Marks a start at sign-in, which shows no window.
-pub const ARGUMENT: &str = "--startup";
-
-pub fn is_on() -> bool {
-    registry::read_string(RUN, NAME).is_some()
+/// Matches the `TaskId` in `packaging/AppxManifest.xml`.
+fn task() -> Result<StartupTask> {
+    StartupTask::GetAsync(h!("Startup"))?.join()
 }
 
-pub fn set(on: bool) {
-    if !on {
-        registry::delete(RUN, NAME);
-        return;
-    }
-    match env::current_exe() {
-        Ok(exe) => {
-            let mut command = OsString::from("\"");
-            command.push(exe);
-            command.push(format!("\" {ARGUMENT}"));
-            registry::write_string(RUN, NAME, &command);
+fn enabled(state: StartupTaskState) -> bool {
+    state == StartupTaskState::Enabled || state == StartupTaskState::EnabledByPolicy
+}
+
+pub fn is_on() -> bool {
+    task().and_then(|task| task.State()).is_ok_and(enabled)
+}
+
+/// Turns it on or off, and returns whether it ended up on: turned off in Windows'
+/// own settings, it stays off until turned on there.
+pub fn set(on: bool) -> bool {
+    let state = task().and_then(|task| {
+        if on {
+            task.RequestEnableAsync()?.join()
+        } else {
+            task.Disable()?;
+            task.State()
         }
-        Err(error) => report("startup", &error),
+    });
+    match state {
+        Ok(state) => enabled(state),
+        Err(error) => {
+            report("startup", &error);
+            false
+        }
     }
+}
+
+/// Whether Windows started Kata as the user signed in.
+pub fn at_sign_in() -> bool {
+    AppInstance::GetActivatedEventArgs()
+        .and_then(|args| args.Kind())
+        .is_ok_and(|kind| kind == ActivationKind::StartupTask)
 }
