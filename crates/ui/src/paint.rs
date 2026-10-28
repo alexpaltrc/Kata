@@ -5,13 +5,15 @@ use windows::{
     Win32::Graphics::{
         Direct2D::{
             Common::{D2D_RECT_F, D2D1_COLOR_F},
-            D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-            D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_ROUNDED_RECT, ID2D1Bitmap,
-            ID2D1DeviceContext, ID2D1SolidColorBrush,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
+            D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+            D2D1_LAYER_PARAMETERS1, D2D1_ROUNDED_RECT, ID2D1Bitmap, ID2D1DeviceContext, ID2D1Layer,
+            ID2D1SolidColorBrush,
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_TEXT_METRICS, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
+            DWRITE_TEXT_METRICS, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+            DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
         },
     },
     core::{PCWSTR, Result, w},
@@ -88,7 +90,7 @@ pub struct Painter<'a> {
 
 impl<'a> Painter<'a> {
     /// `scale` is how many pixels make a DIP.
-    pub fn new(
+    pub(crate) fn new(
         context: &'a ID2D1DeviceContext,
         brush: &'a ID2D1SolidColorBrush,
         palette: &'a Palette,
@@ -103,18 +105,66 @@ impl<'a> Painter<'a> {
         }
     }
 
-    pub fn context(&self) -> &ID2D1DeviceContext {
-        self.context
-    }
-
     /// Rounds `value` to the nearest pixel edge.
     pub fn snap(&self, value: f32) -> f32 {
         (value * self.scale).round() / self.scale
     }
 
+    /// `area` with its edges on the nearest pixel edges.
+    pub fn align(&self, area: Area) -> Area {
+        let (left, top) = (self.snap(area.left), self.snap(area.top));
+        Area::new(
+            left,
+            top,
+            self.snap(area.right()) - left,
+            self.snap(area.bottom()) - top,
+        )
+    }
+
     /// One pixel, in DIPs.
     pub fn pixel(&self) -> f32 {
         1.0 / self.scale
+    }
+
+    /// A hairline's width: one DIP, in whole pixels.
+    pub fn border(&self) -> f32 {
+        self.snap(1.0).max(self.pixel())
+    }
+
+    /// Draws what `draw` paints at `opacity`, moved `offset` DIPs to the right.
+    pub fn layer(&self, opacity: f32, offset: f32, draw: impl FnOnce()) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let scale = Matrix3x2::scale(self.scale, self.scale);
+        let translucent = opacity < 1.0;
+        unsafe {
+            self.context
+                .SetTransform(&(Matrix3x2::translation(self.snap(offset), 0.0) * scale));
+            if translucent {
+                let everything = D2D_RECT_F {
+                    left: f32::MIN,
+                    top: f32::MIN,
+                    right: f32::MAX,
+                    bottom: f32::MAX,
+                };
+                self.context.PushLayer(
+                    &D2D1_LAYER_PARAMETERS1 {
+                        contentBounds: everything,
+                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                        maskTransform: Matrix3x2::identity(),
+                        opacity,
+                        ..Default::default()
+                    },
+                    None::<&ID2D1Layer>,
+                );
+            }
+            draw();
+            if translucent {
+                self.context.PopLayer();
+            }
+            self.context.SetTransform(&scale);
+        }
     }
 
     pub fn fill(&self, area: Area, radius: f32, color: D2D1_COLOR_F) {
@@ -235,52 +285,74 @@ fn ellipse((x, y): Point, radius: f32) -> D2D1_ELLIPSE {
 pub struct Fonts {
     dwrite: IDWriteFactory,
     body: IDWriteTextFormat,
-    icons: IDWriteTextFormat,
+    caption: IDWriteTextFormat,
 }
 
 impl Fonts {
     pub fn new(graphics: &Graphics) -> Result<Self> {
-        let format = |family: PCWSTR, size: f32| unsafe {
-            graphics.dwrite.CreateTextFormat(
-                family,
-                None,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!(""),
-            )
-        };
+        let dwrite = graphics.dwrite.clone();
         Ok(Self {
-            dwrite: graphics.dwrite.clone(),
-            body: format(w!("Segoe UI Variable Text"), 14.0)?,
-            icons: format(w!("Segoe Fluent Icons"), 10.0)?,
+            body: format(&dwrite, w!("Segoe UI Variable Text"), 14.0)?,
+            caption: format(&dwrite, w!("Segoe UI Variable Small"), 12.0)?,
+            dwrite,
         })
     }
 
+    /// Text in controls and settings.
     pub fn label(&self, text: &str) -> Result<Label> {
-        self.layout(text, &self.body)
+        self.layout(text, &self.body, f32::MAX)
     }
 
-    /// One of Segoe Fluent Icons' glyphs.
-    pub fn icon(&self, glyph: char) -> Result<Label> {
-        self.layout(glyph.encode_utf8(&mut [0; 4]), &self.icons)
+    /// Small text, as in title bars and hints.
+    pub fn caption(&self, text: &str) -> Result<Label> {
+        self.layout(text, &self.caption, f32::MAX)
     }
 
-    fn layout(&self, text: &str, format: &IDWriteTextFormat) -> Result<Label> {
-        let text: Vec<u16> = text.encode_utf16().collect();
-        let mut metrics = DWRITE_TEXT_METRICS::default();
+    /// A folder's path in small text, at most `width` DIPs wide: what doesn't fit
+    /// gives way to an ellipsis before the last folder.
+    pub fn path(&self, path: &str, width: f32) -> Result<Label> {
+        let label = self.layout(path, &self.caption, width.max(0.0))?;
+        let trimming = DWRITE_TRIMMING {
+            granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+            delimiter: u32::from('\\'),
+            delimiterCount: 1,
+        };
         unsafe {
-            let layout = self
-                .dwrite
-                .CreateTextLayout(&text, format, f32::MAX, f32::MAX)?;
-            layout.GetMetrics(&mut metrics)?;
-            Ok(Label {
-                layout,
-                width: metrics.width,
-                height: metrics.height,
-            })
+            let layout = &label.layout;
+            layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+            let ellipsis = self.dwrite.CreateEllipsisTrimmingSign(layout)?;
+            layout.SetTrimming(&trimming, &ellipsis)?;
         }
+        Label::new(label.layout)
+    }
+
+    /// One of Segoe Fluent Icons' glyphs, `size` DIPs tall.
+    pub fn icon(&self, glyph: char, size: f32) -> Result<Label> {
+        let icons = format(&self.dwrite, w!("Segoe Fluent Icons"), size)?;
+        self.layout(glyph.encode_utf8(&mut [0; 4]), &icons, f32::MAX)
+    }
+
+    fn layout(&self, text: &str, format: &IDWriteTextFormat, width: f32) -> Result<Label> {
+        let text: Vec<u16> = text.encode_utf16().collect();
+        let layout = unsafe {
+            self.dwrite
+                .CreateTextLayout(&text, format, width, f32::MAX)?
+        };
+        Label::new(layout)
+    }
+}
+
+fn format(dwrite: &IDWriteFactory, family: PCWSTR, size: f32) -> Result<IDWriteTextFormat> {
+    unsafe {
+        dwrite.CreateTextFormat(
+            family,
+            None,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            size,
+            w!(""),
+        )
     }
 }
 
@@ -290,4 +362,16 @@ pub struct Label {
     layout: IDWriteTextLayout,
     pub width: f32,
     pub height: f32,
+}
+
+impl Label {
+    fn new(layout: IDWriteTextLayout) -> Result<Self> {
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        unsafe { layout.GetMetrics(&mut metrics)? };
+        Ok(Self {
+            layout,
+            width: metrics.width,
+            height: metrics.height,
+        })
+    }
 }

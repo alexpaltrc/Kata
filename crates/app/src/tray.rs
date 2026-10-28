@@ -24,7 +24,7 @@ use windows::{
     core::{HSTRING, PCWSTR, Result},
 };
 
-use crate::{HOTKEY_LABEL, strings::strings};
+use crate::strings::strings;
 
 /// The window message the icon reports its events with.
 pub const MESSAGE: u32 = WM_APP + 1;
@@ -40,6 +40,7 @@ pub enum Event {
 pub enum Command {
     Capture,
     OpenFolder,
+    Settings,
     Exit,
 }
 
@@ -57,15 +58,19 @@ pub fn event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
 pub struct Tray {
     hwnd: HWND,
     icon: HICON,
+    /// Its tooltip: the app's name and the shortcut.
+    tip: String,
     /// What the icon was drawn for: the shell's theme and the icon size.
     drawn_for: (bool, i32),
 }
 
 impl Tray {
-    pub fn new(hwnd: HWND, graphics: &Graphics) -> Result<Self> {
+    /// `shortcut` is the capture shortcut, as people read it.
+    pub fn new(hwnd: HWND, graphics: &Graphics, shortcut: &str) -> Result<Self> {
         let mut tray = Self {
             hwnd,
             icon: HICON::default(),
+            tip: tip(shortcut),
             drawn_for: (false, 0),
         };
         tray.redraw(graphics)?;
@@ -87,10 +92,17 @@ impl Tray {
         }
     }
 
+    /// Shows the new capture shortcut in the tooltip.
+    pub fn set_shortcut(&mut self, shortcut: &str) {
+        self.tip = tip(shortcut);
+        let _ = notify(NIM_MODIFY, &self.data());
+    }
+
     pub fn menu(&self, x: i32, y: i32) -> Option<Command> {
         const CAPTURE: usize = 1;
         const OPEN_FOLDER: usize = 2;
-        const EXIT: usize = 3;
+        const SETTINGS: usize = 3;
+        const EXIT: usize = 4;
         let text = strings();
         unsafe {
             let menu = CreatePopupMenu().ok()?;
@@ -101,6 +113,7 @@ impl Tray {
                 OPEN_FOLDER,
                 &HSTRING::from(text.open_captures),
             );
+            let _ = AppendMenuW(menu, MF_STRING, SETTINGS, &HSTRING::from(text.settings));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
             let _ = AppendMenuW(menu, MF_STRING, EXIT, &HSTRING::from(text.exit));
             // Without these two calls the menu wouldn't close when clicking elsewhere.
@@ -118,6 +131,7 @@ impl Tray {
             match chosen.0 as usize {
                 CAPTURE => Some(Command::Capture),
                 OPEN_FOLDER => Some(Command::OpenFolder),
+                SETTINGS => Some(Command::Settings),
                 EXIT => Some(Command::Exit),
                 _ => None,
             }
@@ -156,7 +170,7 @@ impl Tray {
             },
             ..Default::default()
         };
-        let tip: Vec<u16> = format!("Kata · {HOTKEY_LABEL}").encode_utf16().collect();
+        let tip: Vec<u16> = self.tip.encode_utf16().take(data.szTip.len() - 1).collect();
         data.szTip[..tip.len()].copy_from_slice(&tip);
         data
     }
@@ -173,6 +187,10 @@ impl Drop for Tray {
         let _ = notify(NIM_DELETE, &self.data());
         self.destroy_icon();
     }
+}
+
+fn tip(shortcut: &str) -> String {
+    format!("Kata · {shortcut}")
 }
 
 fn notify(message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> Result<()> {

@@ -7,7 +7,7 @@ mod toolbar;
 
 use std::{
     cell::{Cell, RefCell},
-    mem::{self, size_of},
+    mem,
     time::Instant,
 };
 
@@ -17,40 +17,32 @@ use kata_editor::{
 use kata_ui::{
     Graphics,
     motion::{self, Animation, Easing},
-    paint::{Area, Fonts, Label, Painter, Point},
+    paint::{Area, Fonts, Label, Point},
     theme::{Palette, faded},
-    window,
+    window::{self, WorkArea},
 };
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{
-            GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-            MonitorFromRect, ScreenToClient, ValidateRect,
+            InvalidateRect, MONITOR_DEFAULTTONEAREST, MonitorFromRect, ScreenToClient, ValidateRect,
         },
-        System::LibraryLoader::GetModuleHandleW,
         UI::{
             Controls::WM_MOUSELEAVE,
-            HiDpi::{
-                AdjustWindowRectExForDpi, GetDpiForMonitor, GetDpiForWindow,
-                GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
-            },
+            HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
-                GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT,
-                TrackMouseEvent, VIRTUAL_KEY, VK_1, VK_2, VK_BACK, VK_C, VK_CONTROL, VK_DELETE,
-                VK_ESCAPE, VK_NUMPAD1, VK_NUMPAD2, VK_S, VK_SHIFT, VK_Y, VK_Z,
+                GetKeyState, ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_1, VK_2, VK_BACK, VK_C,
+                VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD1, VK_NUMPAD2, VK_S, VK_SHIFT, VK_Y,
+                VK_Z,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetClientRect,
-                GetCursorPos, HTCAPTION, HTCLIENT, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW,
-                IDC_SIZENWSE, LoadCursorW, MINMAXINFO, PostMessageW, RegisterClassExW,
-                SIZE_MINIMIZED, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-                SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
-                SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CAPTURECHANGED, WM_CLOSE,
+                DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
+                IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENWSE, LoadCursorW,
+                PostMessageW, SIZE_MINIMIZED, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor,
+                SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_CAPTURECHANGED, WM_CLOSE,
                 WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
                 WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
                 WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE,
-                WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -60,7 +52,7 @@ use windows::{
 use crate::{
     export::{self, Output},
     report,
-    settings::Settings,
+    settings::EditorSettings,
 };
 use canvas::{Gpu, HANDLE_REACH, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
@@ -73,8 +65,6 @@ const MARGIN: f32 = 24.0;
 const MIN_CANVAS: f32 = 100.0;
 /// The most of the screen a new editor takes, in each direction.
 const MAX_SHARE: f32 = 0.85;
-/// How wide the caption buttons are, when Windows doesn't say.
-const CAPTION_BUTTONS: f32 = 138.0;
 const CLASS: PCWSTR = w!("Kata.Editor");
 
 /// A capture to edit.
@@ -111,9 +101,9 @@ pub fn close() {
 
 unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
-    let settings = Settings::load();
+    let settings = EditorSettings::load();
     let toolbar = Toolbar::new(&fonts, &settings)?;
-    let chip = fonts.icon('\u{E711}')?;
+    let chip = fonts.icon('\u{E711}', 10.0)?;
     let palette = Palette::current();
     let min = min_size(&toolbar);
     let image = (capture.image.width() as f32, capture.image.height() as f32);
@@ -129,61 +119,19 @@ unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Resul
             },
             MONITOR_DEFAULTTONEAREST,
         );
-        let mut info = MONITORINFO {
-            cbSize: size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        let _ = GetMonitorInfoW(monitor, &mut info);
-        let (mut dpi, mut _dpi_y) = (96, 96);
-        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut _dpi_y);
-        let scale = dpi as f32 / 96.0;
-        let work = info.rcWork;
-        let (work_width, work_height) = (work.right - work.left, work.bottom - work.top);
+        let work = WorkArea::of(monitor);
+        let scale = work.scale;
         let client = (
             (image.0 + 2.0 * MARGIN * scale)
-                .min(work_width as f32 * MAX_SHARE)
+                .min(work.width() as f32 * MAX_SHARE)
                 .max((min.0 * scale).ceil()),
             (image.1 + (TITLE_BAR + 2.0 * MARGIN) * scale)
-                .min(work_height as f32 * MAX_SHARE)
+                .min(work.height() as f32 * MAX_SHARE)
                 .max((min.1 * scale).ceil()),
         );
-        let (width, height) = frame_size((client.0 as i32, client.1 as i32), dpi);
-
-        let instance = GetModuleHandleW(None)?.into();
-        // Later captures register the class again, which fails harmlessly.
-        RegisterClassExW(&WNDCLASSEXW {
-            cbSize: size_of::<WNDCLASSEXW>() as u32,
-            lpfnWndProc: Some(window_proc),
-            hInstance: instance,
-            lpszClassName: CLASS,
-            ..Default::default()
-        });
-        let hwnd = CreateWindowExW(
-            WS_EX_NOREDIRECTIONBITMAP,
-            CLASS,
-            w!("Kata"),
-            WS_OVERLAPPEDWINDOW,
-            work.left + (work_width - width) / 2,
-            work.top + (work_height - height) / 2,
-            width,
-            height,
-            None,
-            None,
-            Some(instance),
-            None,
-        )?;
-        window::use_mica(hwnd, !palette.light);
-        // Lets the client area take over the caption.
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-        );
-        let size = client_size(hwnd);
+        let client = (client.0 as i32, client.1 as i32);
+        let hwnd = window::create(CLASS, window_proc, &work, client, !palette.light)?;
+        let size = window::client_size(hwnd);
         let renderer = Renderer::new(&capture.image, capture.scale);
         let gpu = match Gpu::new(graphics, hwnd, size, renderer.output()) {
             Ok(gpu) => gpu,
@@ -196,7 +144,7 @@ unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Resul
             hwnd,
             graphics: graphics.clone(),
             palette,
-            scale: GetDpiForWindow(hwnd) as f32 / 96.0,
+            scale: window::scale(hwnd),
             size,
             document: Document::new(capture.image),
             edits: Edits::default(),
@@ -264,36 +212,9 @@ unsafe fn release(hwnd: HWND) {
 /// The smallest client area, in DIPs: the toolbar and a little of the capture.
 fn min_size(toolbar: &Toolbar) -> (f32, f32) {
     (
-        toolbar.min_width() + CAPTION_BUTTONS,
+        toolbar.min_width() + window::CAPTION_BUTTONS,
         TITLE_BAR + 2.0 * MARGIN + MIN_CANVAS,
     )
-}
-
-/// The size of a window whose client area measures `client` pixels.
-fn frame_size(client: (i32, i32), dpi: u32) -> (i32, i32) {
-    let mut frame = RECT {
-        left: 0,
-        top: 0,
-        right: client.0,
-        bottom: client.1,
-    };
-    let _ = unsafe {
-        AdjustWindowRectExForDpi(
-            &mut frame,
-            WS_OVERLAPPEDWINDOW,
-            false,
-            WS_EX_NOREDIRECTIONBITMAP,
-            dpi,
-        )
-    };
-    // The client area covers the caption, so only the side and bottom borders add.
-    (frame.right - frame.left, frame.bottom)
-}
-
-fn client_size(hwnd: HWND) -> (u32, u32) {
-    let mut client = RECT::default();
-    let _ = unsafe { GetClientRect(hwnd, &mut client) };
-    (client.right.max(0) as u32, client.bottom.max(0) as u32)
 }
 
 /// `rect`, at least a pixel wide and high.
@@ -350,7 +271,7 @@ struct Editor {
     stale: Vec<Rect>,
     output: Output,
     /// The settings as last saved.
-    settings: Settings,
+    settings: EditorSettings,
     toolbar: Toolbar,
     /// The remove chip's glyph.
     chip: Label,
@@ -399,7 +320,10 @@ impl Editor {
             WM_KEYDOWN => return self.key(VIRTUAL_KEY(wparam.0 as u16)).then_some(LRESULT(0)),
             WM_SIZE if wparam.0 != SIZE_MINIMIZED as usize => self.resized(),
             WM_DPICHANGED => self.dpi_changed(wparam, lparam),
-            WM_GETMINMAXINFO => self.limit_size(lparam),
+            // Keeps the window from getting too small for the toolbar.
+            WM_GETMINMAXINFO => unsafe {
+                window::limit_size(lparam, min_size(&self.toolbar), self.scale);
+            },
             WM_SETTINGCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
                 self.follow_theme();
                 return None;
@@ -466,13 +390,7 @@ impl Editor {
 
     fn pointer_moved(&mut self, point: Point) {
         if !self.tracking {
-            let mut track = TRACKMOUSEEVENT {
-                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                dwFlags: TME_LEAVE,
-                hwndTrack: self.hwnd,
-                dwHoverTime: 0,
-            };
-            self.tracking = unsafe { TrackMouseEvent(&mut track) }.is_ok();
+            self.tracking = window::track_mouse_leave(self.hwnd);
         }
         let changed = match self.gesture {
             Some(_) => self.drag(point),
@@ -906,13 +824,8 @@ impl Editor {
     }
 
     fn draw(&self, gpu: &mut Gpu, now: Instant) -> Result<()> {
-        let Gpu {
-            surface,
-            brush,
-            image,
-        } = gpu;
-        surface.draw(|context| {
-            let painter = Painter::new(context, brush, &self.palette, self.scale);
+        let Gpu { surface, image } = gpu;
+        surface.draw(&self.palette, self.scale, |painter| {
             let capture = self.view.area(self.bounds());
             painter.bitmap(image, capture);
             let border = painter.pixel();
@@ -927,26 +840,26 @@ impl Editor {
                 && let Some(area) = self.shape_area(shape, now)
             {
                 let color = faded(WHITE, 0.9);
-                canvas::draw_outline(&painter, area, self.radius(shape), canvas::HOVERED, color);
+                canvas::draw_outline(painter, area, self.radius(shape), canvas::HOVERED, color);
             }
             if let Some(shape) = self.selected
                 && let Some(area) = self.shape_area(shape, now)
             {
                 let accent = self.palette.accent;
-                canvas::draw_outline(&painter, area, self.radius(shape), canvas::SELECTED, accent);
-                canvas::draw_handles(&painter, area);
+                canvas::draw_outline(painter, area, self.radius(shape), canvas::SELECTED, accent);
+                canvas::draw_handles(painter, area);
                 if matches!(self.gesture, None | Some(Gesture::Remove)) {
                     let center = canvas::chip(area, self.width());
-                    canvas::draw_chip(&painter, center, &self.chip, self.chip_hovered);
+                    canvas::draw_chip(painter, center, &self.chip, self.chip_hovered);
                 }
             }
-            self.toolbar.draw(&painter, now);
+            self.toolbar.draw(painter, now);
         })
     }
 
     /// Follows the window's new size.
     fn resized(&mut self) {
-        self.size = client_size(self.hwnd);
+        self.size = window::client_size(self.hwnd);
         let size = self.size;
         if self
             .gpu
@@ -962,32 +875,8 @@ impl Editor {
     /// The window moved to a monitor with another scale, and Windows suggests where
     /// it goes.
     fn dpi_changed(&mut self, wparam: WPARAM, lparam: LPARAM) {
-        self.scale = f32::from(wparam.0 as u16) / 96.0;
-        let suggested = unsafe { *(lparam.0 as *const RECT) };
-        unsafe {
-            let _ = SetWindowPos(
-                self.hwnd,
-                None,
-                suggested.left,
-                suggested.top,
-                suggested.right - suggested.left,
-                suggested.bottom - suggested.top,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            );
-        }
+        self.scale = unsafe { window::follow_dpi(self.hwnd, wparam, lparam) };
         self.resized();
-    }
-
-    /// Keeps the window from getting too small for the toolbar.
-    fn limit_size(&self, lparam: LPARAM) {
-        let (width, height) = min_size(&self.toolbar);
-        let client = (
-            (width * self.scale).ceil() as i32,
-            (height * self.scale).ceil() as i32,
-        );
-        let (x, y) = frame_size(client, self.dpi());
-        let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
-        info.ptMinTrackSize = POINT { x, y };
     }
 
     fn follow_theme(&mut self) {
@@ -1003,11 +892,8 @@ impl Editor {
         );
         let image = self.document.image();
         self.view = View::fit(room, (image.width(), image.height()), self.scale);
-        let caption_buttons = window::caption_buttons(self.hwnd)
-            .map_or(room.0 - CAPTION_BUTTONS, |buttons| {
-                buttons.left as f32 / self.scale
-            });
-        self.toolbar.layout(caption_buttons);
+        self.toolbar
+            .layout(window::caption_buttons(self.hwnd, self.scale));
     }
 
     /// Where `shape` shows, in capture pixels: a focus follows its zoom as it glides.

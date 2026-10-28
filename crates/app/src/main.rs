@@ -4,15 +4,21 @@
 
 mod editor;
 mod export;
+mod hotkey;
+mod main_window;
 mod overlay;
+mod registry;
 mod settings;
 mod sound;
+mod startup;
 mod strings;
 mod tray;
 
-use std::{cell::RefCell, fmt::Display, mem::size_of, ptr};
+use std::{cell::RefCell, env, fmt::Display, mem::size_of, ptr};
 
 use kata_ui::{Graphics, theme, window};
+use main_window::Page;
+use settings::Settings;
 use tray::Tray;
 use windows::{
     Win32::{
@@ -24,33 +30,40 @@ use windows::{
         },
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
-            Input::KeyboardAndMouse::{
-                MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
-            },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-                KillTimer, MSG, PostQuitMessage, RegisterClassExW, RegisterWindowMessageW,
-                SetTimer, TranslateMessage, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY,
+                AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow,
+                DispatchMessageW, FindWindowW, GetMessageW, GetWindowThreadProcessId, KillTimer,
+                MSG, PostMessageW, PostQuitMessage, RegisterClassExW, RegisterWindowMessageW,
+                SetTimer, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY,
                 WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
             },
         },
     },
-    core::{Owned, Result, w},
+    core::{Owned, PCWSTR, Result, w},
 };
 
-/// The shortcut that starts a capture, as people read it.
-pub const HOTKEY_LABEL: &str = "Ctrl + Shift + S";
-const HOTKEY_ID: i32 = 1;
-/// Captures started from the tray wait for its menu or flyout to fade away first.
-const TRAY_CAPTURE_TIMER: usize = 1;
-const TRAY_CAPTURE_DELAY_MS: u32 = 200;
+/// Shows the main window. Starting Kata again sends it to the Kata running.
+pub const SHOW: u32 = WM_APP + 2;
+/// Starts a capture, from the main window.
+pub const CAPTURE: u32 = WM_APP + 3;
+/// The capture shortcut changed.
+pub const HOTKEY_CHANGED: u32 = WM_APP + 4;
+const CLASS: PCWSTR = w!("Kata");
+/// Captures started from the tray or the main window wait for it to fade away first.
+const CAPTURE_TIMER: usize = 1;
+const CAPTURE_DELAY_MS: u32 = 200;
 
 fn main() -> Result<()> {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)?;
         CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
     }
+    // Started at sign-in, Kata waits in the tray.
+    let quiet = env::args().any(|arg| arg == startup::ARGUMENT);
     let Some(_instance) = claim_single_instance()? else {
+        if !quiet {
+            show_running();
+        }
         return Ok(());
     };
     theme::follow_system_theme_in_menus();
@@ -60,6 +73,9 @@ fn main() -> Result<()> {
     let hwnd = unsafe { create_window(&app)? };
     *app.borrow_mut() = Some(App::new(hwnd, Graphics::new()?)?);
     unsafe {
+        if !quiet {
+            PostMessageW(Some(hwnd), SHOW, WPARAM(0), LPARAM(0))?;
+        }
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).0 > 0 {
             let _ = TranslateMessage(&message);
@@ -78,6 +94,20 @@ fn claim_single_instance() -> Result<Option<Owned<HANDLE>>> {
     }
 }
 
+/// Has the Kata already running show its main window.
+fn show_running() {
+    unsafe {
+        let Ok(hwnd) = FindWindowW(CLASS, PCWSTR::null()) else {
+            return;
+        };
+        // Its window may only come to the front with this process's leave.
+        let mut process = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut process));
+        let _ = AllowSetForegroundWindow(process);
+        let _ = PostMessageW(Some(hwnd), SHOW, WPARAM(0), LPARAM(0));
+    }
+}
+
 /// Kata's resident window. It's never shown: it receives the hotkey, tray and
 /// system messages.
 unsafe fn create_window(app: &RefCell<Option<App>>) -> Result<HWND> {
@@ -87,12 +117,12 @@ unsafe fn create_window(app: &RefCell<Option<App>>) -> Result<HWND> {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
-            lpszClassName: w!("Kata"),
+            lpszClassName: CLASS,
             ..Default::default()
         });
         CreateWindowExW(
             WS_EX_TOOLWINDOW,
-            w!("Kata"),
+            CLASS,
             w!("Kata"),
             WS_OVERLAPPED,
             0,
@@ -139,16 +169,9 @@ struct App {
 
 impl App {
     fn new(hwnd: HWND, graphics: Graphics) -> Result<Self> {
-        let tray = Tray::new(hwnd, &graphics)?;
-        let hotkey = unsafe {
-            RegisterHotKey(
-                Some(hwnd),
-                HOTKEY_ID,
-                MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-                u32::from(b'S'),
-            )
-        };
-        if let Err(error) = hotkey {
+        let hotkey = Settings::load().hotkey;
+        let tray = Tray::new(hwnd, &graphics, &hotkey.label())?;
+        if let Err(error) = hotkey::register(hwnd, hotkey) {
             report("hotkey", &error);
         }
         Ok(Self {
@@ -163,18 +186,22 @@ impl App {
         match message {
             WM_HOTKEY => self.capture(),
             tray::MESSAGE => match tray::event(wparam, lparam) {
-                Some(tray::Event::Activate) => self.capture_after_tray(),
+                Some(tray::Event::Activate) => self.capture_soon(),
                 Some(tray::Event::Menu { x, y }) => match self.tray.menu(x, y) {
-                    Some(tray::Command::Capture) => self.capture_after_tray(),
+                    Some(tray::Command::Capture) => self.capture_soon(),
                     Some(tray::Command::OpenFolder) => export::open_folder(),
+                    Some(tray::Command::Settings) => self.show(Page::Settings),
                     Some(tray::Command::Exit) => unsafe { PostQuitMessage(0) },
                     None => {}
                 },
                 None => return false,
             },
-            WM_TIMER if wparam.0 == TRAY_CAPTURE_TIMER => {
+            SHOW => self.show(Page::Home),
+            CAPTURE => self.capture_soon(),
+            HOTKEY_CHANGED => self.tray.set_shortcut(&Settings::load().hotkey.label()),
+            WM_TIMER if wparam.0 == CAPTURE_TIMER => {
                 unsafe {
-                    let _ = KillTimer(Some(self.hwnd), TRAY_CAPTURE_TIMER);
+                    let _ = KillTimer(Some(self.hwnd), CAPTURE_TIMER);
                 }
                 self.capture();
             }
@@ -187,8 +214,12 @@ impl App {
         true
     }
 
-    /// Freezes the screen, lets the user choose an area and opens it in the editor,
-    /// which delivers it.
+    fn show(&self, page: Page) {
+        main_window::show(&self.graphics, self.hwnd, page);
+    }
+
+    /// Freezes the screen and lets the user choose an area, which is delivered as
+    /// it is or opened in the editor, as the settings say.
     fn capture(&mut self) {
         let shot = match kata_capture::capture() {
             Ok(shot) => shot,
@@ -209,27 +240,29 @@ impl App {
             scale: shot.scale_at(area),
         };
         drop(shot);
-        sound::play();
-        editor::open(&self.graphics, self.hwnd, capture);
+        let settings = Settings::load();
+        if settings.sound {
+            sound::play();
+        }
+        if settings.open_editor {
+            editor::open(&self.graphics, self.hwnd, capture);
+        } else {
+            drop(export::Output::new(self.hwnd, capture.image));
+        }
     }
 
-    fn capture_after_tray(&self) {
+    fn capture_soon(&self) {
         unsafe {
-            SetTimer(
-                Some(self.hwnd),
-                TRAY_CAPTURE_TIMER,
-                TRAY_CAPTURE_DELAY_MS,
-                None,
-            );
+            SetTimer(Some(self.hwnd), CAPTURE_TIMER, CAPTURE_DELAY_MS, None);
         }
     }
 }
 
 impl Drop for App {
     fn drop(&mut self) {
-        unsafe {
-            let _ = UnregisterHotKey(Some(self.hwnd), HOTKEY_ID);
-        }
+        // Closing the main window may give the hotkey back, so it goes first.
+        main_window::close();
+        hotkey::unregister(self.hwnd);
         // The editor's last changes are written before Kata exits.
         editor::close();
         export::wait_for_saves();

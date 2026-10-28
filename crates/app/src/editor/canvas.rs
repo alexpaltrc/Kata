@@ -15,7 +15,6 @@ use windows::{
                     D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
                 },
                 D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1, ID2D1Bitmap1,
-                ID2D1SolidColorBrush,
             },
             Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
         },
@@ -52,7 +51,6 @@ pub const WHITE: D2D1_COLOR_F = D2D1_COLOR_F {
 /// What the editor draws with on the graphics card.
 pub struct Gpu {
     pub surface: Surface,
-    pub brush: ID2D1SolidColorBrush,
     /// The edited capture.
     pub image: ID2D1Bitmap1,
 }
@@ -63,7 +61,6 @@ impl Gpu {
         let surface = Surface::new(graphics, hwnd, size)?;
         let context = surface.context();
         unsafe {
-            let brush = context.CreateSolidColorBrush(&WHITE, None)?;
             let image = context.CreateBitmap(
                 D2D_SIZE_U {
                     width: image.width(),
@@ -82,11 +79,7 @@ impl Gpu {
                     ..Default::default()
                 },
             )?;
-            Ok(Self {
-                surface,
-                brush,
-                image,
-            })
+            Ok(Self { surface, image })
         }
     }
 
@@ -198,9 +191,9 @@ pub fn distance(a: Point, b: Point) -> f32 {
 /// Rings `area` from outside with a line `width` DIPs thick, edged with a faint
 /// shadow so it shows on any image.
 pub fn draw_outline(painter: &Painter, area: Area, radius: f32, width: f32, color: D2D1_COLOR_F) {
-    let area = snapped(painter, area);
+    let area = painter.align(area);
     let width = painter.snap(width).max(painter.pixel());
-    let shadow = painter.snap(1.0).max(painter.pixel());
+    let shadow = painter.border();
     let edge = width + shadow;
     painter.stroke(
         area.inflate(edge),
@@ -227,15 +220,4 @@ pub fn draw_chip(painter: &Painter, center: Point, glyph: &Label, hovered: bool)
     }
     painter.ring(center, CHIP, painter.pixel(), palette.control_stroke);
     painter.text(glyph, center.0 - glyph.width / 2.0, center.1, palette.text);
-}
-
-/// `area` with its edges on the nearest pixel edges.
-fn snapped(painter: &Painter, area: Area) -> Area {
-    let (left, top) = (painter.snap(area.left), painter.snap(area.top));
-    Area::new(
-        left,
-        top,
-        painter.snap(area.right()) - left,
-        painter.snap(area.bottom()) - top,
-    )
 }

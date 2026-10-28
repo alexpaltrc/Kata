@@ -11,7 +11,7 @@ use kata_ui::{
 use windows::core::Result;
 
 use super::TITLE_BAR;
-use crate::{settings::Settings, strings::strings};
+use crate::{settings::EditorSettings, strings::strings};
 
 /// Between the window's edges and the controls, and between related controls.
 const EDGE: f32 = 12.0;
@@ -55,7 +55,7 @@ pub struct Toolbar {
 }
 
 impl Toolbar {
-    pub fn new(fonts: &Fonts, settings: &Settings) -> Result<Self> {
+    pub fn new(fonts: &Fonts, settings: &EditorSettings) -> Result<Self> {
         let strings = strings();
         let blur_levels = strings
             .blur_levels
@@ -80,8 +80,8 @@ impl Toolbar {
     }
 
     /// What the toolbar is set to, worth remembering for the next capture.
-    pub fn settings(&self) -> Settings {
-        Settings {
+    pub fn settings(&self) -> EditorSettings {
+        EditorSettings {
             tool: self.tool() as usize,
             blur_level: self.blur.value(),
             zoom_level: self.zoom.value(),

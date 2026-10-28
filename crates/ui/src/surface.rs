@@ -11,6 +11,7 @@ use windows::{
                 D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_TARGET,
                 D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
                 D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Bitmap1, ID2D1DeviceContext, ID2D1Image,
+                ID2D1SolidColorBrush,
             },
             Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
@@ -36,10 +37,11 @@ use windows::{
     core::{Error, Interface, Result},
 };
 
-use crate::Graphics;
+use crate::{Graphics, paint::Painter, theme::Palette};
 
 pub struct Surface {
     context: ID2D1DeviceContext,
+    brush: ID2D1SolidColorBrush,
     swap_chain: IDXGISwapChain1,
     size: (u32, u32),
     /// The back buffer as a Direct2D target, until the next resize.
@@ -83,6 +85,7 @@ impl Surface {
                 .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
             // ClearType needs an opaque background to blend with.
             context.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            let brush = context.CreateSolidColorBrush(&Default::default(), None)?;
 
             let composition: IDCompositionDevice = DCompositionCreateDevice(&dxgi)?;
             let window = composition.CreateTargetForHwnd(hwnd, true)?;
@@ -92,6 +95,7 @@ impl Surface {
             composition.Commit()?;
             Ok(Self {
                 context,
+                brush,
                 swap_chain,
                 size,
                 target: None,
@@ -128,9 +132,14 @@ impl Surface {
         Ok(())
     }
 
-    /// Draws a frame on a transparent background, in pixels, and shows it. An
-    /// error means the graphics device is gone: make a new surface.
-    pub fn draw(&mut self, paint: impl FnOnce(&ID2D1DeviceContext)) -> Result<()> {
+    /// Draws a frame on a transparent background, `scale` pixels to the DIP, and
+    /// shows it. An error means the graphics device is gone: make a new surface.
+    pub fn draw(
+        &mut self,
+        palette: &Palette,
+        scale: f32,
+        paint: impl FnOnce(&Painter),
+    ) -> Result<()> {
         let target = match &self.target {
             Some(target) => target.clone(),
             None => self.target.insert(self.back_buffer()?).clone(),
@@ -140,7 +149,7 @@ impl Surface {
             context.SetTarget(&target);
             context.BeginDraw();
             context.Clear(None);
-            paint(context);
+            paint(&Painter::new(context, &self.brush, palette, scale));
             let drawn = context.EndDraw(None, None);
             context.SetTarget(None::<&ID2D1Image>);
             drawn?;

@@ -11,20 +11,31 @@ use windows::{
                 DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE, DwmDefWindowProc,
                 DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
             },
-            Gdi::{ClientToScreen, ScreenToClient},
+            Gdi::{ClientToScreen, GetMonitorInfoW, HMONITOR, MONITORINFO, ScreenToClient},
         },
+        System::LibraryLoader::GetModuleHandleW,
         UI::{
             Controls::MARGINS,
-            HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
+            HiDpi::{
+                AdjustWindowRectExForDpi, GetDpiForMonitor, GetDpiForWindow,
+                GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
+            },
+            Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent},
             WindowsAndMessaging::{
-                CREATESTRUCTW, DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, GetWindowRect,
-                HTCLIENT, HTTOP, IsZoomed, NCCALCSIZE_PARAMS, SM_CXPADDEDBORDER, SM_CYSIZEFRAME,
-                SetWindowLongPtrW, WM_NCCALCSIZE, WM_NCCREATE, WM_NCHITTEST,
+                CREATESTRUCTW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetClientRect,
+                GetWindowLongPtrW, GetWindowRect, HTCLIENT, HTTOP, IDC_ARROW, IsZoomed,
+                LoadCursorW, MINMAXINFO, NCCALCSIZE_PARAMS, RegisterClassExW, SM_CXPADDEDBORDER,
+                SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCCALCSIZE, WM_NCCREATE,
+                WM_NCHITTEST, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
             },
         },
     },
-    core::BOOL,
+    core::{BOOL, PCWSTR, Result, w},
 };
+
+/// How wide the caption buttons are, in DIPs, when Windows doesn't say.
+pub const CAPTION_BUTTONS: f32 = 138.0;
 
 /// The state linked to `hwnd`. Call it first thing in the window procedure: on
 /// `WM_NCCREATE` it links the pointer passed as `CreateWindowExW`'s last argument.
@@ -133,8 +144,16 @@ pub unsafe fn frame_proc(
     }
 }
 
+/// Where the caption buttons start, in DIPs from the client area's left edge.
+pub fn caption_buttons(hwnd: HWND, scale: f32) -> f32 {
+    caption_button_bounds(hwnd).map_or_else(
+        || client_size(hwnd).0 as f32 / scale - CAPTION_BUTTONS,
+        |bounds| bounds.left as f32 / scale,
+    )
+}
+
 /// Where Windows draws the caption buttons, in client pixels.
-pub fn caption_buttons(hwnd: HWND) -> Option<RECT> {
+fn caption_button_bounds(hwnd: HWND) -> Option<RECT> {
     let mut bounds = RECT::default();
     let mut window = RECT::default();
     let mut client = POINT::default();
@@ -157,6 +176,173 @@ pub fn caption_buttons(hwnd: HWND) -> Option<RECT> {
         right: bounds.right + dx,
         bottom: bounds.bottom + dy,
     })
+}
+
+/// The part of a monitor that isn't under the taskbar.
+pub struct WorkArea {
+    /// In pixels, on the virtual screen.
+    pub rect: RECT,
+    /// The monitor's pixels per DIP.
+    pub scale: f32,
+}
+
+impl WorkArea {
+    pub fn of(monitor: HMONITOR) -> Self {
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let (mut dpi, mut dpi_y) = (96, 96);
+        unsafe {
+            let _ = GetMonitorInfoW(monitor, &mut info);
+            let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
+        }
+        Self {
+            rect: info.rcWork,
+            scale: dpi as f32 / 96.0,
+        }
+    }
+
+    pub fn width(&self) -> i32 {
+        self.rect.right - self.rect.left
+    }
+
+    pub fn height(&self) -> i32 {
+        self.rect.bottom - self.rect.top
+    }
+}
+
+/// Creates a hidden window of class `class`, whose client area of `client` pixels
+/// covers the title bar over Mica, centered in `work`.
+pub fn create(
+    class: PCWSTR,
+    proc: WindowProc,
+    work: &WorkArea,
+    client: (i32, i32),
+    dark: bool,
+) -> Result<HWND> {
+    let dpi = (work.scale * 96.0).round() as u32;
+    let (width, height) = frame_size(client, dpi);
+    unsafe {
+        let instance = GetModuleHandleW(None)?.into();
+        // Every window after the first registers the class again, which fails
+        // harmlessly.
+        RegisterClassExW(&WNDCLASSEXW {
+            cbSize: size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(proc),
+            hInstance: instance,
+            hCursor: LoadCursorW(None, IDC_ARROW)?,
+            lpszClassName: class,
+            ..Default::default()
+        });
+        let hwnd = CreateWindowExW(
+            WS_EX_NOREDIRECTIONBITMAP,
+            class,
+            w!("Kata"),
+            WS_OVERLAPPEDWINDOW,
+            work.rect.left + (work.width() - width) / 2,
+            work.rect.top + (work.height() - height) / 2,
+            width,
+            height,
+            None,
+            None,
+            Some(instance),
+            None,
+        )?;
+        use_mica(hwnd, dark);
+        // Lets the client area take over the caption.
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        Ok(hwnd)
+    }
+}
+
+/// A window procedure.
+pub type WindowProc = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
+
+/// The size of a window whose client area, which covers the caption, measures
+/// `client` pixels.
+fn frame_size(client: (i32, i32), dpi: u32) -> (i32, i32) {
+    let mut frame = RECT {
+        left: 0,
+        top: 0,
+        right: client.0,
+        bottom: client.1,
+    };
+    let _ = unsafe {
+        AdjustWindowRectExForDpi(
+            &mut frame,
+            WS_OVERLAPPEDWINDOW,
+            false,
+            WS_EX_NOREDIRECTIONBITMAP,
+            dpi,
+        )
+    };
+    // Only the side and bottom borders add.
+    (frame.right - frame.left, frame.bottom)
+}
+
+/// The client area's size, in pixels.
+pub fn client_size(hwnd: HWND) -> (u32, u32) {
+    let mut client = RECT::default();
+    let _ = unsafe { GetClientRect(hwnd, &mut client) };
+    (client.right.max(0) as u32, client.bottom.max(0) as u32)
+}
+
+/// The window's pixels per DIP.
+pub fn scale(hwnd: HWND) -> f32 {
+    unsafe { GetDpiForWindow(hwnd) as f32 / 96.0 }
+}
+
+/// Moves the window where Windows suggests on `WM_DPICHANGED`, and returns its new
+/// pixels per DIP.
+///
+/// # Safety
+/// Pass the message's arguments unchanged.
+pub unsafe fn follow_dpi(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> f32 {
+    unsafe {
+        let suggested = *(lparam.0 as *const RECT);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            suggested.left,
+            suggested.top,
+            suggested.right - suggested.left,
+            suggested.bottom - suggested.top,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+    f32::from(wparam.0 as u16) / 96.0
+}
+
+/// Keeps the client area at least `min` DIPs on `WM_GETMINMAXINFO`.
+///
+/// # Safety
+/// Pass the message's `lparam` unchanged.
+pub unsafe fn limit_size(lparam: LPARAM, min: (f32, f32), scale: f32) {
+    let client = ((min.0 * scale).ceil() as i32, (min.1 * scale).ceil() as i32);
+    let (x, y) = frame_size(client, (scale * 96.0).round() as u32);
+    let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
+    info.ptMinTrackSize = POINT { x, y };
+}
+
+/// Asks Windows to send `WM_MOUSELEAVE` once the pointer leaves the window, and
+/// returns whether it will.
+pub fn track_mouse_leave(hwnd: HWND) -> bool {
+    let mut track = TRACKMOUSEEVENT {
+        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+        dwFlags: TME_LEAVE,
+        hwndTrack: hwnd,
+        dwHoverTime: 0,
+    };
+    unsafe { TrackMouseEvent(&mut track) }.is_ok()
 }
 
 /// How thick the resize border is, in pixels.

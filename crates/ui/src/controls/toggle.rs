@@ -1,4 +1,4 @@
-//! An on/off switch, its label on the left.
+//! An on/off switch, its label on the left and the switch on the right.
 
 use std::time::Instant;
 
@@ -20,6 +20,8 @@ pub struct Toggle {
     on: bool,
     left: f32,
     top: f32,
+    /// The area it answers to, which can be wider and taller than it looks.
+    size: (f32, f32),
     /// From 0 when off to 1 when on.
     state: Animation,
     knob: Animation,
@@ -29,11 +31,13 @@ pub struct Toggle {
 
 impl Toggle {
     pub fn new(label: Label, on: bool) -> Self {
+        let size = (label.width + GAP + SWITCH.0, HEIGHT);
         Self {
             label,
             on,
             left: 0.0,
             top: 0.0,
+            size,
             state: Animation::idle(if on { 1.0 } else { 0.0 }),
             knob: Animation::idle(KNOB),
             hovered: false,
@@ -49,12 +53,18 @@ impl Toggle {
         (self.left, self.top) = (left, top);
     }
 
+    /// Spreads it over `width` by `height` DIPs, as a whole row of settings: the
+    /// label stays on the left and the switch moves to the right.
+    pub fn stretch(&mut self, width: f32, height: f32) {
+        self.size = (width.max(self.width()), height.max(HEIGHT));
+    }
+
     pub fn is_on(&self) -> bool {
         self.on
     }
 
     fn area(&self) -> Area {
-        Area::new(self.left, self.top, self.width(), HEIGHT)
+        Area::new(self.left, self.top, self.size.0, self.size.1)
     }
 
     fn update_knob(&mut self) {

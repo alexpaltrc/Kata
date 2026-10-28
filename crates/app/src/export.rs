@@ -45,7 +45,7 @@ use windows::{
     core::{Error, HSTRING, PCWSTR, Result, w},
 };
 
-use crate::report;
+use crate::{report, settings::Settings};
 
 /// Savers still writing captures of closed editors.
 static FINISHING: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
@@ -179,8 +179,11 @@ pub fn open_folder() {
     }
 }
 
-/// Where captures go: Pictures\Kata.
-fn folder() -> io::Result<PathBuf> {
+/// Where captures go: the folder chosen in Settings, or Pictures\Kata.
+pub fn folder() -> io::Result<PathBuf> {
+    if let Some(folder) = Settings::load().folder {
+        return Ok(folder);
+    }
     unsafe {
         let path = SHGetKnownFolderPath(&FOLDERID_Pictures, KF_FLAG_DEFAULT, None)?;
         let pictures = PathBuf::from(OsString::from_wide(path.as_wide()));

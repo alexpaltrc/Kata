@@ -7,7 +7,7 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 **Por qué:**
 
 - **No hay una opción oficial:** WinUI 3, la interfaz nativa de Microsoft, no tiene soporte real para Rust.
-- **Son pocos controles:** Kata necesita unos seis (botón, slider por niveles, interruptor, selector de atajo, barra de herramientas y lienzo), así que hacerlos es abarcable.
+- **Son pocos controles:** botón (de acento, estándar y de icono), slider por niveles, interruptor, selector de herramienta, campo de atajo y lienzo. Hacerlos es abarcable.
 - **Rendimiento:** no carga ningún framework, por lo que arranca al instante y gasta muy poca memoria.
 - **Control total del diseño:** cada animación, sombra y transición se ajusta al detalle. Las animaciones las ejecuta el compositor de Windows, así que siguen fluidas aunque la app esté ocupada.
 
@@ -32,6 +32,13 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 - **Sin bloqueos:** se guarda en segundo plano, así la app nunca se traba.
 - **Escritura atómica:** primero un archivo temporal, luego se reemplaza. Nunca queda una imagen a medias.
 - **Portapapeles:** se copia al instante, antes de guardar.
+
+## Ajustes
+
+- **Dónde viven:** en el registro del usuario, `HKCU\Software\Kata`, junto con lo que recuerda el editor. Sin archivos de configuración.
+- **Atajo:** `RegisterHotKey`. Mientras se elige uno nuevo, el actual se suelta, para que pulsarlo no inicie una captura.
+- **Iniciar con Windows:** por ahora, la clave `Run` del usuario, con `--startup` para arrancar sin ventanas. En el paquete MSIX será la `StartupTask`.
+- **Una sola instancia:** abrir Kata otra vez le pide a la que ya corre que muestre su ventana.
 
 ## Sonido
 
