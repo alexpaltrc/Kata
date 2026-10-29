@@ -1,10 +1,18 @@
 //! The selection overlay. It shows the frozen screen and lets the user choose what
 //! to capture: hovering highlights the window or monitor under the pointer, a click
-//! takes it, and dragging selects any area.
+//! takes it, and dragging selects any area. A window partly covered by others
+//! shows whole while hovered, and is captured whole.
 
-use std::{cell::RefCell, mem::size_of, ptr, time::Instant};
+use std::{
+    cell::RefCell,
+    mem::{self, size_of},
+    ptr,
+    sync::mpsc::{self, Receiver, Sender},
+    thread,
+    time::{Duration, Instant},
+};
 
-use kata_capture::Screenshot;
+use kata_capture::{Screenshot, Window};
 use kata_editor::{Image, Rect};
 use kata_ui::{
     Graphics,
@@ -39,12 +47,12 @@ use windows::{
             Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN},
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
-                GetMessageW, GetSystemMetrics, IDC_CROSS, LoadCursorW, MSG, PostQuitMessage,
-                RegisterClassExW, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetForegroundWindow, ShowWindow,
-                TranslateMessage, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DISPLAYCHANGE,
-                WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONUP, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                WS_POPUP,
+                GetMessageW, GetSystemMetrics, IDC_CROSS, LoadCursorW, MSG, PostMessageW,
+                PostQuitMessage, RegisterClassExW, SM_CXDRAG, SM_CYDRAG, SW_SHOW,
+                SetForegroundWindow, ShowWindow, TranslateMessage, WA_INACTIVE, WM_ACTIVATE,
+                WM_APP, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONUP, WNDCLASSEXW,
+                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
             },
         },
     },
@@ -59,10 +67,15 @@ const DIM: f32 = 0.45;
 /// The size label's text size at 100 % scale.
 const LABEL_SIZE: f32 = 12.0;
 const CLASS: PCWSTR = w!("Kata.Overlay");
+/// Posted to the overlay when Windows has drawn a covered window whole.
+const DRAWN: u32 = WM_APP + 1;
+/// How long a click on a covered window waits for Windows to draw it whole, before
+/// settling for what the frozen screen shows.
+const PATIENCE: Duration = Duration::from_millis(500);
 
-/// Lets the user choose an area of `shot`, in image coordinates. `None` when they
-/// cancel.
-pub fn select(shot: &Screenshot) -> Option<Rect> {
+/// Lets the user choose an area of `shot`, in image coordinates, and gives it back
+/// with its pixels. `None` when they cancel.
+pub fn select(shot: &Screenshot) -> Option<(Rect, Image)> {
     let mut pointer = POINT::default();
     let _ = unsafe { GetCursorPos(&mut pointer) };
     let pointer = (pointer.x - shot.origin.0, pointer.y - shot.origin.1);
@@ -86,8 +99,10 @@ pub fn select(shot: &Screenshot) -> Option<Rect> {
     unsafe { show(hwnd) };
     overlay.borrow_mut().appear(hwnd);
     let chosen = run(&overlay);
+    let whole = chosen.and_then(|_| overlay.borrow_mut().chosen_whole(hwnd));
     let _ = unsafe { DestroyWindow(hwnd) };
-    chosen
+    let area = chosen?;
+    Some((area, whole.or_else(|| shot.image.crop(area))?))
 }
 
 unsafe fn create(overlay: &RefCell<Overlay<'_>>) -> Result<HWND> {
@@ -192,11 +207,28 @@ struct Overlay<'a> {
     dragging: bool,
     /// Whether the overlay has been the active window: losing that cancels.
     active: bool,
+    /// The window the selection is on, as an index into the shot's windows.
+    window: Option<usize>,
+    /// Each window drawn whole, for those covered by others, once asked for.
+    wholes: Vec<Whole>,
+    /// Where the threads drawing windows whole send them, as `(index, whole)`.
+    sender: Sender<(usize, Image)>,
+    receiver: Receiver<(usize, Image)>,
+    /// The covered window shown whole, and how visible: it fades in once Windows
+    /// has drawn it, and out when the pointer leaves it.
+    reveal: Option<(usize, Animation)>,
+}
+
+enum Whole {
+    Unasked,
+    Asked,
+    Drawn(Image),
 }
 
 impl<'a> Overlay<'a> {
     fn new(graphics: &'a Graphics, shot: &'a Screenshot, pointer: (i32, i32)) -> Self {
-        let target = target_at(shot, pointer);
+        let (target, window) = target_at(shot, pointer);
+        let (sender, receiver) = mpsc::channel();
         Self {
             graphics,
             shot,
@@ -209,12 +241,98 @@ impl<'a> Overlay<'a> {
             press: None,
             dragging: false,
             active: false,
+            window,
+            wholes: shot.windows.iter().map(|_| Whole::Unasked).collect(),
+            sender,
+            receiver,
+            reveal: None,
         }
     }
 
     fn appear(&mut self, hwnd: HWND) {
         self.presence = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
+        self.aim(hwnd, self.window);
         invalidate(hwnd);
+    }
+
+    /// Points the selection at `window`, or at none: a covered window is asked
+    /// for whole, and shown whole as soon as it's drawn.
+    fn aim(&mut self, hwnd: HWND, window: Option<usize>) {
+        self.window = window;
+        if let Some((shown, opacity)) = &mut self.reveal
+            && Some(*shown) != window
+        {
+            *opacity = opacity.retarget(0.0, motion::FAST, Easing::ACCELERATE);
+        }
+        if let Some(index) = window.filter(|&index| self.shot.windows[index].covered) {
+            self.ask(hwnd, index);
+            self.reveal_drawn();
+        }
+    }
+
+    /// Has Windows draw window `index` whole, off this thread: an app that doesn't
+    /// respond can't stall the overlay.
+    fn ask(&mut self, hwnd: HWND, index: usize) {
+        if !matches!(self.wholes[index], Whole::Unasked) {
+            return;
+        }
+        self.wholes[index] = Whole::Asked;
+        let window: Window = self.shot.windows[index];
+        let Some(under) = self.shot.image.crop(window.rect) else {
+            return;
+        };
+        let sender = self.sender.clone();
+        let overlay = hwnd.0 as usize;
+        thread::spawn(move || {
+            if sender.send((index, window.uncover(under))).is_ok() {
+                let overlay = HWND(overlay as *mut _);
+                let _ = unsafe { PostMessageW(Some(overlay), DRAWN, WPARAM(0), LPARAM(0)) };
+            }
+        });
+    }
+
+    /// Keeps the windows drawn so far, and fades in the aimed one if it's among them.
+    fn take_drawn(&mut self, hwnd: HWND) {
+        while let Ok((index, whole)) = self.receiver.try_recv() {
+            self.wholes[index] = Whole::Drawn(whole);
+        }
+        self.reveal_drawn();
+        invalidate(hwnd);
+    }
+
+    fn reveal_drawn(&mut self) {
+        let Some(index) = self.window else {
+            return;
+        };
+        if !matches!(self.wholes[index], Whole::Drawn(_)) {
+            return;
+        }
+        let opacity = match self.reveal {
+            Some((shown, opacity)) if shown == index => opacity,
+            _ => Animation::idle(0.0),
+        };
+        self.reveal = Some((
+            index,
+            opacity.retarget(1.0, motion::FAST, Easing::DECELERATE),
+        ));
+    }
+
+    /// The chosen window whole, if others covered it. Windows has usually drawn it
+    /// while the pointer rested on it; if not, it gets a moment more.
+    fn chosen_whole(&mut self, hwnd: HWND) -> Option<Image> {
+        let index = self
+            .window
+            .filter(|&index| self.shot.windows[index].covered)?;
+        self.ask(hwnd, index);
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            if let Whole::Drawn(whole) = mem::replace(&mut self.wholes[index], Whole::Asked) {
+                return Some(whole);
+            }
+            let wait = deadline.saturating_duration_since(Instant::now());
+            let (drawn, whole) = self.receiver.recv_timeout(wait).ok()?;
+            self.wholes[drawn] = Whole::Drawn(whole);
+        }
     }
 
     fn handle(
@@ -252,6 +370,7 @@ impl<'a> Overlay<'a> {
             WM_DISPLAYCHANGE => self.cancel(),
             // The overlay must keep covering every monitor exactly, whatever their scale.
             WM_DPICHANGED => {}
+            DRAWN => self.take_drawn(hwnd),
             _ => return None,
         }
         Some(LRESULT(0))
@@ -276,16 +395,18 @@ impl<'a> Overlay<'a> {
                     self.from = area;
                     self.to = area;
                     self.glide = Animation::idle(1.0);
+                    self.aim(hwnd, None);
                     invalidate(hwnd);
                 }
                 return;
             }
         }
-        let target = target_at(self.shot, point);
-        if target != self.to {
+        let (target, window) = target_at(self.shot, point);
+        if target != self.to || window != self.window {
             self.from = self.from.lerp(&self.to, self.glide.value(Instant::now()));
             self.to = target;
             self.glide = Animation::new(0.0, 1.0, motion::FAST, Easing::POINT_TO_POINT);
+            self.aim(hwnd, window);
             invalidate(hwnd);
         }
     }
@@ -315,8 +436,9 @@ impl<'a> Overlay<'a> {
     fn paint(&mut self, hwnd: HWND) {
         let _ = unsafe { ValidateRect(Some(hwnd), None) };
         let now = Instant::now();
+        let canvas = self.canvas.take();
         let frame = self.frame(now);
-        let drawn = match self.canvas.take() {
+        let drawn = match canvas {
             Some(canvas) => Ok(canvas),
             None => Canvas::new(self.graphics, hwnd, &self.shot.image),
         }
@@ -335,15 +457,32 @@ impl<'a> Overlay<'a> {
         }
         if self.phase == Phase::Leaving && !self.presence.is_running(now) {
             self.phase = Phase::Done(None);
-        } else if self.presence.is_running(now) || self.glide.is_running(now) {
+        } else if self.presence.is_running(now)
+            || self.glide.is_running(now)
+            || self
+                .reveal
+                .is_some_and(|(_, opacity)| opacity.is_running(now))
+        {
             invalidate(hwnd);
         }
     }
 
-    fn frame(&self, now: Instant) -> Frame {
+    fn frame(&self, now: Instant) -> Frame<'_> {
         let selection = self.from.lerp(&self.to, self.glide.value(now));
+        let presence = self.presence.value(now);
         Frame {
-            presence: self.presence.value(now),
+            presence,
+            whole: self.reveal.and_then(|(index, opacity)| {
+                let Whole::Drawn(image) = &self.wholes[index] else {
+                    return None;
+                };
+                Some(Reveal {
+                    index,
+                    image,
+                    rect: self.shot.windows[index].rect,
+                    opacity: opacity.value(now) * presence,
+                })
+            }),
             selection,
             size: (self.to.width(), self.to.height()),
             area: self
@@ -359,14 +498,18 @@ impl<'a> Overlay<'a> {
     }
 }
 
-/// What a click at `(x, y)` captures: the window there, else its monitor.
-fn target_at(shot: &Screenshot, (x, y): (i32, i32)) -> Rect {
-    shot.windows
+/// What a click at `(x, y)` captures: the window there, with its index, else
+/// its monitor.
+fn target_at(shot: &Screenshot, (x, y): (i32, i32)) -> (Rect, Option<usize>) {
+    if let Some(index) = shot.windows.iter().position(|w| w.rect.contains(x, y)) {
+        return (shot.windows[index].rect, Some(index));
+    }
+    let monitor = shot
+        .monitors
         .iter()
-        .chain(shot.monitors.iter().map(|monitor| &monitor.rect))
-        .find(|rect| rect.contains(x, y))
-        .copied()
-        .unwrap_or_else(|| shot.image.bounds())
+        .map(|monitor| monitor.rect)
+        .find(|rect| rect.contains(x, y));
+    (monitor.unwrap_or_else(|| shot.image.bounds()), None)
 }
 
 fn invalidate(hwnd: HWND) {
@@ -374,9 +517,11 @@ fn invalidate(hwnd: HWND) {
 }
 
 /// Everything one frame shows, in image pixels.
-struct Frame {
+struct Frame<'a> {
     /// 0 shows the plain screen; 1, the full overlay.
     presence: f32,
+    /// A covered window shown whole, over the frozen screen.
+    whole: Option<Reveal<'a>>,
     selection: Rect,
     /// The size the label reads: where the selection is heading.
     size: (i32, i32),
@@ -385,11 +530,21 @@ struct Frame {
     scale: f32,
 }
 
+struct Reveal<'a> {
+    /// Which window, among the shot's.
+    index: usize,
+    image: &'a Image,
+    rect: Rect,
+    opacity: f32,
+}
+
 /// The Direct2D resources the overlay draws with.
 struct Canvas {
     target: ID2D1HwndRenderTarget,
     bounds: Rect,
     screen: ID2D1Bitmap,
+    /// The last window shown whole, by index.
+    whole: Option<(usize, ID2D1Bitmap)>,
     brush: ID2D1SolidColorBrush,
     typography: IDWriteTypography,
     /// The label's text format and the display scale it was made for.
@@ -398,39 +553,25 @@ struct Canvas {
 
 impl Canvas {
     fn new(graphics: &Graphics, hwnd: HWND, image: &Image) -> Result<Self> {
-        let size = D2D_SIZE_U {
-            width: image.width(),
-            height: image.height(),
-        };
-        let pixel_format = D2D1_PIXEL_FORMAT {
-            format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            alphaMode: D2D1_ALPHA_MODE_IGNORE,
-        };
         unsafe {
             // At 96 DPI, Direct2D's units are physical pixels, like the capture's.
             let target = graphics.d2d.CreateHwndRenderTarget(
                 &D2D1_RENDER_TARGET_PROPERTIES {
-                    pixelFormat: pixel_format,
+                    pixelFormat: PIXEL_FORMAT,
                     dpiX: 96.0,
                     dpiY: 96.0,
                     ..Default::default()
                 },
                 &D2D1_HWND_RENDER_TARGET_PROPERTIES {
                     hwnd,
-                    pixelSize: size,
+                    pixelSize: D2D_SIZE_U {
+                        width: image.width(),
+                        height: image.height(),
+                    },
                     presentOptions: D2D1_PRESENT_OPTIONS_NONE,
                 },
             )?;
-            let screen = target.CreateBitmap(
-                size,
-                Some(image.pixels().as_ptr().cast()),
-                image.stride() as u32,
-                &D2D1_BITMAP_PROPERTIES {
-                    pixelFormat: pixel_format,
-                    dpiX: 96.0,
-                    dpiY: 96.0,
-                },
-            )?;
+            let screen = bitmap(&target, image)?;
             let brush = target.CreateSolidColorBrush(&rgba(0.0, 0.0, 0.0, 0.0), None)?;
             // Tabular figures keep the label from jittering as its numbers change.
             let typography = graphics.dwrite.CreateTypography()?;
@@ -442,6 +583,7 @@ impl Canvas {
                 target,
                 bounds: image.bounds(),
                 screen,
+                whole: None,
                 brush,
                 typography,
                 label_format: None,
@@ -462,6 +604,19 @@ impl Canvas {
         } else {
             None
         };
+        let whole = match &frame.whole {
+            Some(reveal) if reveal.opacity > 0.0 => {
+                if self
+                    .whole
+                    .as_ref()
+                    .is_none_or(|(index, _)| *index != reveal.index)
+                {
+                    self.whole = Some((reveal.index, bitmap(&self.target, reveal.image)?));
+                }
+                self.whole.as_ref().map(|(_, bitmap)| (bitmap, reveal))
+            }
+            _ => None,
+        };
         let (target, brush) = (&self.target, &self.brush);
         unsafe {
             target.BeginDraw();
@@ -472,6 +627,15 @@ impl Canvas {
                 D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
                 None,
             );
+            if let Some((bitmap, reveal)) = whole {
+                target.DrawBitmap(
+                    bitmap,
+                    Some(&rect_f(reveal.rect)),
+                    reveal.opacity,
+                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    None,
+                );
+            }
             if let Some(label) = label {
                 brush.SetColor(&rgba(0.0, 0.0, 0.0, DIM * presence));
                 for band in around(self.bounds, selection) {
@@ -600,6 +764,31 @@ impl Label {
             brush.SetColor(&rgba(1.0, 1.0, 1.0, presence));
             target.DrawTextLayout(self.text, &self.layout, brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
         }
+    }
+}
+
+/// Kata's images, as Direct2D sees them: opaque BGRA.
+const PIXEL_FORMAT: D2D1_PIXEL_FORMAT = D2D1_PIXEL_FORMAT {
+    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+    alphaMode: D2D1_ALPHA_MODE_IGNORE,
+};
+
+/// `image` as a bitmap `target` can draw, pixel for pixel.
+fn bitmap(target: &ID2D1HwndRenderTarget, image: &Image) -> Result<ID2D1Bitmap> {
+    unsafe {
+        target.CreateBitmap(
+            D2D_SIZE_U {
+                width: image.width(),
+                height: image.height(),
+            },
+            Some(image.pixels().as_ptr().cast()),
+            image.stride() as u32,
+            &D2D1_BITMAP_PROPERTIES {
+                pixelFormat: PIXEL_FORMAT,
+                dpiX: 96.0,
+                dpiY: 96.0,
+            },
+        )
     }
 }
 

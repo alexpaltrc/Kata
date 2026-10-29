@@ -85,6 +85,47 @@ impl Image {
                 .copy_from_slice(&from.pixels[source..source + row_len]);
         }
     }
+
+    /// Lays `from` over the image with its top-left corner at `at`, its corners
+    /// rounded by `radius` pixels: what lies outside the curves keeps showing.
+    pub fn paste_rounded(&mut self, from: &Self, at: (i32, i32), radius: f32) {
+        let shape = from.bounds().offset(at.0, at.1);
+        let Some(area) = shape.intersect(&self.bounds()) else {
+            return;
+        };
+        let radius = radius.clamp(0.0, shape.width().min(shape.height()) as f32 / 2.0);
+        for y in area.top..area.bottom {
+            for x in area.left..area.right {
+                let cover = coverage(shape, radius, x, y);
+                if cover <= 0.0 {
+                    continue;
+                }
+                let source = from.offset(x - at.0, y - at.1);
+                let target = self.offset(x, y);
+                for channel in 0..3 {
+                    let (over, under) = (
+                        f32::from(from.pixels[source + channel]),
+                        f32::from(self.pixels[target + channel]),
+                    );
+                    self.pixels[target + channel] = (under + (over - under) * cover).round() as u8;
+                }
+            }
+        }
+    }
+}
+
+/// How much of pixel `(x, y)` lies inside `shape` with its corners rounded by
+/// `radius`: 1 inside, 0 outside, in between along the curves.
+fn coverage(shape: Rect, radius: f32, x: i32, y: i32) -> f32 {
+    let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+    let (left, top) = (shape.left as f32 + radius, shape.top as f32 + radius);
+    let (right, bottom) = (shape.right as f32 - radius, shape.bottom as f32 - radius);
+    let dx = (left - px).max(px - right).max(0.0);
+    let dy = (top - py).max(py - bottom).max(0.0);
+    if dx == 0.0 || dy == 0.0 {
+        return 1.0;
+    }
+    (radius - dx.hypot(dy) + 0.5).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -137,5 +178,25 @@ mod tests {
         let mut image = blank();
         image.paste(&patch, (1, 1), Rect::new(0, 0, 2, 3));
         assert_eq!(blues(&image), [7, 7, 7, 7, 7, 5, 7, 7, 7, 9, 7, 7]);
+    }
+
+    #[test]
+    fn paste_rounded_keeps_what_lies_past_the_corners() {
+        let mut image = Image::new(20, 20, [0, 0, 0, 255].repeat(400));
+        let white = Image::new(16, 16, [255, 255, 255, 255].repeat(256));
+        image.paste_rounded(&white, (2, 2), 6.0);
+        let blue = |x: i32, y: i32| image.pixels()[image.offset(x, y)];
+        // Outside the shape, and past its top-left curve: untouched.
+        assert_eq!(blue(1, 1), 0);
+        assert_eq!(blue(2, 2), 0);
+        // Along the edges and inside: covered.
+        assert_eq!(blue(10, 2), 255);
+        assert_eq!(blue(2, 10), 255);
+        assert_eq!(blue(10, 10), 255);
+        // On the curve: blended.
+        assert!((1..255).contains(&blue(3, 4)));
+        // Every corner is rounded alike.
+        assert_eq!(blue(17, 17), 0);
+        assert_eq!(blue(17, 2), 0);
     }
 }

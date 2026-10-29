@@ -9,6 +9,7 @@ mod hotkey;
 mod main_window;
 mod overlay;
 mod registry;
+mod screen_keys;
 mod settings;
 mod sound;
 mod startup;
@@ -19,6 +20,7 @@ use std::{cell::RefCell, fmt::Display, mem::size_of, ptr};
 
 use kata_ui::{Graphics, theme, window};
 use main_window::Page;
+use screen_keys::ScreenKeys;
 use settings::Settings;
 use tray::Tray;
 use windows::{
@@ -48,8 +50,10 @@ use windows::{
 pub const SHOW: u32 = WM_APP + 2;
 /// Starts a capture, from the main window.
 pub const CAPTURE: u32 = WM_APP + 3;
-/// The capture shortcut changed.
-pub const HOTKEY_CHANGED: u32 = WM_APP + 4;
+/// The capture shortcut, or whether Kata takes the screenshot keys, changed.
+pub const KEYS_CHANGED: u32 = WM_APP + 4;
+/// One of Windows' screenshot keys was pressed, while Kata takes them.
+pub const SCREEN_KEY: u32 = WM_APP + 5;
 const CLASS: PCWSTR = w!("Kata");
 /// Captures started from the tray or the main window wait for it to fade away first.
 const CAPTURE_TIMER: usize = 1;
@@ -175,28 +179,30 @@ struct App {
     hwnd: HWND,
     graphics: Graphics,
     tray: Tray,
+    screen_keys: Option<ScreenKeys>,
     /// Explorer broadcasts it after restarting; the tray icon must be added again.
     taskbar_created: u32,
 }
 
 impl App {
     fn new(hwnd: HWND, graphics: Graphics) -> Result<Self> {
-        let hotkey = Settings::load().hotkey;
-        let tray = Tray::new(hwnd, &graphics, &hotkey.label())?;
-        if let Err(error) = hotkey::register(hwnd, hotkey) {
+        let settings = Settings::load();
+        let tray = Tray::new(hwnd, &graphics, &settings.hotkey.label())?;
+        if let Err(error) = hotkey::register(hwnd, settings.hotkey) {
             report("hotkey", &error);
         }
         Ok(Self {
             hwnd,
             graphics,
             tray,
+            screen_keys: settings.screen_keys.then(|| screen_keys::take(hwnd)),
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
         })
     }
 
     fn handle(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> bool {
         match message {
-            WM_HOTKEY => self.capture(),
+            WM_HOTKEY | SCREEN_KEY => self.capture(),
             tray::MESSAGE => match tray::event(wparam, lparam) {
                 Some(tray::Event::Activate) => self.capture_soon(),
                 Some(tray::Event::Menu { x, y }) => match self.tray.menu(x, y) {
@@ -210,7 +216,13 @@ impl App {
             },
             SHOW => self.show(Page::Home),
             CAPTURE => self.capture_soon(),
-            HOTKEY_CHANGED => self.tray.set_shortcut(&Settings::load().hotkey.label()),
+            KEYS_CHANGED => {
+                let settings = Settings::load();
+                self.tray.set_shortcut(&settings.hotkey.label());
+                if settings.screen_keys != self.screen_keys.is_some() {
+                    self.screen_keys = settings.screen_keys.then(|| screen_keys::take(self.hwnd));
+                }
+            }
             WM_TIMER if wparam.0 == CAPTURE_TIMER => {
                 unsafe {
                     let _ = KillTimer(Some(self.hwnd), CAPTURE_TIMER);
@@ -240,10 +252,7 @@ impl App {
                 return;
             }
         };
-        let Some(area) = overlay::select(&shot) else {
-            return;
-        };
-        let Some(image) = shot.image.crop(area) else {
+        let Some((area, image)) = overlay::select(&shot) else {
             return;
         };
         let capture = editor::Capture {

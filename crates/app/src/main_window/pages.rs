@@ -30,7 +30,7 @@ const EDGE: f32 = 8.0;
 const HINT_GAP: f32 = 12.0;
 const RADIUS: f32 = 4.0;
 const MIN_WIDTH: f32 = 320.0;
-const CARDS: usize = 5;
+const CARDS: usize = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Page {
@@ -44,6 +44,7 @@ pub enum Part {
     OpenSettings,
     Back,
     Shortcut,
+    ScreenKeys,
     OpenEditor,
     Sound,
     Folder,
@@ -75,6 +76,7 @@ pub struct Pages {
     shortcut: Shortcut,
     /// In `Prompt`'s order.
     prompts: [Label; 3],
+    screen_keys: Toggle,
     open_editor: Toggle,
     sound: Toggle,
     folder_title: Label,
@@ -111,6 +113,7 @@ impl Pages {
                 fonts.label(text.add_modifier)?,
                 fonts.label(text.in_use)?,
             ],
+            screen_keys: Toggle::new(fonts.label(text.screen_keys)?, settings.screen_keys),
             open_editor: Toggle::new(fonts.label(text.open_editor)?, settings.open_editor),
             sound: Toggle::new(fonts.label(text.sound)?, settings.sound),
             folder_title: fonts.label(text.folder)?,
@@ -129,6 +132,7 @@ impl Pages {
     pub fn min_size(&self) -> (f32, f32) {
         let rows = [
             self.shortcut_title.width + PADDING + self.shortcut.width(),
+            self.screen_keys.width(),
             self.open_editor.width(),
             self.sound.width(),
             self.folder_title.width + PADDING + self.change_folder.width(),
@@ -152,10 +156,11 @@ impl Pages {
         self.open_settings.place(left, EDGE);
 
         self.back.place(EDGE, EDGE);
-        let [shortcut, open_editor, sound, folder, startup] = self.cards();
+        let [shortcut, screen_keys, open_editor, sound, folder, startup] = self.cards();
         self.shortcut
             .place(shortcut.right() - PADDING, shortcut.middle());
         for (toggle, card) in [
+            (&mut self.screen_keys, screen_keys),
             (&mut self.open_editor, open_editor),
             (&mut self.sound, sound),
             (&mut self.startup, startup),
@@ -192,6 +197,7 @@ impl Pages {
             Part::OpenSettings => &mut self.open_settings,
             Part::Back => &mut self.back,
             Part::Shortcut => &mut self.shortcut,
+            Part::ScreenKeys => &mut self.screen_keys,
             Part::OpenEditor => &mut self.open_editor,
             Part::Sound => &mut self.sound,
             Part::Folder => &mut self.change_folder,
@@ -205,6 +211,7 @@ impl Pages {
             Part::OpenSettings => &self.open_settings,
             Part::Back => &self.back,
             Part::Shortcut => &self.shortcut,
+            Part::ScreenKeys => &self.screen_keys,
             Part::OpenEditor => &self.open_editor,
             Part::Sound => &self.sound,
             Part::Folder => &self.change_folder,
@@ -237,7 +244,7 @@ impl Pages {
                     painter.fill(card, RADIUS, palette.card);
                     painter.stroke(card, RADIUS, painter.border(), palette.control_stroke);
                 }
-                let [shortcut, _, _, folder, _] = cards;
+                let [shortcut, _, _, _, folder, _] = cards;
                 let left = shortcut.left + PADDING;
                 painter.text(&self.shortcut_title, left, shortcut.middle(), palette.text);
                 // The folder's title and path, one above the other.
@@ -313,6 +320,10 @@ impl Pages {
         self.trim_folder()
     }
 
+    pub fn screen_keys(&self) -> bool {
+        self.screen_keys.is_on()
+    }
+
     pub fn open_editor(&self) -> bool {
         self.open_editor.is_on()
     }
@@ -345,7 +356,7 @@ impl Pages {
 
     /// Fits the folder's path between its card's edge and the Change button.
     fn trim_folder(&mut self) -> Result<()> {
-        let left = self.cards()[3].left + PADDING;
+        let left = self.cards()[4].left + PADDING;
         let width = self.change_folder.area().left - PADDING - left;
         let path = self.folder.to_string_lossy();
         self.folder_path = self.fonts.path(&path, width)?;
@@ -367,6 +378,7 @@ fn parts(page: Page) -> &'static [Part] {
         Page::Settings => &[
             Part::Back,
             Part::Shortcut,
+            Part::ScreenKeys,
             Part::OpenEditor,
             Part::Sound,
             Part::Folder,

@@ -13,6 +13,9 @@ const KEY: PCWSTR = w!(r"Software\Kata");
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub hotkey: Hotkey,
+    /// Whether Print Screen and Win + Shift + S start Kata's captures instead of
+    /// Windows' own.
+    pub screen_keys: bool,
     /// Whether each new capture opens in the editor.
     pub open_editor: bool,
     /// Whether a sound confirms each capture.
@@ -27,6 +30,7 @@ impl Settings {
             hotkey: registry::read_dword(KEY, w!("Hotkey"))
                 .and_then(Hotkey::decode)
                 .unwrap_or_default(),
+            screen_keys: read(w!("ScreenKeys"), 0) != 0,
             open_editor: read(w!("OpenEditor"), 1) != 0,
             sound: read(w!("Sound"), 1) != 0,
             folder: registry::read_string(KEY, w!("Folder")).map(PathBuf::from),
@@ -35,6 +39,7 @@ impl Settings {
 
     pub fn save(&self) {
         registry::write_dword(KEY, w!("Hotkey"), self.hotkey.encode());
+        write(w!("ScreenKeys"), usize::from(self.screen_keys));
         write(w!("OpenEditor"), usize::from(self.open_editor));
         write(w!("Sound"), usize::from(self.sound));
         match &self.folder {

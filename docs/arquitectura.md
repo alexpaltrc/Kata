@@ -26,6 +26,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 - La pantalla se congela al iniciar el recorte. Todos los monitores, con su escala propia.
 - **Hoy:** GDI copia todo el escritorio de una vez. En el mismo instante se anotan las ventanas y monitores, para resaltarlos al pasar el cursor.
+- **Ventanas tapadas:** de cada ventana se anota también si otra de encima la toca. Si sí, al pasar el cursor un hilo aparte le pide a Windows la ventana entera con `PrintWindow` (`PW_RENDERFULLCONTENT`, el mismo que usa Chromium), en 13–23 ms, y la pinta sobre lo congelado dentro de sus esquinas redondeadas. Se guarda por si se hace clic; si aún no llegó, el clic la espera hasta 500 ms. Si la ventana se movió, no responde o devuelve todo negro (juegos, video protegido), se queda lo congelado. Las ventanas sin nada encima no cambian: GDI basta.
 - **HDR:** con HDR encendido, Windows ya le entrega a GDI la pantalla en colores estándar. Ventanas, páginas y texto salen idénticos a como se ven (medido, píxel a píxel). Solo un video en reproducción puede salir más claro. Capturarlo en HDR con Desktop Duplication no compensa: cuesta unos 150 ms y, con la pantalla quieta, el primer cuadro llega en negro.
 - **Memoria:** la selección dibuja con su propia fábrica de Direct2D. Al cerrarse, Windows libera sus búferes del tamaño de la pantalla en unos segundos; con la fábrica compartida, se quedaban retenidos.
 
@@ -47,6 +48,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 - **Dónde viven:** en el registro del usuario, `HKCU\Software\Kata`, junto con lo que recuerda el editor. Sin archivos de configuración. Instalada, Windows le da a cada paquete su propia copia, así que Kata y Kata Dev no se mezclan.
 - **Atajo:** `RegisterHotKey`. Mientras se elige uno nuevo, el actual se suelta, para que pulsarlo no inicie una captura.
+- **Impr Pant y Win + Mayús + S:** Windows se reserva `Alt` y `Win + Impr Pant`, y `Win + Mayús + S` es suyo, así que `RegisterHotKey` no basta. Con el ajuste encendido, un gancho de teclado de bajo nivel (`crates/app/src/screen_keys.rs`), en un hilo propio, se queda con esas teclas antes que Windows; cualquier otra tecla pasa al instante. Si `Win` o `Alt` siguen pulsadas, toca una tecla sin uso para que al soltarlas no se abra Inicio ni un menú. Se descartó declarar el protocolo `ms-screenclip:`: obligaba a elegir Kata en Configuración, no cubría `Alt` ni `Win + Impr Pant` y abría un segundo `Kata.exe` en cada captura.
 - **Iniciar con Windows:** la `StartupTask` del paquete. Windows abre Kata sin argumentos; Kata pregunta cómo la abrieron y, si fue al iniciar sesión, espera en la bandeja sin ventanas. Si se apaga en los ajustes de Windows, solo se vuelve a encender ahí. Sin instalar, Kata no inicia con Windows.
 - **Una sola instancia:** abrir Kata otra vez le pide a la que ya corre que muestre su ventana.
 

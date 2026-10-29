@@ -409,6 +409,12 @@ impl Main {
                     sound::play();
                 }
             }
+            Part::ScreenKeys => {
+                self.settings.screen_keys = self.pages.screen_keys();
+                self.settings.save();
+                let changed = crate::KEYS_CHANGED;
+                let _ = unsafe { PostMessageW(Some(self.owner), changed, WPARAM(0), LPARAM(0)) };
+            }
             Part::Folder => self.change_folder(),
             Part::Startup => {
                 let on = startup::set(self.pages.startup());
@@ -435,7 +441,7 @@ impl Main {
                         report("window", &error);
                     }
                     self.pages.stop_listening();
-                    let changed = crate::HOTKEY_CHANGED;
+                    let changed = crate::KEYS_CHANGED;
                     let _ =
                         unsafe { PostMessageW(Some(self.owner), changed, WPARAM(0), LPARAM(0)) };
                 }
