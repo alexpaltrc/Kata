@@ -13,6 +13,15 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 
 **Descartado:** Tauri u otras opciones basadas en WebView (más pesadas y no nativas) y Slint (otra capa entre Kata y Windows).
 
+## Accesibilidad
+
+Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da gratis a los controles estándar:
+
+- **Movimiento:** con «Efectos de animación» apagado en Windows, cada animación salta a su final. Se lee en cada animación, así que el cambio se nota al momento.
+- **Teclado:** Tab y Mayús + Tab recorren los controles, marcados con el anillo de foco de Fluent. Enter o Espacio los pulsan; las flechas, Inicio y Fin mueven sliders y selectores.
+- **Contraste alto:** con un tema de contraste, los colores salen del tema y la ventana deja Mica por un fondo sólido.
+- **Narrador:** cada ventana describe sus controles a Windows con UI Automation (`crates/ui/src/access.rs`): nombre, tipo, estado y lugar. Lo que pide Narrador (pulsar, elegir, cambiar un nivel) llega a la ventana como una acción de teclado. Solo trabaja si un lector de pantalla lo pide; si no, no cuesta nada.
+
 ## Captura
 
 - La pantalla se congela al iniciar el recorte. Todos los monitores, con su escala propia.

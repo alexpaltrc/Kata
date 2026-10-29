@@ -5,8 +5,9 @@ use std::time::Instant;
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
-use super::{Control, HEIGHT};
+use super::{Action, Control, HEIGHT};
 use crate::{
+    access::{Element, Role},
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
     theme::faded,
@@ -17,6 +18,8 @@ const RADIUS: f32 = 4.0;
 
 pub struct Button {
     label: Label,
+    /// What assistive technologies call it: its label, unless that needs context.
+    name: String,
     accent: bool,
     left: f32,
     top: f32,
@@ -31,6 +34,7 @@ impl Button {
     /// An accent button.
     pub fn new(label: Label, shown: bool) -> Self {
         Self {
+            name: label.text.clone(),
             label,
             accent: true,
             left: 0.0,
@@ -46,6 +50,15 @@ impl Button {
         Self {
             accent: false,
             ..Self::new(label, true)
+        }
+    }
+
+    /// Has assistive technologies call it `name`, for a label that says too little
+    /// on its own.
+    pub fn named(self, name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            ..self
         }
     }
 
@@ -138,6 +151,31 @@ impl Control for Button {
 
     fn cancel(&mut self) {
         self.pressed = false;
+    }
+
+    fn is_focusable(&self) -> bool {
+        self.presence.target() > 0.0 && self.enabled
+    }
+
+    fn focus_area(&self) -> (Area, f32) {
+        (self.area(), RADIUS)
+    }
+
+    fn act(&mut self, action: Action) -> bool {
+        action == Action::Activate && self.is_focusable()
+    }
+
+    fn describe(&self, control: usize, elements: &mut Vec<Element>) {
+        if self.presence.target() > 0.0 {
+            elements.push(Element {
+                control,
+                name: self.name.clone(),
+                role: Role::Button {
+                    enabled: self.enabled,
+                },
+                area: self.area(),
+            });
+        }
     }
 
     fn draw(&self, painter: &Painter, now: Instant) {

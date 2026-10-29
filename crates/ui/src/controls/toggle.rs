@@ -2,8 +2,9 @@
 
 use std::time::Instant;
 
-use super::{Control, HEIGHT};
+use super::{Action, Control, HEIGHT};
 use crate::{
+    access::{Element, Role},
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
     theme::{faded, mix},
@@ -78,6 +79,17 @@ impl Toggle {
         Area::new(self.left, self.top, self.size.0, self.size.1)
     }
 
+    /// The switch, on the right, centered on `middle`.
+    fn switch(&self, middle: f32) -> Area {
+        let (width, height) = SWITCH;
+        Area::new(
+            self.area().right() - width,
+            middle - height / 2.0,
+            width,
+            height,
+        )
+    }
+
     fn update_knob(&mut self) {
         let radius = if self.hovered || self.pressed {
             KNOB_HOVERED
@@ -125,6 +137,26 @@ impl Control for Toggle {
         self.update_knob();
     }
 
+    fn focus_area(&self) -> (Area, f32) {
+        (self.switch(self.area().middle()), SWITCH.1 / 2.0)
+    }
+
+    fn act(&mut self, action: Action) -> bool {
+        if action == Action::Activate {
+            self.set(!self.on);
+        }
+        action == Action::Activate
+    }
+
+    fn describe(&self, control: usize, elements: &mut Vec<Element>) {
+        elements.push(Element {
+            control,
+            name: self.label.text.clone(),
+            role: Role::Toggle { on: self.on },
+            area: self.area(),
+        });
+    }
+
     fn draw(&self, painter: &Painter, now: Instant) {
         let palette = painter.palette;
         let area = self.area();
@@ -133,7 +165,7 @@ impl Control for Toggle {
 
         let (width, height) = SWITCH;
         let radius = height / 2.0;
-        let switch = Area::new(area.right() - width, middle - radius, width, height);
+        let switch = self.switch(middle);
         let on = self.state.value(now);
         let accent = if self.hovered {
             faded(palette.accent, 0.9)

@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use kata_editor::{Shape, ZOOMS};
 use kata_ui::{
-    controls::{Button, Control, HEIGHT, SelectorBar, Slider, Toggle},
+    access::Element,
+    controls::{self, Button, Control, HEIGHT, SelectorBar, Slider, Toggle},
     paint::{Fonts, Painter, Point},
 };
 use windows::core::Result;
@@ -52,6 +53,8 @@ pub struct Toolbar {
     zoom: Slider,
     save: Button,
     autosave: Toggle,
+    /// Which of the parts on show has the keyboard focus, by its place among them.
+    focus: Option<usize>,
 }
 
 impl Toolbar {
@@ -72,10 +75,11 @@ impl Toolbar {
         save.enable(false);
         Ok(Self {
             tools: SelectorBar::new(tools, settings.tool),
-            blur: Slider::new(blur_levels, settings.blur_level),
-            zoom: Slider::new(zooms, settings.zoom_level),
+            blur: Slider::new(strings.blur, blur_levels, settings.blur_level),
+            zoom: Slider::new(strings.focus, zooms, settings.zoom_level),
             save,
             autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
+            focus: None,
         })
     }
 
@@ -122,6 +126,23 @@ impl Toolbar {
             .find(|&part| self.get(part).contains(point))
     }
 
+    /// The controls on show, as assistive technologies know them, each numbered as
+    /// its part.
+    pub fn describe(&self) -> Vec<Element> {
+        let mut elements = Vec::new();
+        for part in self.parts() {
+            self.get(part).describe(part as usize, &mut elements);
+        }
+        elements
+    }
+
+    /// The part on show with the number `describe` gave it.
+    pub fn part(&self, number: usize) -> Option<Part> {
+        self.parts()
+            .into_iter()
+            .find(|&part| part as usize == number)
+    }
+
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
         match part {
             Part::Tools => &mut self.tools,
@@ -147,9 +168,30 @@ impl Toolbar {
         changed
     }
 
+    /// Moves the keyboard focus to the next control, or the previous one if `back`.
+    pub fn tab(&mut self, back: bool) {
+        let parts = self.parts();
+        let focusable = |index: usize| self.get(parts[index]).is_focusable();
+        self.focus = controls::tab(parts.len(), self.focus, back, focusable);
+    }
+
+    /// The control with the keyboard focus.
+    pub fn focused(&self) -> Option<Part> {
+        let part = self.parts()[self.focus?];
+        self.get(part).is_focusable().then_some(part)
+    }
+
+    pub fn unfocus(&mut self) {
+        self.focus = None;
+    }
+
     pub fn draw(&self, painter: &Painter, now: Instant) {
         for part in self.parts() {
             self.get(part).draw(painter, now);
+        }
+        if let Some(part) = self.focused() {
+            let (area, radius) = self.get(part).focus_area();
+            painter.focus(area, radius);
         }
     }
 

@@ -4,8 +4,8 @@ use windows::{
     Win32::{
         Foundation::HWND,
         UI::Input::KeyboardAndMouse::{
-            GetKeyNameTextW, GetKeyState, HOT_KEY_MODIFIERS, MAPVK_VK_TO_CHAR, MAPVK_VK_TO_VSC_EX,
-            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, MapVirtualKeyW, RegisterHotKey,
+            GetKeyNameTextW, HOT_KEY_MODIFIERS, MAPVK_VK_TO_CHAR, MAPVK_VK_TO_VSC_EX, MOD_ALT,
+            MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, MapVirtualKeyW, RegisterHotKey,
             UnregisterHotKey, VIRTUAL_KEY, VK_CONTROL, VK_F1, VK_F24, VK_LCONTROL, VK_LMENU,
             VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
             VK_SNAPSHOT,
@@ -13,6 +13,8 @@ use windows::{
     },
     core::Result,
 };
+
+use kata_ui::window::held;
 
 use crate::{channel, strings::strings};
 
@@ -50,7 +52,6 @@ impl Default for Hotkey {
 impl Hotkey {
     /// The shortcut `key` makes with the modifiers held down along with it.
     pub fn pressed(key: VIRTUAL_KEY) -> Press {
-        let held = |key: VIRTUAL_KEY| unsafe { GetKeyState(i32::from(key.0)) } < 0;
         let flags = [
             (held(VK_CONTROL), MOD_CONTROL),
             (held(VK_MENU), MOD_ALT),

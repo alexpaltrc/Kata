@@ -132,7 +132,7 @@ impl Surface {
         Ok(())
     }
 
-    /// Draws a frame on a transparent background, `scale` pixels to the DIP, and
+    /// Draws a frame on the palette's background, `scale` pixels to the DIP, and
     /// shows it. An error means the graphics device is gone: make a new surface.
     pub fn draw(
         &mut self,
@@ -148,7 +148,7 @@ impl Surface {
         unsafe {
             context.SetTarget(&target);
             context.BeginDraw();
-            context.Clear(None);
+            context.Clear(Some(&palette.background));
             paint(&Painter::new(context, &self.brush, palette, scale));
             let drawn = context.EndDraw(None, None);
             context.SetTarget(None::<&ID2D1Image>);

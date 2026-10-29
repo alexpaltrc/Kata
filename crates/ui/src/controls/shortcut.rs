@@ -3,8 +3,11 @@
 
 use std::time::Instant;
 
-use super::{Control, HEIGHT};
-use crate::paint::{Area, Label, Painter, Point};
+use super::{Action, Control, HEIGHT};
+use crate::{
+    access::{Element, Role},
+    paint::{Area, Label, Painter, Point},
+};
 
 /// Inside a keycap, around its key.
 const PADDING: f32 = 8.0;
@@ -14,6 +17,8 @@ const GAP: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 
 pub struct Shortcut {
+    /// What assistive technologies call it, ahead of its keys.
+    name: String,
     keys: Vec<Label>,
     /// What it says while it waits for a new shortcut.
     prompt: Option<Label>,
@@ -24,8 +29,9 @@ pub struct Shortcut {
 }
 
 impl Shortcut {
-    pub fn new(keys: Vec<Label>) -> Self {
+    pub fn new(name: &str, keys: Vec<Label>) -> Self {
         Self {
+            name: name.to_owned(),
             keys,
             prompt: None,
             right: 0.0,
@@ -107,6 +113,31 @@ impl Control for Shortcut {
 
     fn cancel(&mut self) {
         self.pressed = false;
+    }
+
+    fn focus_area(&self) -> (Area, f32) {
+        (self.area(), RADIUS)
+    }
+
+    fn act(&mut self, action: Action) -> bool {
+        action == Action::Activate && !self.is_listening()
+    }
+
+    /// Its name, then the keys or, while it waits, the prompt.
+    fn describe(&self, control: usize, elements: &mut Vec<Element>) {
+        let shows = match &self.prompt {
+            Some(prompt) => prompt.text.clone(),
+            None => {
+                let keys: Vec<&str> = self.keys.iter().map(|key| key.text.as_str()).collect();
+                keys.join(" + ")
+            }
+        };
+        elements.push(Element {
+            control,
+            name: format!("{}, {shows}", self.name),
+            role: Role::Button { enabled: true },
+            area: self.area(),
+        });
     }
 
     fn draw(&self, painter: &Painter, _now: Instant) {

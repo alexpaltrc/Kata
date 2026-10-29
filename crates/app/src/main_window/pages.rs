@@ -8,7 +8,8 @@ use std::{
 
 use kata_ui::{
     Graphics,
-    controls::{Button, Control, HEIGHT, IconButton, Shortcut, Toggle},
+    access::Element,
+    controls::{self, Button, Control, HEIGHT, IconButton, Shortcut, Toggle},
     paint::{Area, Fonts, Label, Painter, Point},
     window::CAPTION_BUTTONS,
 };
@@ -82,6 +83,8 @@ pub struct Pages {
     folder_path: Label,
     change_folder: Button,
     startup: Toggle,
+    /// Which of the page's parts has the keyboard focus, by its place among them.
+    focus: Option<usize>,
 }
 
 impl Pages {
@@ -97,12 +100,12 @@ impl Pages {
             room: (0.0, 0.0),
             title: fonts.caption(channel::name())?,
             capture: Button::new(fonts.label(text.new_capture)?, true),
-            open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?),
+            open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
             hint: fonts.caption("")?,
-            back: IconButton::new(fonts.icon('\u{E72B}', 12.0)?),
+            back: IconButton::new(fonts.icon('\u{E72B}', 12.0)?, text.back),
             settings_title: fonts.caption(text.settings)?,
             shortcut_title: fonts.label(text.shortcut)?,
-            shortcut: Shortcut::new(Vec::new()),
+            shortcut: Shortcut::new(text.shortcut, Vec::new()),
             prompts: [
                 fonts.label(text.press_shortcut)?,
                 fonts.label(text.add_modifier)?,
@@ -113,8 +116,9 @@ impl Pages {
             folder_title: fonts.label(text.folder)?,
             folder: folder.to_owned(),
             folder_path: fonts.caption("")?,
-            change_folder: Button::standard(fonts.label(text.change)?),
+            change_folder: Button::standard(fonts.label(text.change)?).named(text.change_folder),
             startup: Toggle::new(fonts.label(text.start_with_windows)?, startup),
+            focus: None,
             fonts,
         };
         pages.set_hotkey(settings.hotkey)?;
@@ -170,6 +174,16 @@ impl Pages {
             .iter()
             .copied()
             .find(|&part| self.get(part).contains(point))
+    }
+
+    /// `page`'s controls, as assistive technologies know them, each numbered as
+    /// its part.
+    pub fn describe(&self, page: Page) -> Vec<Element> {
+        let mut elements = Vec::new();
+        for &part in parts(page) {
+            self.get(part).describe(part as usize, &mut elements);
+        }
+        elements
     }
 
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
@@ -238,6 +252,33 @@ impl Pages {
         for &part in parts(page) {
             self.get(part).draw(painter, now);
         }
+        if let Some(part) = self.focused(page) {
+            let (area, radius) = self.get(part).focus_area();
+            painter.focus(area, radius);
+        }
+    }
+
+    /// Moves the keyboard focus to `page`'s next control, or the previous one if
+    /// `back`.
+    pub fn tab(&mut self, page: Page, back: bool) {
+        let parts = parts(page);
+        let focusable = |index: usize| self.get(parts[index]).is_focusable();
+        self.focus = controls::tab(parts.len(), self.focus, back, focusable);
+    }
+
+    /// The control on `page` with the keyboard focus.
+    pub fn focused(&self, page: Page) -> Option<Part> {
+        let &part = parts(page).get(self.focus?)?;
+        self.get(part).is_focusable().then_some(part)
+    }
+
+    pub fn unfocus(&mut self) {
+        self.focus = None;
+    }
+
+    /// Following a change of page, a keyboard focus starts over at the first control.
+    pub fn refocus(&mut self) {
+        self.focus = self.focus.map(|_| 0);
     }
 
     pub fn is_animating(&self, page: Page, now: Instant) -> bool {
@@ -310,6 +351,14 @@ impl Pages {
         self.folder_path = self.fonts.path(&path, width)?;
         Ok(())
     }
+}
+
+/// `page`'s part with the number `describe` gave it.
+pub fn part(page: Page, number: usize) -> Option<Part> {
+    parts(page)
+        .iter()
+        .copied()
+        .find(|&part| part as usize == number)
 }
 
 fn parts(page: Page) -> &'static [Part] {

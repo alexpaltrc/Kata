@@ -2,13 +2,15 @@
 
 use std::time::Instant;
 
-use super::Control;
+use super::{Action, Control};
 use crate::{
+    access::{Element, Role},
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
 };
 
 const PADDING: f32 = 12.0;
+const RADIUS: f32 = 4.0;
 /// The selection pill's size.
 const PILL: (f32, f32) = (16.0, 3.0);
 
@@ -79,6 +81,12 @@ impl SelectorBar {
         item.left - self.left + item.width / 2.0
     }
 
+    /// Where an item's hover shade goes.
+    fn back(&self, index: usize) -> Area {
+        let item = self.item(index);
+        Area::new(item.left, item.top + 4.0, item.width, item.height - 8.0)
+    }
+
     fn item_at(&self, point: Point) -> Option<usize> {
         (0..self.items.len()).find(|&index| self.item(index).contains(point))
     }
@@ -113,18 +121,45 @@ impl Control for SelectorBar {
         self.pressed = None;
     }
 
+    /// The selected item: the arrow keys move the selection along with the focus.
+    fn focus_area(&self) -> (Area, f32) {
+        (self.back(self.selected), RADIUS)
+    }
+
+    fn act(&mut self, action: Action) -> bool {
+        match action.step(self.selected, self.items.len()) {
+            Some(index) if index != self.selected => {
+                self.select(index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Each item, on its own.
+    fn describe(&self, control: usize, elements: &mut Vec<Element>) {
+        elements.extend(self.items.iter().enumerate().map(|(index, item)| Element {
+            control,
+            name: item.text.clone(),
+            role: Role::Choice {
+                index,
+                selected: index == self.selected,
+            },
+            area: self.item(index),
+        }));
+    }
+
     fn draw(&self, painter: &Painter, now: Instant) {
         let palette = painter.palette;
         for (index, label) in self.items.iter().enumerate() {
             let item = self.item(index);
             if self.hovered == Some(index) {
-                let back = Area::new(item.left, item.top + 4.0, item.width, item.height - 8.0);
                 let color = if self.pressed == Some(index) {
                     palette.subtle_pressed
                 } else {
                     palette.subtle_hover
                 };
-                painter.fill(back, 4.0, color);
+                painter.fill(self.back(index), RADIUS, color);
             }
             let color = if index == self.selected {
                 palette.text

@@ -4,12 +4,24 @@ use std::{ffi::c_void, mem, ptr};
 
 use windows::{
     Win32::{
-        Graphics::Direct2D::Common::D2D1_COLOR_F,
+        Graphics::{
+            Direct2D::Common::D2D1_COLOR_F,
+            Gdi::{
+                COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW,
+                COLOR_WINDOWTEXT, GetSysColor, SYS_COLOR_INDEX,
+            },
+        },
         System::{
             LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW},
             Registry::{
                 HKEY_CURRENT_USER, REG_ROUTINE_FLAGS, RRF_RT_REG_BINARY, RRF_RT_REG_DWORD,
                 RegGetValueW,
+            },
+        },
+        UI::{
+            Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
+            WindowsAndMessaging::{
+                SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
             },
         },
     },
@@ -63,10 +75,29 @@ pub fn follow_system_theme_in_menus() {
     }
 }
 
-/// Fluent's colors for the apps' current theme.
+/// Whether one of Windows' contrast themes is on.
+pub fn high_contrast() -> bool {
+    let mut contrast = HIGHCONTRASTW {
+        cbSize: mem::size_of::<HIGHCONTRASTW>() as u32,
+        ..Default::default()
+    };
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            contrast.cbSize,
+            Some(ptr::from_mut(&mut contrast).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    read.is_ok() && contrast.dwFlags.contains(HCF_HIGHCONTRASTON)
+}
+
+/// Fluent's colors for the apps' current theme, or the contrast theme's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub light: bool,
+    /// Behind everything: transparent, so Mica shows, unless a contrast theme is on.
+    pub background: D2D1_COLOR_F,
     pub text: D2D1_COLOR_F,
     pub text_secondary: D2D1_COLOR_F,
     /// Behind subtle controls, such as list items, while hovered and pressed.
@@ -89,16 +120,22 @@ pub struct Palette {
     pub on_accent: D2D1_COLOR_F,
     pub accent_disabled: D2D1_COLOR_F,
     pub on_accent_disabled: D2D1_COLOR_F,
+    /// The inner ring of the keyboard focus visual.
+    pub focus_inner: D2D1_COLOR_F,
 }
 
 impl Palette {
     /// Reads the theme and the accent color from the system.
     pub fn current() -> Self {
+        if high_contrast() {
+            return Self::contrast();
+        }
         let light = apps_are_light();
         let accent = accent(light);
         if light {
             Self {
                 light,
+                background: color(0x000000, 0.0),
                 text: color(0x000000, 0.8956),
                 text_secondary: color(0x000000, 0.6063),
                 subtle_hover: color(0x000000, 0.0373),
@@ -114,10 +151,12 @@ impl Palette {
                 on_accent: color(0xFFFFFF, 1.0),
                 accent_disabled: color(0x000000, 0.2169),
                 on_accent_disabled: color(0xFFFFFF, 1.0),
+                focus_inner: color(0xFFFFFF, 0.7),
             }
         } else {
             Self {
                 light,
+                background: color(0x000000, 0.0),
                 text: color(0xFFFFFF, 1.0),
                 text_secondary: color(0xFFFFFF, 0.786),
                 subtle_hover: color(0xFFFFFF, 0.0605),
@@ -133,7 +172,39 @@ impl Palette {
                 on_accent: color(0x000000, 1.0),
                 accent_disabled: color(0xFFFFFF, 0.1581),
                 on_accent_disabled: color(0xFFFFFF, 0.5302),
+                focus_inner: color(0x000000, 0.7),
             }
+        }
+    }
+
+    /// The contrast theme's system colors, solid: every line and surface stands
+    /// out, hovering shades nothing, and the accent becomes the highlight.
+    fn contrast() -> Self {
+        let system = |index: SYS_COLOR_INDEX| {
+            let [r, g, b, _] = unsafe { GetSysColor(index) }.to_le_bytes();
+            color(u32::from_be_bytes([0, r, g, b]), 1.0)
+        };
+        let (window, text) = (system(COLOR_WINDOW), system(COLOR_WINDOWTEXT));
+        let none = faded(window, 0.0);
+        Self {
+            light: 0.2126 * window.r + 0.7152 * window.g + 0.0722 * window.b > 0.5,
+            background: window,
+            text,
+            text_secondary: text,
+            subtle_hover: none,
+            subtle_pressed: none,
+            control: window,
+            control_stroke: text,
+            card_stroke: text,
+            strong: text,
+            alt: window,
+            card: window,
+            button: window,
+            accent: system(COLOR_HIGHLIGHT),
+            on_accent: system(COLOR_HIGHLIGHTTEXT),
+            accent_disabled: system(COLOR_GRAYTEXT),
+            on_accent_disabled: window,
+            focus_inner: window,
         }
     }
 }

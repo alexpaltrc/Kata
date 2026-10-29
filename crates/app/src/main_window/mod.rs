@@ -12,6 +12,8 @@ use std::{
 
 use kata_ui::{
     Graphics, Surface,
+    access::{self, Access},
+    controls::Action,
     motion::{self, Animation, Easing},
     paint::Point,
     theme::Palette,
@@ -25,7 +27,7 @@ use windows::{
         UI::{
             Controls::WM_MOUSELEAVE,
             Input::KeyboardAndMouse::{
-                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_ESCAPE, VK_SNAPSHOT,
+                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_ESCAPE, VK_SHIFT, VK_SNAPSHOT, VK_TAB,
             },
             Shell::{
                 FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem,
@@ -36,9 +38,9 @@ use windows::{
                 IsIconic, PostMessageW, SIZE_MINIMIZED, SW_RESTORE, SW_SHOW, SetForegroundWindow,
                 SetWindowLongPtrW, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CAPTURECHANGED,
                 WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
-                WM_GETMINMAXINFO, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-                WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCHAR,
-                WM_SYSKEYDOWN, WM_SYSKEYUP,
+                WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+                WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE,
+                WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
             },
         },
     },
@@ -133,6 +135,7 @@ unsafe fn create(graphics: &Graphics, owner: HWND, page: Page) -> Result<HWND> {
             direction: 1.0,
             pressed: None,
             tracking: false,
+            access: Access::new(hwnd),
         };
         // The first frame is ready before the window shows.
         main.layout();
@@ -201,6 +204,7 @@ struct Main {
     pressed: Option<Part>,
     /// Whether Windows will say when the pointer leaves.
     tracking: bool,
+    access: Access,
 }
 
 impl Main {
@@ -258,9 +262,26 @@ impl Main {
             }
             GO if wparam.0 == Page::Settings as usize => self.go(Page::Settings),
             GO => self.go(Page::Home),
+            WM_GETOBJECT => {
+                let result = self.access.answer(self.hwnd, wparam, lparam)?;
+                self.update_access();
+                return Some(result);
+            }
+            access::ACT => {
+                if let Some(part) = pages::part(self.page, wparam.0)
+                    && self.pressed.is_none()
+                {
+                    if part != Part::Shortcut {
+                        self.stop_listening();
+                    }
+                    self.act(part, access::action(lparam));
+                    self.invalidate();
+                }
+            }
             // The shortcut works again once the window is gone.
             WM_DESTROY => {
                 self.stop_listening();
+                self.access.close(self.hwnd);
                 return None;
             }
             _ => return None,
@@ -299,6 +320,7 @@ impl Main {
     }
 
     fn press(&mut self, point: Point) {
+        self.pages.unfocus();
         let part = self.pages.part_at(self.page, point);
         // A click anywhere else gives up on a new shortcut.
         if part != Some(Part::Shortcut) {
@@ -334,18 +356,34 @@ impl Main {
 
     /// Returns whether `key` did something.
     fn key(&mut self, key: VIRTUAL_KEY) -> bool {
-        if key != VK_ESCAPE {
-            return false;
-        }
         if self.pressed.is_some() {
+            if key != VK_ESCAPE {
+                return false;
+            }
             self.cancel();
             let _ = unsafe { ReleaseCapture() };
-        } else if self.page == Page::Settings {
+            return true;
+        }
+        let focused = self.pages.focused(self.page);
+        if key == VK_TAB {
+            self.pages.tab(self.page, window::held(VK_SHIFT));
+        } else if let Some((part, action)) = focused.zip(Action::of(key)) {
+            self.act(part, action);
+        } else if key == VK_ESCAPE && self.page == Page::Settings {
             self.go(Page::Home);
         } else {
             return false;
         }
+        self.invalidate();
         true
+    }
+
+    /// Carries out `action`, asked by the keyboard or an assistive technology, on
+    /// `part`.
+    fn act(&mut self, part: Part, action: Action) {
+        if self.pages.control(part).act(action) {
+            self.activated(part);
+        }
     }
 
     /// A control was clicked.
@@ -438,6 +476,7 @@ impl Main {
         }
         self.stop_listening();
         self.pages.hover(self.page, None);
+        self.pages.refocus();
         self.direction = if page > self.page { 1.0 } else { -1.0 };
         self.page = page;
         self.transition = Animation::new(0.0, 1.0, motion::NORMAL, Easing::DECELERATE);
@@ -463,6 +502,16 @@ impl Main {
         }
         if self.transition.is_running(now) || self.pages.is_animating(self.page, now) {
             self.invalidate();
+        }
+        self.update_access();
+    }
+
+    /// Tells assistive technologies, if any follow the window, how its controls are.
+    fn update_access(&mut self) {
+        if self.access.is_wanted() {
+            let elements = self.pages.describe(self.page);
+            let focus = self.pages.focused(self.page).map(|part| part as usize);
+            self.access.update(elements, focus, self.scale);
         }
     }
 

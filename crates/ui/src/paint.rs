@@ -206,6 +206,19 @@ impl<'a> Painter<'a> {
         }
     }
 
+    /// Fluent's keyboard focus visual around `area`, whose corners have `radius`: a
+    /// ring in the text color, with a thin one inside that sets it apart from
+    /// whatever is behind.
+    pub fn focus(&self, area: Area, radius: f32) {
+        const MARGIN: f32 = 3.0;
+        let outer = self.align(area.inflate(MARGIN));
+        let width = self.snap(2.0).max(self.pixel());
+        self.stroke(outer, radius + MARGIN, width, self.palette.text);
+        let inner = outer.inflate(-width);
+        let color = self.palette.focus_inner;
+        self.stroke(inner, radius + MARGIN - width, self.border(), color);
+    }
+
     pub fn circle(&self, center: Point, radius: f32, color: D2D1_COLOR_F) {
         if color.a <= 0.0 {
             return;
@@ -323,7 +336,7 @@ impl Fonts {
             let ellipsis = self.dwrite.CreateEllipsisTrimmingSign(layout)?;
             layout.SetTrimming(&trimming, &ellipsis)?;
         }
-        Label::new(label.layout)
+        Label::new(label.layout, label.text)
     }
 
     /// One of Segoe Fluent Icons' glyphs, `size` DIPs tall.
@@ -333,12 +346,12 @@ impl Fonts {
     }
 
     fn layout(&self, text: &str, format: &IDWriteTextFormat, width: f32) -> Result<Label> {
-        let text: Vec<u16> = text.encode_utf16().collect();
+        let wide: Vec<u16> = text.encode_utf16().collect();
         let layout = unsafe {
             self.dwrite
-                .CreateTextLayout(&text, format, width, f32::MAX)?
+                .CreateTextLayout(&wide, format, width, f32::MAX)?
         };
-        Label::new(layout)
+        Label::new(layout, text.to_owned())
     }
 }
 
@@ -360,16 +373,19 @@ fn format(dwrite: &IDWriteFactory, family: PCWSTR, size: f32) -> Result<IDWriteT
 #[derive(Clone)]
 pub struct Label {
     layout: IDWriteTextLayout,
+    /// What it says, for assistive technologies such as Narrator.
+    pub text: String,
     pub width: f32,
     pub height: f32,
 }
 
 impl Label {
-    fn new(layout: IDWriteTextLayout) -> Result<Self> {
+    fn new(layout: IDWriteTextLayout, text: String) -> Result<Self> {
         let mut metrics = DWRITE_TEXT_METRICS::default();
         unsafe { layout.GetMetrics(&mut metrics)? };
         Ok(Self {
             layout,
+            text,
             width: metrics.width,
             height: metrics.height,
         })

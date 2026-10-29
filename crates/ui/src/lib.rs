@@ -1,5 +1,6 @@
 //! Fluent controls, motion and theming built on Direct2D and DirectComposition.
 
+pub mod access;
 pub mod controls;
 mod graphics;
 pub mod icon;

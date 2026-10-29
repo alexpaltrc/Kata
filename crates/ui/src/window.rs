@@ -20,7 +20,9 @@ use windows::{
                 AdjustWindowRectExForDpi, GetDpiForMonitor, GetDpiForWindow,
                 GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
             },
-            Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent},
+            Input::KeyboardAndMouse::{
+                GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
+            },
             WindowsAndMessaging::{
                 CREATESTRUCTW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetClientRect,
                 GetWindowLongPtrW, GetWindowRect, HTCLIENT, HTTOP, IDC_ARROW, IsZoomed,
@@ -344,6 +346,11 @@ pub fn track_mouse_leave(hwnd: HWND) -> bool {
         dwHoverTime: 0,
     };
     unsafe { TrackMouseEvent(&mut track) }.is_ok()
+}
+
+/// Whether `key` was down when the message being handled was sent.
+pub fn held(key: VIRTUAL_KEY) -> bool {
+    unsafe { GetKeyState(i32::from(key.0)) < 0 }
 }
 
 /// How thick the resize border is, in pixels.

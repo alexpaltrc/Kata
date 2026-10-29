@@ -2,8 +2,9 @@
 
 use std::time::Instant;
 
-use super::{Control, HEIGHT};
+use super::{Action, Control, HEIGHT};
 use crate::{
+    access::{Element, Role},
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
 };
@@ -21,6 +22,8 @@ const DOT_HOVERED: f32 = 7.0;
 const DOT_PRESSED: f32 = 5.0;
 
 pub struct Slider {
+    /// What assistive technologies call it.
+    name: String,
     /// What each step is called.
     names: Vec<Label>,
     value: usize,
@@ -34,9 +37,10 @@ pub struct Slider {
 }
 
 impl Slider {
-    /// A slider with one step per name.
-    pub fn new(names: Vec<Label>, value: usize) -> Self {
+    /// A slider called `name`, with one step per name in `names`.
+    pub fn new(name: &str, names: Vec<Label>, value: usize) -> Self {
         let mut slider = Self {
+            name: name.to_owned(),
             names,
             value,
             left: 0.0,
@@ -143,6 +147,33 @@ impl Control for Slider {
     fn cancel(&mut self) {
         self.pressed = false;
         self.update_dot();
+    }
+
+    fn focus_area(&self) -> (Area, f32) {
+        (self.track(), THUMB)
+    }
+
+    fn act(&mut self, action: Action) -> bool {
+        match action.step(self.value, self.names.len()) {
+            Some(step) if step != self.value => {
+                self.set_value(step);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn describe(&self, control: usize, elements: &mut Vec<Element>) {
+        elements.push(Element {
+            control,
+            name: self.name.clone(),
+            role: Role::Slider {
+                value: self.value,
+                count: self.names.len(),
+                text: self.names[self.value].text.clone(),
+            },
+            area: Area::new(self.left, self.top, self.width(), HEIGHT),
+        });
     }
 
     fn draw(&self, painter: &Painter, now: Instant) {

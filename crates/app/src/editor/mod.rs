@@ -16,6 +16,8 @@ use kata_editor::{
 };
 use kata_ui::{
     Graphics,
+    access::{self, Access},
+    controls::Action,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Point},
     theme::{Palette, faded},
@@ -31,9 +33,8 @@ use windows::{
             Controls::WM_MOUSELEAVE,
             HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
-                GetKeyState, ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_1, VK_2, VK_BACK, VK_C,
-                VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD1, VK_NUMPAD2, VK_S, VK_SHIFT, VK_Y,
-                VK_Z,
+                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_1, VK_2, VK_BACK, VK_C, VK_CONTROL,
+                VK_DELETE, VK_ESCAPE, VK_NUMPAD1, VK_NUMPAD2, VK_S, VK_SHIFT, VK_TAB, VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
@@ -41,8 +42,9 @@ use windows::{
                 PostMessageW, SIZE_MINIMIZED, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor,
                 SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_CAPTURECHANGED, WM_CLOSE,
                 WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
-                WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-                WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE,
+                WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+                WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE,
+                WM_SIZE,
             },
         },
     },
@@ -167,6 +169,7 @@ unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Resul
             tracking: false,
             unpublished: false,
             unsaved: false,
+            access: Access::new(hwnd),
         };
         // The first frame is ready before the window shows.
         editor.layout();
@@ -292,6 +295,7 @@ struct Editor {
     unpublished: bool,
     /// The clipboard has a version the file doesn't.
     unsaved: bool,
+    access: Access,
 }
 
 impl Editor {
@@ -330,11 +334,26 @@ impl Editor {
                 self.follow_theme();
                 return None;
             }
+            WM_GETOBJECT => {
+                let result = self.access.answer(self.hwnd, wparam, lparam)?;
+                self.update_access();
+                return Some(result);
+            }
+            access::ACT => {
+                if let Some(part) = self.toolbar.part(wparam.0)
+                    && self.gesture.is_none()
+                {
+                    self.act(part, access::action(lparam));
+                    self.remember();
+                    self.invalidate();
+                }
+            }
             // The last changes still reach the clipboard.
             WM_DESTROY => {
                 if self.unpublished {
                     self.publish();
                 }
+                self.access.close(self.hwnd);
                 return None;
             }
             _ => return None,
@@ -416,6 +435,7 @@ impl Editor {
     }
 
     fn press(&mut self, point: Point) {
+        self.toolbar.unfocus();
         let bounds = self.bounds();
         let gesture = if let Some(part) = self.toolbar.part_at(point) {
             if self.toolbar.control(part).press(point) {
@@ -574,9 +594,9 @@ impl Editor {
             let _ = unsafe { ReleaseCapture() };
             return true;
         }
-        let held = |key: VIRTUAL_KEY| unsafe { GetKeyState(i32::from(key.0)) } < 0;
-        let (ctrl, shift) = (held(VK_CONTROL), held(VK_SHIFT));
+        let (ctrl, shift) = (window::held(VK_CONTROL), window::held(VK_SHIFT));
         match key {
+            VK_TAB => self.toolbar.tab(shift),
             VK_1 | VK_NUMPAD1 if !ctrl => self.choose_tool(Tool::Blur),
             VK_2 | VK_NUMPAD2 if !ctrl => self.choose_tool(Tool::Focus),
             VK_Z if ctrl && shift => self.step(Document::redo),
@@ -589,7 +609,13 @@ impl Editor {
                 self.render_document();
                 export::copy(self.hwnd, self.renderer.output());
             }
-            _ => return false,
+            // The rest go to the control with the keyboard focus.
+            _ => {
+                let Some((part, action)) = self.toolbar.focused().zip(Action::of(key)) else {
+                    return false;
+                };
+                self.act(part, action);
+            }
         }
         self.remember();
         self.invalidate();
@@ -691,6 +717,15 @@ impl Editor {
         }
     }
 
+    /// Carries out `action`, asked by the keyboard or an assistive technology, on
+    /// `part`.
+    fn act(&mut self, part: Part, action: Action) {
+        if self.toolbar.control(part).act(action) {
+            self.activated(part);
+            self.commit();
+        }
+    }
+
     /// A toolbar control was clicked.
     fn activated(&mut self, part: Part) {
         match part {
@@ -703,7 +738,7 @@ impl Editor {
                     self.save();
                 }
             }
-            Part::Blur | Part::Zoom => {}
+            Part::Blur | Part::Zoom => self.slider_changed(part),
         }
     }
 
@@ -822,6 +857,16 @@ impl Editor {
         }
         if self.unpublished && self.gesture.is_none() && !self.zoom.is_running(now) {
             self.publish();
+        }
+        self.update_access();
+    }
+
+    /// Tells assistive technologies, if any follow the window, how the toolbar is.
+    fn update_access(&mut self) {
+        if self.access.is_wanted() {
+            let focus = self.toolbar.focused().map(|part| part as usize);
+            self.access
+                .update(self.toolbar.describe(), focus, self.scale);
         }
     }
 

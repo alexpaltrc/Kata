@@ -2,6 +2,13 @@
 
 use std::time::{Duration, Instant};
 
+use windows::{
+    Win32::UI::WindowsAndMessaging::{
+        SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    },
+    core::BOOL,
+};
+
 /// For small elements and quick feedback.
 pub const FAST: Duration = Duration::from_millis(167);
 /// For larger surfaces.
@@ -67,8 +74,23 @@ pub struct Animation {
 }
 
 impl Animation {
-    /// Starts now.
+    /// Starts now, or lands on `to` at once if animation effects are off in
+    /// Windows' accessibility settings.
     pub fn new(from: f32, to: f32, duration: Duration, easing: Easing) -> Self {
+        let duration = if animations_enabled() {
+            duration
+        } else {
+            Duration::ZERO
+        };
+        Self::lasting(from, to, duration, easing)
+    }
+
+    /// Already at rest on `value`.
+    pub fn idle(value: f32) -> Self {
+        Self::lasting(value, value, Duration::ZERO, Easing::DECELERATE)
+    }
+
+    fn lasting(from: f32, to: f32, duration: Duration, easing: Easing) -> Self {
         Self {
             from,
             to,
@@ -76,11 +98,6 @@ impl Animation {
             duration,
             easing,
         }
-    }
-
-    /// Already at rest on `value`.
-    pub fn idle(value: f32) -> Self {
-        Self::new(value, value, Duration::ZERO, Easing::DECELERATE)
     }
 
     /// Heads for `to` from wherever this animation is now, unless it already is.
@@ -114,6 +131,21 @@ impl Animation {
     }
 }
 
+/// Whether Windows' "Animation effects" setting is on. It's read each time, so a
+/// change applies at once; reading it takes under a microsecond.
+fn animations_enabled() -> bool {
+    let mut enabled = BOOL(1);
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut enabled).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    read.is_err() || enabled.as_bool()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,7 +170,7 @@ mod tests {
 
     #[test]
     fn animation_runs_then_rests_on_target() {
-        let animation = Animation::new(10.0, 20.0, FAST, Easing::DECELERATE);
+        let animation = Animation::lasting(10.0, 20.0, FAST, Easing::DECELERATE);
         let start = animation.start;
         assert_eq!(animation.value(start), 10.0);
         assert!(animation.is_running(start + FAST / 2));

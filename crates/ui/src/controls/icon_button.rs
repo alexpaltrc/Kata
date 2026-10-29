@@ -2,13 +2,18 @@
 
 use std::time::Instant;
 
-use super::{Control, HEIGHT};
-use crate::paint::{Area, Label, Painter, Point};
+use super::{Action, Control, HEIGHT};
+use crate::{
+    access::{Element, Role},
+    paint::{Area, Label, Painter, Point},
+};
 
 const RADIUS: f32 = 4.0;
 
 pub struct IconButton {
     glyph: Label,
+    /// What assistive technologies call it, as the glyph says nothing to them.
+    name: String,
     left: f32,
     top: f32,
     hovered: bool,
@@ -18,9 +23,10 @@ pub struct IconButton {
 impl IconButton {
     pub const WIDTH: f32 = 40.0;
 
-    pub fn new(glyph: Label) -> Self {
+    pub fn new(glyph: Label, name: &str) -> Self {
         Self {
             glyph,
+            name: name.to_owned(),
             left: 0.0,
             top: 0.0,
             hovered: false,
@@ -61,6 +67,23 @@ impl Control for IconButton {
 
     fn cancel(&mut self) {
         self.pressed = false;
+    }
+
+    fn focus_area(&self) -> (Area, f32) {
+        (self.area(), RADIUS)
+    }
+
+    fn act(&mut self, action: Action) -> bool {
+        action == Action::Activate
+    }
+
+    fn describe(&self, control: usize, elements: &mut Vec<Element>) {
+        elements.push(Element {
+            control,
+            name: self.name.clone(),
+            role: Role::Button { enabled: true },
+            area: self.area(),
+        });
     }
 
     fn draw(&self, painter: &Painter, _now: Instant) {
