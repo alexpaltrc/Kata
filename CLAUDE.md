@@ -50,7 +50,7 @@ Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada ca
 | `crates/editor` | Modelo de edición: herramientas, deshacer, guardado. Rust puro, sin APIs de Windows |
 | `crates/ui` | Controles Fluent, animaciones y tema (Direct2D y DirectComposition) |
 | `packaging/` | Los paquetes MSIX de Kata y Kata Dev |
-| `docs/` | Producto y arquitectura |
+| `docs/` | Producto, arquitectura y la política de privacidad que enlaza la Store |
 
 ## Comandos
 
