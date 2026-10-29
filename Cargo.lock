@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "kata"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kata-capture",
  "kata-editor",
@@ -15,7 +15,7 @@ dependencies = [
 
 [[package]]
 name = "kata-capture"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kata-editor",
  "windows",
@@ -23,11 +23,11 @@ dependencies = [
 
 [[package]]
 name = "kata-editor"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "kata-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "windows",
  "windows-core",
