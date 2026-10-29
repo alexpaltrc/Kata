@@ -52,6 +52,29 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |
 | Iniciar con Windows | Desactivado | Kata arranca en la bandeja, sin abrir ventanas. |
 
+## Próximo
+
+Planeado para la siguiente versión. Al terminarse, cada punto pasa a su sección.
+
+### Ventanas completas, aunque otra las tape
+
+Al pasar el cursor por una ventana tapada en parte, su parte oculta aparece en la selección: la ventana "sube" al frente y se captura completa. También la parte que sale de la pantalla.
+
+- **Cómo:** `PrintWindow` con `PW_RENDERFULLCONTENT` pide la ventana a Windows aunque esté tapada. Medido en la PC de Alex: 13–23 ms por ventana (Apple Music, Claude, ambas tapadas), completas.
+- **Solo cuando hace falta:** si ninguna ventana de encima la toca, todo sigue igual (GDI). Si sí, se pide al pasar el cursor, en un hilo aparte, y se guarda por si se hace clic. Una ventana que no responde no traba a Kata: se queda lo congelado.
+- **Bordes:** sobre el recorte congelado se pinta la ventana dentro de su rectángulo redondeado. Las esquinas quedan como se ven.
+- **Por revisar:** ventanas de administrador, juegos y video protegido. Si `PrintWindow` falla, se prueba Windows.Graphics.Capture (sin borde amarillo: capacidad `graphicsCaptureWithoutBorder`) o se queda lo congelado.
+- **Código:** `crates/capture` guarda el `HWND` de cada ventana; `overlay.rs` muestra y elige la ventana completa; `main.rs` recorta con ella.
+
+### Kata como la app de capturas de Windows
+
+Un ajuste, «Usar Kata con Impr Pant y Win + Mayús + S», hace que esas teclas abran el recorte de Kata en vez de Recortes.
+
+- **Impr Pant:** en Windows 11 26H2 (build 26300, el de Alex) las apps ya pueden tomarla: la directiva «Make Print Screen key yieldable», sin configurar, lo permite. Kata ya acepta Impr Pant como atajo; hay que confirmar que se registra con Recortes instalado.
+- **Win + Mayús + S:** Windows abre el protocolo `ms-screenclip:` (hoy asociado a Recortes). Plan A: Kata lo declara en su manifiesto y el ajuste lleva a Configuración › Aplicaciones predeterminadas, donde el usuario elige Kata (Windows no deja que una app se ponga sola como predeterminada). Plan B, si Windows no deja declarar `ms-screenclip`: un gancho de teclado de bajo nivel que solo mira esa combinación.
+- **Rapidez:** abrir por protocolo arranca un segundo `Kata.exe` que avisa al que ya corre. Se mide contra la meta de 100 ms.
+- **Por decidir con Alex:** si Alt + Impr Pant y Win + Impr Pant también pasan a Kata, y qué hacen.
+
 ## Fuera de alcance por ahora
 
 - **Historial de capturas.** La app no guarda ningún registro de capturas. Se puede evaluar en el futuro.
