@@ -26,7 +26,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 - La pantalla se congela al iniciar el recorte. Todos los monitores, con su escala propia.
 - **Hoy:** GDI copia todo el escritorio de una vez. En el mismo instante se anotan las ventanas y monitores, para resaltarlos al pasar el cursor.
-- **Pendiente (fase 5):** convertir las pantallas HDR a colores estándar, para que la captura se vea igual en cualquier lugar.
+- **HDR:** con HDR encendido, Windows ya le entrega a GDI la pantalla en colores estándar. Ventanas, páginas y texto salen idénticos a como se ven (medido, píxel a píxel). Solo un video en reproducción puede salir más claro. Capturarlo en HDR con Desktop Duplication no compensa: cuesta unos 150 ms y, con la pantalla quieta, el primer cuadro llega en negro.
 - **Memoria:** la selección dibuja con su propia fábrica de Direct2D. Al cerrarse, Windows libera sus búferes del tamaño de la pantalla en unos segundos; con la fábrica compartida, se quedaban retenidos.
 
 ## Editor
