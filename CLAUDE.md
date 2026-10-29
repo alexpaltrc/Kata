@@ -36,6 +36,7 @@ Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada ca
 
 - **Idioma:** código, comentarios y commits en inglés. Documentación en español. Los textos de la app, en español e inglés.
 - **Autoría:** Alex Palacios. Nunca se pone un correo en los archivos del proyecto.
+- **Repositorio público:** a diferencia del estándar, porque aloja la política de privacidad que enlaza la Store. Es solo para Kata.
 - **Licencia:** aún sin definir. No agregar ninguna hasta que Alex lo decida.
 - **Repositorio limpio:** sin archivos sobrantes, carpetas vacías ni código muerto. Cada archivo tiene una razón de existir.
 - **Dependencias:** solo si se justifican. Antes que una crate externa, preferir la API de Windows.
