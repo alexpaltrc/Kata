@@ -26,6 +26,8 @@ propio documento: [compresion.md](compresion.md).
 - **Elegir qué capturar:** la pantalla se congela y se oscurece un poco. Al pasar el cursor se
   ilumina la ventana que hay debajo, o el monitor si está sobre el escritorio; un clic la captura.
   Arrastrar elige cualquier área, y una etiqueta muestra su tamaño en píxeles.
+- **Pantalla completa:** lleva el cursor a cualquier esquina del monitor. Se ilumina el monitor
+  entero, con la barra de tareas, y un clic lo captura.
 - **Cancelar:** `Esc` o clic derecho.
 - **Ventanas tapadas:** si otra ventana tapa una parte, al pasar el cursor aparece completa, y así
   se captura. Lo que queda fuera de la pantalla no se incluye.
@@ -117,6 +119,9 @@ ajustes se quedan en tu equipo. Política completa: [privacidad.md](privacidad.m
 
 **¿Dónde están mis capturas?** En `Imágenes\Kata`, o en la carpeta elegida en Ajustes. El menú de
 la bandeja tiene **Abrir capturas**.
+
+**¿Cómo capturo la pantalla completa?** Durante la captura, lleva el cursor a una esquina del
+monitor y haz clic. Entra todo, también la barra de tareas.
 
 **¿La captura pierde calidad?** No. Se guarda en PNG, sin pérdida: cada píxel queda idéntico.
 

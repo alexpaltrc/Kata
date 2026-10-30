@@ -1,7 +1,8 @@
 //! The selection overlay. It shows the frozen screen and lets the user choose what
 //! to capture: hovering highlights the window or monitor under the pointer, a click
-//! takes it, and dragging selects any area. A window partly covered by others
-//! shows whole while hovered, and is captured whole.
+//! takes it, and dragging selects any area. In a monitor's corners, the whole
+//! monitor is highlighted. A window partly covered by others shows whole while
+//! hovered, and is captured whole.
 
 use std::{
     cell::RefCell,
@@ -12,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kata_capture::{Screenshot, Window};
+use kata_capture::{Monitor, Screenshot, Window};
 use kata_editor::{Image, Rect};
 use kata_ui::{
     Graphics,
@@ -72,6 +73,9 @@ const DRAWN: u32 = WM_APP + 1;
 /// How long a click on a covered window waits for Windows to draw it whole, before
 /// settling for what the frozen screen shows.
 const PATIENCE: Duration = Duration::from_millis(500);
+/// How far into a monitor's corner, at 100 % scale, the pointer selects the whole
+/// monitor.
+const CORNER: f32 = 8.0;
 
 /// Lets the user choose an area of `shot`, in image coordinates, and gives it back
 /// with its pixels. `None` when they cancel.
@@ -498,18 +502,35 @@ impl<'a> Overlay<'a> {
     }
 }
 
-/// What a click at `(x, y)` captures: the window there, with its index, else
-/// its monitor.
+/// What a click at `(x, y)` captures: the whole monitor from its corners, else
+/// the window there, with its index, else its monitor.
 fn target_at(shot: &Screenshot, (x, y): (i32, i32)) -> (Rect, Option<usize>) {
-    if let Some(index) = shot.windows.iter().position(|w| w.rect.contains(x, y)) {
-        return (shot.windows[index].rect, Some(index));
-    }
     let monitor = shot
         .monitors
         .iter()
-        .map(|monitor| monitor.rect)
-        .find(|rect| rect.contains(x, y));
+        .find(|monitor| monitor.rect.contains(x, y));
+    if let Some(monitor) = monitor.filter(|monitor| in_corner(monitor, (x, y))) {
+        return (monitor.rect, None);
+    }
+    if let Some(index) = shot.windows.iter().position(|w| w.rect.contains(x, y)) {
+        return (shot.windows[index].rect, Some(index));
+    }
+    let monitor = monitor.map(|monitor| monitor.rect);
     (monitor.unwrap_or_else(|| shot.image.bounds()), None)
+}
+
+/// Whether `(x, y)` lies in one of `monitor`'s corners, where the screen's edges
+/// stop the pointer, so a flick of the mouse gets there.
+fn in_corner(monitor: &Monitor, (x, y): (i32, i32)) -> bool {
+    let reach = (CORNER * monitor.scale).round() as i32;
+    let Rect {
+        left,
+        top,
+        right,
+        bottom,
+    } = monitor.rect;
+    let near = |at: i32, start: i32, end: i32| at < start + reach || at >= end - reach;
+    near(x, left, right) && near(y, top, bottom)
 }
 
 fn invalidate(hwnd: HWND) {
@@ -836,4 +857,53 @@ fn rect_f(rect: Rect) -> D2D_RECT_F {
 
 const fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r, g, b, a }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corners_reach_grows_with_scale() {
+        // At 150 %, 12 pixels into each corner.
+        let monitor = Monitor {
+            rect: Rect::new(0, 0, 1920, 1080),
+            scale: 1.5,
+        };
+        for corner in [
+            (0, 0),
+            (1919, 0),
+            (0, 1079),
+            (1919, 1079),
+            (11, 11),
+            (1908, 1068),
+        ] {
+            assert!(in_corner(&monitor, corner), "{corner:?}");
+        }
+        for elsewhere in [
+            (12, 0),
+            (0, 12),
+            (960, 0),
+            (0, 540),
+            (960, 540),
+            (1907, 1079),
+        ] {
+            assert!(!in_corner(&monitor, elsewhere), "{elsewhere:?}");
+        }
+    }
+
+    #[test]
+    fn each_monitor_has_its_own_corners() {
+        // A second monitor, to the right of a 1920-pixel one, at 100 %.
+        let monitor = Monitor {
+            rect: Rect::new(1920, 0, 4480, 1440),
+            scale: 1.0,
+        };
+        for corner in [(1920, 0), (1927, 1439), (4479, 7), (4472, 1432)] {
+            assert!(in_corner(&monitor, corner), "{corner:?}");
+        }
+        for elsewhere in [(1928, 0), (1920, 8), (4471, 1439), (3200, 720)] {
+            assert!(!in_corner(&monitor, elsewhere), "{elsewhere:?}");
+        }
+    }
 }
