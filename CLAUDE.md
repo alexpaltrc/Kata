@@ -40,7 +40,7 @@ Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada ca
 - **Licencia:** aún sin definir. No agregar ninguna hasta que Alex lo decida.
 - **Documentación al día:** cada cambio actualiza los documentos de `docs/` que toca. Cada experimento de compresión, funcione o no, se anota en `docs/compresion.md`.
 - **Repositorio limpio:** sin archivos sobrantes, carpetas vacías ni código muerto. Cada archivo tiene una razón de existir.
-- **Dependencias:** solo si se justifican. Antes que una crate externa, preferir la API de Windows.
+- **Todo es nuestro:** nada de librerías ni código de terceros. Todo se escribe desde cero, a partir de las especificaciones públicas. La API de Windows, mediante las crates oficiales `windows` de Microsoft, sí se usa.
 - **Rendimiento:** se mide, no se supone.
 
 ## Estructura
