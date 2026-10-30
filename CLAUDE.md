@@ -2,7 +2,7 @@
 
 App de Windows 11, escrita en Rust, para tomar capturas de pantalla destinadas a manuales, guías e instructivos, y editarlas con dos herramientas: **Desenfocar** y **Foco**. Se distribuye como MSIX en la Microsoft Store.
 
-Detalle del producto: [docs/producto.md](docs/producto.md). Decisiones técnicas: [docs/arquitectura.md](docs/arquitectura.md).
+Detalle del producto: [docs/producto.md](docs/producto.md). Decisiones técnicas: [docs/arquitectura.md](docs/arquitectura.md). Guía para quien la usa: [docs/guia.md](docs/guia.md). La compresión PNG propia: [docs/compresion.md](docs/compresion.md).
 
 Sigue siempre el estándar personal de Alex (skill `alex-vibecode`), en cada conversación, en la PC y en la nube, aunque nadie lo mencione. Manda su versión más reciente. La nube no ve ese skill, así que lo esencial va aquí.
 
@@ -38,6 +38,7 @@ Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada ca
 - **Autoría:** Alex Palacios. Nunca se pone un correo en los archivos del proyecto.
 - **Repositorio público:** a diferencia del estándar, porque aloja la política de privacidad que enlaza la Store. Es solo para Kata.
 - **Licencia:** aún sin definir. No agregar ninguna hasta que Alex lo decida.
+- **Documentación al día:** cada cambio actualiza los documentos de `docs/` que toca. Cada experimento de compresión, funcione o no, se anota en `docs/compresion.md`.
 - **Repositorio limpio:** sin archivos sobrantes, carpetas vacías ni código muerto. Cada archivo tiene una razón de existir.
 - **Dependencias:** solo si se justifican. Antes que una crate externa, preferir la API de Windows.
 - **Rendimiento:** se mide, no se supone.
@@ -51,7 +52,7 @@ Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada ca
 | `crates/editor` | Modelo de edición: herramientas, deshacer, guardado. Rust puro, sin APIs de Windows |
 | `crates/ui` | Controles Fluent, animaciones y tema (Direct2D y DirectComposition) |
 | `packaging/` | Los paquetes MSIX de Kata y Kata Dev |
-| `docs/` | Producto, arquitectura y la política de privacidad que enlaza la Store |
+| `docs/` | Producto, arquitectura, guía, compresión y la política de privacidad que enlaza la Store |
 
 ## Comandos
 
