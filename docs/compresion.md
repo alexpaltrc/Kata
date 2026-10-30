@@ -1,8 +1,9 @@
 # La compresión PNG de Kata
 
-Kata guarda cada captura como PNG con un compresor propio, escrito desde cero. Comparado con el
-que trae Windows, los archivos pesan **18 % menos de media** (en el peor caso, prácticamente lo
-mismo) y **sin cambiar un solo píxel**.
+Kata guarda cada captura como PNG con un compresor propio, escrito desde cero, **sin cambiar un
+solo píxel**. Frente al que trae Windows, en nuestro banco de 19 capturas los archivos pesan **18 %
+menos de media**. En el uso diario se gana menos: entre 5 y 8 % en ventanas, y con un fondo de
+pantalla que es una foto, 0,5 % más. El plan para ir mucho más lejos está al final.
 
 Este documento cuenta por qué lo hicimos, cómo funciona, qué probamos (también lo que no
 funcionó) y qué decidimos, con los números de cada experimento.
@@ -79,6 +80,18 @@ Medido con 19 capturas reales: ventanas, páginas, capturas de la Store y una fo
 ahorro sobre el peso total de todas juntas. La media es la que importa, porque cuenta lo que cada
 persona ve en cada captura. El total lo dominan dos fotos grandes y ruidosas que casi no se
 pueden comprimir, así que es mucho menor: 5,6 %.
+
+**En el uso diario.** Alex tomó las mismas capturas con Kata, que aún usaba el codificador de
+Windows, y con Kata Dev. Comprimiendo los mismos píxeles con los dos:
+
+| Captura | Ahorro frente a Windows |
+|---|---|
+| Pantalla completa con una ventana (2560×1440) | 8 % |
+| Recorte pequeño (680×100) | 5 % |
+| Pantalla completa del fondo de pantalla, una foto | −0,5 % (un poco más grande) |
+
+Menos que en el banco, que tenía más capturas de pocos colores. Y con fotos, nuestro método pierde
+por poco. De ahí el plan del final.
 
 ## Bitácora de experimentos
 
@@ -192,18 +205,77 @@ filas, una tabla de 65 536 entradas guarda en qué fila se vio cada par.
 [`crates/editor/src/deflate.rs`](../crates/editor/src/deflate.rs). Unas 900 líneas de Rust puro,
 con pruebas, sin ninguna dependencia.
 
-## Ideas por explorar
+## Plan para ir a fondo (pendiente)
 
-Lo que aún no probamos y podría ahorrar más:
+Hasta ahora fuimos prudentes: técnicas clásicas, bien medidas. Lo siguiente es más atrevido y
+experimental.
 
-- **Ordenar la paleta** por cuánto se usa cada color o por qué colores van juntos, para que los
-  índices formen patrones más repetidos.
-- **Cortar los bloques donde cambia la imagen**, en vez de cada 32 768 símbolos, para que cada uno
-  tenga códigos hechos a su medida.
-- **Elegir las repeticiones por su costo real en bits**, en vez de quedarse con la más larga.
-- **Usar varios núcleos** del procesador: comprimir franjas de la imagen a la vez.
-- **Buscar arriba primero.** En una captura, lo que más se repite suele estar justo encima, a una
-  fila de distancia.
+**Metas:**
+
+- **Nunca más grande que Windows**, en ninguna captura, fotos incluidas.
+- **Ganar de verdad en el día a día:** más de 15 % en ventanas y páginas, no solo en el banco.
+- **Sin hacer esperar:** todo sigue en segundo plano, con la captura ya en el portapapeles.
+
+**Lo que no se puede cambiar.** El archivo sigue siendo un PNG normal. Eso fija las herramientas:
+cinco filtros por fila y DEFLATE, que solo recuerda 32 KB hacia atrás (en una captura de 2560 px de
+ancho, unas 4 filas). Lo que sí decidimos: el filtro de cada fila, cómo se describen las
+repeticiones, dónde empieza cada bloque y cómo se guardan los colores. Con fotos, el margen es
+pequeño para cualquier codificador: tienen ruido y casi nada se repite. Ganar mucho ahí exigiría
+otro formato, y eso ya lo descartamos.
+
+### Fase 0. Medir mejor
+
+- **Un banco de pruebas permanente:** una prueba en el repo que compara con Windows cada captura
+  de una carpeta, con un solo comando. Las capturas son privadas y el repo es público, así que
+  viven en `Kata Archivos`.
+- **Más variedad:** fondos de pantalla, pantalla completa con la barra de tareas, modo oscuro, 4K,
+  texto pequeño y capturas editadas con Desenfocar y Foco, que es lo que de verdad se guarda.
+
+### Fase 1. Nunca más grande
+
+- **Varias recetas a la vez:** comprimir la misma captura con 3 o 4 recetas en paralelo, una por
+  núcleo del procesador (filtros por pares, por la regla habitual o por entropía; con o sin
+  paleta), y quedarse con la más pequeña. Cuesta procesador, no espera.
+- **Filas de foto y filas de ventana:** nuestra medida de pares gana en ventanas, pero no en fotos.
+  Elegir la medida según el tipo de fila.
+
+### Fase 2. DEFLATE óptimo
+
+La que más promete, en todo tipo de capturas.
+
+- **Repeticiones por su costo real en bits:** en vez de quedarse con la más larga en cada punto,
+  buscar el camino más barato por todo el archivo, y repetirlo unas veces afinando los códigos.
+- **Bloques a medida:** cortar donde cambia la imagen (por ejemplo, donde el fondo de pantalla se
+  encuentra con la barra de tareas), para que cada bloque tenga sus propios códigos.
+
+### Fase 3. Filtros atrevidos
+
+- **Probar de verdad:** comprimir cada fila con los cinco filtros y quedarse con el que menos bits
+  cuesta, en vez de estimarlo.
+- **Pensar varias filas por delante:** el filtro de una fila cambia cuánto se le parecen las
+  siguientes. Buscar la mejor secuencia, no la mejor fila suelta.
+
+### Fase 4. Colores
+
+- **Escala de grises:** si todos los píxeles son grises, guardar un canal en vez de tres.
+- **Paleta ordenada** por uso o por qué colores van juntos, para que los índices formen patrones;
+  y paleta con filtros cuando convenga.
+
+### Fase 5. Ideas sin garantía
+
+Probablemente fallen, pero se miden:
+
+- **Buscar arriba primero:** en una captura, lo que más se repite suele estar justo encima.
+- **Entrelazado:** el PNG entrelazado casi siempre pesa más, pero cambia qué cabe en esos 32 KB.
+  En capturas muy anchas, quizá no.
+
+### Para pagar el tiempo
+
+- **Varios núcleos e instrucciones vectoriales** (SIMD) en los filtros y la búsqueda.
+- **Empezar antes:** comprimir mientras el editor está abierto, para que guardar sea instantáneo.
+
+Cada experimento se mide con el banco y se anota en la bitácora, funcione o no. Una idea se queda
+solo si mejora la media sin dejar ninguna captura más grande que con Windows.
 
 ## Cómo se mide
 

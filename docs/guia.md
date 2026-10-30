@@ -16,8 +16,8 @@ propio documento: [compresion.md](compresion.md).
 - **Rápida y ligera.** La selección aparece en 30–40 ms, el programa pesa 0,3 MB y en reposo usa
   10 MB de memoria y nada de procesador.
 - **Privada.** No se conecta a internet ni recopila nada.
-- **Hecha desde cero.** Incluso su compresión de PNG, que deja los archivos un 18 % más ligeros
-  que los de Windows, sin perder calidad.
+- **Hecha desde cero.** Incluso su compresión de PNG, que deja las capturas de ventanas más
+  ligeras que con Windows, sin perder calidad.
 
 ## Capturar
 
@@ -120,9 +120,9 @@ la bandeja tiene **Abrir capturas**.
 
 **¿La captura pierde calidad?** No. Se guarda en PNG, sin pérdida: cada píxel queda idéntico.
 
-**¿Por qué mis archivos pesan menos que con otras apps?** Kata tiene su propia compresión PNG,
-hecha desde cero. De media, un 18 % menos que el codificador de Windows. Detalles en
-[compresion.md](compresion.md).
+**¿Por qué mis archivos pesan menos?** Kata tiene su propia compresión PNG, hecha desde cero. En
+capturas de ventanas y páginas suele ahorrar entre 5 y 20 % frente al codificador de Windows; con
+fotos, pesa prácticamente lo mismo. Detalles en [compresion.md](compresion.md).
 
 **¿Puedo usar la tecla Impr Pant?** Sí. Enciende «Capturar con Impr Pant y Win + Mayús + S» en
 Ajustes. Al apagarlo, esas teclas vuelven a Windows al instante.

@@ -39,7 +39,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 ## Guardado
 
-- **Formato:** PNG, con un compresor propio escrito desde cero (`crates/editor`), sin librerías ni código de nadie más. Pesa 18 % menos de media que con el de Windows, sin cambiar un píxel. Cómo funciona, qué se probó y cuánto ahorra: [compresion.md](compresion.md).
+- **Formato:** PNG, con un compresor propio escrito desde cero (`crates/editor`), sin librerías ni código de nadie más. Pesa menos que con el de Windows, sin cambiar un píxel: 18 % de media en las pruebas, 5–8 % en el uso diario y lo mismo con fotos. Cómo funciona, qué se probó y cuánto ahorra: [compresion.md](compresion.md).
 - **Comprobado:** una prueba hace que el decodificador de Windows lea cada PNG de vuelta, píxel a píxel.
 - **Sin bloqueos:** se guarda en segundo plano, así la app nunca se traba.
 - **Escritura atómica:** primero un archivo temporal, luego se reemplaza. Nunca queda una imagen a medias.
@@ -77,4 +77,4 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 | Aplicar un desenfoque | < 16 ms | 7.8 ms |
 | Cuadro de la animación del Foco (captura 4K) | < 16 ms | 12 ms (peor caso) |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
-| PNG frente al de Windows | Menor | 18 % menor de media (peor caso, 0,1 % mayor) |
+| PNG frente al de Windows | Nunca mayor | 18 % menor de media en las pruebas; con fotos, hasta 0,5 % mayor |
