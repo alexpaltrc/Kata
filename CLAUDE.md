@@ -25,11 +25,11 @@ Ante cualquier duda, gana la opción más simple.
 
 ## Kata y Kata Dev
 
-Alex usa a diario **Kata**, la versión estable, con sus ajustes reales. Cada cambio se hace y se prueba en **Kata Dev**, que solo usa datos de prueba. Ninguna se abre desde `target/`.
+Alex usa a diario **Kata**, la versión estable que instala la Microsoft Store, con sus ajustes reales. Cada cambio se hace y se prueba en **Kata Dev**, que solo usa datos de prueba. Ninguna se abre desde `target/`.
 
-- **Separadas por completo:** `AlexPalacios.Kata` («Kata») y `AlexPalacios.Kata.Dev` («Kata Dev»). Las dos pueden estar abiertas a la vez. Cada una tiene sus propios ajustes, y Kata Dev además su propio atajo (`Ctrl + Mayús + D`) y su propia carpeta (`Imágenes\Kata Dev`). Kata Dev se reconoce por la etiqueta «Dev» de su icono (también en la bandeja) y por el nombre de sus ventanas. Son MSIX firmadas con el certificado `CN=Alex Palacios Dev`, confiado solo en la PC de Alex. Sin modo de desarrollador.
+- **Separadas por completo:** `AlexPalacios.Kata` («Kata») y `AlexPalacios.Kata.Dev` («Kata Dev»). Las dos pueden estar abiertas a la vez. Cada una tiene sus propios ajustes, y Kata Dev además su propio atajo (`Ctrl + Mayús + D`) y su propia carpeta (`Imágenes\Kata Dev`). Kata Dev se reconoce por la etiqueta «Dev» de su icono (también en la bandeja) y por el nombre de sus ventanas. Kata Dev es un MSIX firmado con el certificado `CN=Alex Palacios Dev`, confiado solo en la PC de Alex. Sin modo de desarrollador.
 - **Al terminar cualquier cambio en la PC de Alex,** actualiza Kata Dev con `packaging/update-dev.ps1 -NoPull` y di en una línea que ya está. Si la cierras, vuelve a abrirla.
-- **La estable no se toca mientras se trabaja.** Solo cambia cuando Alex decide lanzar una versión: se sube el número en `Cargo.toml`, se instala con `packaging/build-msix.ps1 -Stable` y se vuelve a abrir si estaba abierta.
+- **La estable la actualiza Alex, desde la Store.** Nunca la instales, cierres ni actualices tú. Para lanzar una versión, solo cuando Alex lo decida: sube el número en `Cargo.toml`, fabrica el paquete con `packaging/build-msix.ps1 -Store` y dile qué subir a Partner Center. Cuando Microsoft la apruebe, recuérdale actualizar la estable desde la Store, y repítelo en cada conversación mientras la instalada (`Get-AppxPackage AlexPalacios.Kata`) tenga un número menor que el enviado.
 - **Bajar y subir:** cada conversación, la de la PC y la de la nube, empieza bajando lo último de GitHub y termina subiendo su trabajo. Al volver a la de la PC, antes de nada: baja lo último, une a `main` el trabajo de la nube que esté en otra rama (si su CI pasó), actualiza Kata Dev con `packaging/update-dev.ps1` y di qué cambios llegaron.
 
 ## Convenciones

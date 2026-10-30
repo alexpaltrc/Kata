@@ -1,22 +1,19 @@
 <#
-  Builds Kata as an MSIX package and installs it over the copy in use.
+  Builds Kata Dev as an MSIX package and installs it over the copy in use.
 
-    powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1 [-Stable | -Store]
+    powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1 [-Store]
 
-  Two copies, apart in every way: Kata Dev (AlexPalacios.Kata.Dev, its icon labeled "Dev"), where
-  every change is tried, and, with -Stable, Kata (AlexPalacios.Kata), the one Alex uses every day,
-  which changes only when he releases a version. Each identity installs only over itself, and
-  Windows keeps each package's settings apart and untouched by updates.
-
-  Both are signed with the "Alex Palacios Dev" certificate, made on this PC and trusted only here;
-  Developer Mode is never needed.
+  Kata Dev (AlexPalacios.Kata.Dev, its icon labeled "Dev") is where every change is tried, apart in
+  every way from Kata, the copy Alex uses every day. It is signed with the "Alex Palacios Dev"
+  certificate, made on this PC and trusted only here; Developer Mode is never needed.
 
   With -Store, it builds Kata for the Microsoft Store instead: the identity Partner Center reserved,
   x64 and ARM64 in one bundle, unsigned (the Store signs it) and not installed. Upload it as is.
+  Kata comes only from the Store, and Alex updates it himself.
 
   Packages are written to target\msix\out\.
 #>
-param([switch]$Stable, [switch]$Store)
+param([switch]$Store)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 $repo = Split-Path -Parent $PSScriptRoot
@@ -29,10 +26,6 @@ if ($Store) {
     $Publisher = "CN=A3B4D4CD-AECB-4B6D-9268-AEAB19F8F17B"
     $DisplayName = "Kata"
     $Architectures = @("x64", "arm64")
-    $Stable = $true
-} elseif ($Stable) {
-    $Name = "AlexPalacios.Kata"
-    $DisplayName = "Kata"
 } else {
     $Name = "AlexPalacios.Kata.Dev"
     $DisplayName = "Kata Dev"
@@ -41,17 +34,14 @@ $Targets = @{ x64 = "x86_64-pc-windows-msvc"; arm64 = "aarch64-pc-windows-msvc" 
 # Windows' own blue, until phase 6 gives Kata its identity.
 $Plate = [System.Drawing.Color]::FromArgb(0x00, 0x5F, 0xB8)
 
-# --- Version: MSIX wants four numbers. A stable release is Cargo's 0.1.0 as 0.1.0.0, so releasing
+# --- Version: MSIX wants four numbers. A Store release is Cargo's 0.1.0 as 0.1.0.0, so releasing
 # means raising it in Cargo.toml; a Dev build is 0.1.0.<n>, one past the Dev installed.
 $numeric = (Select-String -Path (Join-Path $repo "Cargo.toml") -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-$installed = if (-not $Store) { Get-AppxPackage -Name $Name }
-if ($Stable) {
+if ($Store) {
     $version = "$numeric.0"
-    if ($installed -and [version]$installed.Version -ge [version]$version) {
-        throw "Kata $($installed.Version) is already installed: raise the version in Cargo.toml"
-    }
 } else {
     $revision = 1
+    $installed = Get-AppxPackage -Name $Name
     if ($installed) {
         $v = [version]$installed.Version
         if ("$($v.Major).$($v.Minor).$($v.Build)" -eq $numeric) { $revision = $v.Revision + 1 }
@@ -115,7 +105,7 @@ function Logo([string]$file, [int]$size, [double]$share) {
     $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), ([single][Math]::Max(1, 1.25 * $unit))
     $g.DrawPath($pen, $glyph)
 
-    if (-not $Stable) {
+    if (-not $Store) {
         # The Dev mark, as on the tray icon: the plate's lower part is a white label that says
         # "Dev", kept apart from the corners it covers by a strip of plate.
         [single]$height = [Math]::Round($side * 7 / 16)
