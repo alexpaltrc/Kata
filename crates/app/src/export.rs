@@ -18,20 +18,10 @@ use std::{
 use kata_editor::Image;
 use windows::{
     Win32::{
-        Foundation::{E_POINTER, GENERIC_WRITE, GlobalFree, HANDLE, HWND},
-        Graphics::{
-            Gdi::{BI_RGB, BITMAPINFOHEADER},
-            Imaging::{
-                CLSID_WICImagingFactory, GUID_ContainerFormatPng, GUID_WICPixelFormat24bppBGR,
-                GUID_WICPixelFormat32bppBGR, IWICImagingFactory, WICBitmapDitherTypeNone,
-                WICBitmapEncoderNoCache, WICBitmapPaletteTypeCustom,
-            },
-        },
+        Foundation::{GlobalFree, HANDLE, HWND},
+        Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER},
         System::{
-            Com::{
-                CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-                CoTaskMemFree, CoUninitialize,
-            },
+            Com::CoTaskMemFree,
             DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
             Ole::CF_DIB,
@@ -279,59 +269,91 @@ fn open_clipboard(owner: HWND) -> Result<()> {
 /// Writes the PNG beside `path`, then swaps it in: `path` never holds half an image.
 fn save_png(path: &Path, image: &Image) -> io::Result<()> {
     let partial = path.with_extension("png.partial");
-    let saved = unsafe {
-        CoInitializeEx(None, COINIT_MULTITHREADED)
-            .ok()
-            .and_then(|()| {
-                let encoded = encode_png(&partial, image);
-                CoUninitialize();
-                encoded
-            })
-    }
-    .map_err(io::Error::from)
-    .and_then(|()| fs::rename(&partial, path));
+    let saved = fs::write(&partial, image.to_png()).and_then(|()| fs::rename(&partial, path));
     if saved.is_err() {
         let _ = fs::remove_file(&partial);
     }
     saved
 }
 
-unsafe fn encode_png(path: &Path, image: &Image) -> Result<()> {
-    let (width, height) = (image.width(), image.height());
-    unsafe {
-        let wic: IWICImagingFactory =
-            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-        let pixels = wic.CreateBitmapFromMemory(
-            width,
-            height,
-            &GUID_WICPixelFormat32bppBGR,
-            image.stride() as u32,
-            image.pixels(),
-        )?;
-        // Captures are opaque: an alpha channel would only make files bigger.
-        let opaque = wic.CreateFormatConverter()?;
-        opaque.Initialize(
-            &pixels,
-            &GUID_WICPixelFormat24bppBGR,
-            WICBitmapDitherTypeNone,
-            None,
-            0.0,
-            WICBitmapPaletteTypeCustom,
-        )?;
+#[cfg(test)]
+mod tests {
+    use windows::Win32::{
+        Graphics::Imaging::{
+            CLSID_WICImagingFactory, GUID_WICPixelFormat32bppBGR, IWICImagingFactory,
+            WICBitmapDitherTypeNone, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
+        },
+        System::Com::{
+            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+        },
+    };
 
-        let stream = wic.CreateStream()?;
-        stream.InitializeFromFilename(&HSTRING::from(path), GENERIC_WRITE.0)?;
-        let encoder = wic.CreateEncoder(&GUID_ContainerFormatPng, ptr::null())?;
-        encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
-        let (mut frame, mut options) = (None, None);
-        encoder.CreateNewFrame(&mut frame, &mut options)?;
-        let frame = frame.ok_or(Error::from(E_POINTER))?;
-        frame.Initialize(options.as_ref())?;
-        frame.SetSize(width, height)?;
-        let mut format = GUID_WICPixelFormat24bppBGR;
-        frame.SetPixelFormat(&mut format)?;
-        frame.WriteSource(&opaque, ptr::null())?;
-        frame.Commit()?;
-        encoder.Commit()
+    use super::*;
+
+    /// `png` as Windows' own decoder reads it.
+    fn decode(png: &[u8]) -> Result<Image> {
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+            let wic: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let stream = wic.CreateStream()?;
+            stream.InitializeFromMemory(png)?;
+            let decoder =
+                wic.CreateDecoderFromStream(&stream, ptr::null(), WICDecodeMetadataCacheOnDemand)?;
+            let pixels = wic.CreateFormatConverter()?;
+            pixels.Initialize(
+                &decoder.GetFrame(0)?,
+                &GUID_WICPixelFormat32bppBGR,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
+            let (mut width, mut height) = (0, 0);
+            pixels.GetSize(&mut width, &mut height)?;
+            let mut bytes = vec![0; (4 * width * height) as usize];
+            pixels.CopyPixels(ptr::null(), 4 * width, &mut bytes)?;
+            // This format leaves the fourth byte undefined; captures are opaque.
+            for pixel in bytes.as_chunks_mut::<4>().0 {
+                pixel[3] = 255;
+            }
+            Ok(Image::new(width, height, bytes))
+        }
+    }
+
+    /// An image whose pixel at `(x, y)` is `color(x, y)`, as `0xRRGGBB`.
+    fn image(width: u32, height: u32, color: impl Fn(u32, u32) -> u32) -> Image {
+        let pixels = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .flat_map(|(x, y)| (0xFF00_0000 | color(x, y)).to_le_bytes())
+            .collect();
+        Image::new(width, height, pixels)
+    }
+
+    fn noise(x: u32, y: u32) -> u32 {
+        (x.wrapping_mul(0x9E37_79B1) ^ y.wrapping_mul(0x85EB_CA77)).wrapping_mul(0xC2B2_AE3D) >> 8
+    }
+
+    #[test]
+    fn windows_reads_back_every_pixel() {
+        let cases = [
+            image(1, 1, |_, _| 0x33_6699),
+            // Indices one, two, four and eight bits wide, with rows ending mid-byte.
+            image(13, 7, |x, y| [0, 0xFF_FFFF][((x + y) % 2) as usize]),
+            image(9, 5, |x, y| (x * 3 + y) % 3 * 0x40_4040),
+            image(31, 17, |x, y| (x ^ y) % 16 * 0x10_0000),
+            image(50, 40, |x, y| (x * 40 + y) % 200 * 0x01_0101),
+            image(64, 48, |x, y| (x * 4) << 16 | (y * 5) << 8 | (x + y)),
+            // Long repeats near and far, then noise that fills several blocks.
+            image(700, 120, |x, y| noise(x % 97, y % 5)),
+            image(300, 200, noise),
+        ];
+        for image in cases {
+            let (width, height) = (image.width(), image.height());
+            assert!(
+                decode(&image.to_png()).unwrap() == image,
+                "{width}x{height}"
+            );
+        }
     }
 }

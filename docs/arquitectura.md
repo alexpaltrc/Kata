@@ -39,7 +39,10 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 ## Guardado
 
-- **Formato:** PNG, con el codificador nativo de Windows (WIC).
+- **Formato:** PNG, con un codificador propio (`crates/editor/src/png.rs` y `deflate.rs`), escrito desde las especificaciones, sin librerías ni código de nadie más. Es Rust puro, así que se prueba sin Windows.
+- **Cómo ahorra:** una captura con 256 colores o menos, como la mayoría de las ventanas, guarda cada píxel como el número de su color, en 1, 2, 4 u 8 bits. Las demás guardan RGB, y cada fila elige el filtro que la deja más repetitiva. Después, DEFLATE busca repeticiones, decide cada una un byte tarde por si empieza otra más larga, y le da a cada bloque los códigos de Huffman más cortos posibles.
+- **Medido** con 19 capturas reales, frente al codificador de Windows (WIC): 18 % más pequeño de media (14–23 % en capturas típicas, 50–65 % con pocos colores) y nunca más grande. Tarda unas 1,6 veces más, en segundo plano: 88 ms frente a 64 ms en una captura típica de 2556×1440.
+- **Comprobado:** una prueba hace que el decodificador de Windows lea cada PNG de vuelta, píxel a píxel.
 - **Sin bloqueos:** se guarda en segundo plano, así la app nunca se traba.
 - **Escritura atómica:** primero un archivo temporal, luego se reemplaza. Nunca queda una imagen a medias.
 - **Portapapeles:** se copia al instante, antes de guardar.
@@ -76,3 +79,4 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 | Aplicar un desenfoque | < 16 ms | 7.8 ms |
 | Cuadro de la animación del Foco (captura 4K) | < 16 ms | 12 ms (peor caso) |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
+| PNG frente al de Windows | Nunca mayor | 18 % menor de media |
