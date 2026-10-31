@@ -64,6 +64,7 @@ En este orden:
 4. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 5. **Botón de Ajustes.** Analizar dónde va el engranaje de la ventana principal.
 6. **Abrir capturas desde el editor.** Quizá un botón que abra la carpeta de las capturas.
+7. **Un ajuste de Impr Pant que se entienda.** Que diga algo como «Kata es tu app de capturas», con un icono «i» que, al pasar el cursor, explique qué teclas toma (`Impr Pant`, sola o con `Alt`, `Win`, `Ctrl` o `Mayús`, y `Win + Mayús + S`) y qué pasa al apagarlo.
 
 ## Fuera de alcance por ahora
 

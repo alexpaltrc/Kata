@@ -36,7 +36,7 @@ Alex usa a diario **Kata**, la versión estable que instala la Microsoft Store, 
 
 - **Idioma:** código, comentarios y commits en inglés. Documentación en español. Los textos de la app, en español e inglés.
 - **Autoría:** Alex Palacios. Nunca se pone un correo en los archivos del proyecto.
-- **Repositorio público:** a diferencia del estándar, porque aloja la política de privacidad que enlaza la Store. Es solo para Kata.
+- **Política de privacidad:** el texto de `docs/privacidad.md` va pegado en Partner Center. Si cambia, dile a Alex que lo vuelva a pegar.
 - **Licencia:** aún sin definir. No agregar ninguna hasta que Alex lo decida.
 - **Documentación al día:** cada cambio actualiza los documentos de `docs/` que toca. Cada experimento de compresión, funcione o no, se anota en `docs/compresion.md`.
 - **Repositorio limpio:** sin archivos sobrantes, carpetas vacías ni código muerto. Cada archivo tiene una razón de existir.
@@ -52,7 +52,7 @@ Alex usa a diario **Kata**, la versión estable que instala la Microsoft Store, 
 | `crates/editor` | Modelo de edición: herramientas, deshacer, guardado. Rust puro, sin APIs de Windows |
 | `crates/ui` | Controles Fluent, animaciones y tema (Direct2D y DirectComposition) |
 | `packaging/` | Los paquetes MSIX de Kata y Kata Dev |
-| `docs/` | Producto, arquitectura, guía, compresión y la política de privacidad que enlaza la Store |
+| `docs/` | Producto, arquitectura, guía, compresión y la política de privacidad de la Store |
 
 ## Comandos
 
