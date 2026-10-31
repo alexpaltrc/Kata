@@ -62,6 +62,8 @@ En este orden:
 2. **Zoom en el editor.** La rueda del ratón acerca y aleja la captura, hacia donde está el cursor. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones.
 3. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
 4. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
+5. **Botón de Ajustes.** Analizar dónde va el engranaje de la ventana principal.
+6. **Abrir capturas desde el editor.** Quizá un botón que abra la carpeta de las capturas.
 
 ## Fuera de alcance por ahora
 
