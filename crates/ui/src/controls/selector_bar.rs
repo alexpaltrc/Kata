@@ -146,6 +146,7 @@ impl Control for SelectorBar {
                 selected: index == self.selected,
             },
             area: self.item(index),
+            help: "",
         }));
     }
 

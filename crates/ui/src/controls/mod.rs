@@ -2,6 +2,7 @@
 
 mod button;
 mod icon_button;
+mod info;
 mod selector_bar;
 mod shortcut;
 mod slider;
@@ -11,6 +12,7 @@ use std::time::Instant;
 
 pub use button::Button;
 pub use icon_button::IconButton;
+pub use info::Info;
 pub use selector_bar::SelectorBar;
 pub use shortcut::Shortcut;
 pub use slider::Slider;

@@ -15,13 +15,14 @@ use windows::{
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
-            Controls::MARGINS,
+            Controls::{HOVER_DEFAULT, MARGINS},
             HiDpi::{
                 AdjustWindowRectExForDpi, GetDpiForMonitor, GetDpiForWindow,
                 GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
             },
             Input::KeyboardAndMouse::{
-                GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
+                GetKeyState, TME_HOVER, TME_LEAVE, TRACKMOUSEEVENT, TRACKMOUSEEVENT_FLAGS,
+                TrackMouseEvent, VIRTUAL_KEY,
             },
             WindowsAndMessaging::{
                 CREATESTRUCTW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetClientRect,
@@ -354,11 +355,21 @@ pub unsafe fn limit_size(lparam: LPARAM, min: (f32, f32), scale: f32) {
 /// Asks Windows to send `WM_MOUSELEAVE` once the pointer leaves the window, and
 /// returns whether it will.
 pub fn track_mouse_leave(hwnd: HWND) -> bool {
+    track_mouse(hwnd, TME_LEAVE)
+}
+
+/// Asks Windows to send `WM_MOUSEHOVER` once the pointer rests on the window as
+/// long as a tooltip waits, starting over now, and returns whether it will.
+pub fn track_mouse_rest(hwnd: HWND) -> bool {
+    track_mouse(hwnd, TME_HOVER | TME_LEAVE)
+}
+
+fn track_mouse(hwnd: HWND, flags: TRACKMOUSEEVENT_FLAGS) -> bool {
     let mut track = TRACKMOUSEEVENT {
         cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-        dwFlags: TME_LEAVE,
+        dwFlags: flags,
         hwndTrack: hwnd,
-        dwHoverTime: 0,
+        dwHoverTime: HOVER_DEFAULT,
     };
     unsafe { TrackMouseEvent(&mut track) }.is_ok()
 }

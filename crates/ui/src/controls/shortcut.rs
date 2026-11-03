@@ -137,6 +137,7 @@ impl Control for Shortcut {
             name: format!("{}, {shows}", self.name),
             role: Role::Button { enabled: true },
             area: self.area(),
+            help: "",
         });
     }
 

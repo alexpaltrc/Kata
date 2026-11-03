@@ -85,6 +85,7 @@ impl Control for IconButton {
             name: self.name.clone(),
             role: Role::Button { enabled: true },
             area: self.area(),
+            help: "",
         });
     }
 

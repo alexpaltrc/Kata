@@ -9,7 +9,7 @@ use std::{
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Button, Control, HEIGHT, IconButton, Shortcut, Toggle},
+    controls::{self, Button, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
     paint::{Area, Fonts, Label, Painter, Point},
     window::CAPTION_BUTTONS,
 };
@@ -28,6 +28,8 @@ const GAP: f32 = 4.0;
 const EDGE: f32 = 8.0;
 /// Between the capture button and the shortcut below it.
 const HINT_GAP: f32 = 12.0;
+/// Between a setting's label and its info glyph's square.
+const INFO_GAP: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 const MIN_WIDTH: f32 = 320.0;
 const CARDS: usize = 6;
@@ -44,6 +46,7 @@ pub enum Part {
     OpenSettings,
     Back,
     Shortcut,
+    ScreenKeysInfo,
     ScreenKeys,
     OpenEditor,
     Sound,
@@ -79,6 +82,7 @@ pub struct Pages {
     /// In `Prompt`'s order.
     prompts: [Label; 3],
     screen_keys: Toggle,
+    screen_keys_info: Info,
     open_editor: Toggle,
     sound: Toggle,
     folder_title: Label,
@@ -116,7 +120,12 @@ impl Pages {
                 fonts.label(text.add_modifier)?,
                 fonts.label(text.in_use)?,
             ],
-            screen_keys: Toggle::new(fonts.label(text.screen_keys)?, settings.screen_keys),
+            screen_keys: Toggle::new(fonts.label(text.screen_keys)?, settings.screen_keys)
+                .explained(text.screen_keys_help),
+            screen_keys_info: Info::new(
+                fonts.icon('\u{E946}', 16.0)?,
+                fonts.wrapped(text.screen_keys_help, Info::TEXT_WIDTH)?,
+            ),
             open_editor: Toggle::new(fonts.label(text.open_editor)?, settings.open_editor),
             sound: Toggle::new(fonts.label(text.sound)?, settings.sound),
             folder_title: fonts.label(text.folder)?,
@@ -135,7 +144,7 @@ impl Pages {
     pub fn min_size(&self) -> (f32, f32) {
         let rows = [
             self.shortcut_title.width + PADDING + self.shortcut.width(),
-            self.screen_keys.width(),
+            self.screen_keys.width() + INFO_GAP + Info::SIZE,
             self.open_editor.width(),
             self.sound.width(),
             self.folder_title.width + PADDING + self.change_folder.width(),
@@ -173,6 +182,10 @@ impl Pages {
             toggle.place(card.left + PADDING, card.top);
             toggle.stretch(card.width - 2.0 * PADDING, card.height);
         }
+        let left = self.screen_keys.label_right() + INFO_GAP;
+        let below_title = Area::new(EDGE, TITLE_BAR, room.0 - 2.0 * EDGE, room.1 - TITLE_BAR);
+        self.screen_keys_info
+            .place(left, screen_keys.middle(), below_title);
         let change = &mut self.change_folder;
         let left = folder.right() - PADDING - change.width();
         change.place(left, folder.middle() - HEIGHT / 2.0);
@@ -202,6 +215,7 @@ impl Pages {
             Part::OpenSettings => &mut self.open_settings,
             Part::Back => &mut self.back,
             Part::Shortcut => &mut self.shortcut,
+            Part::ScreenKeysInfo => &mut self.screen_keys_info,
             Part::ScreenKeys => &mut self.screen_keys,
             Part::OpenEditor => &mut self.open_editor,
             Part::Sound => &mut self.sound,
@@ -216,6 +230,7 @@ impl Pages {
             Part::OpenSettings => &self.open_settings,
             Part::Back => &self.back,
             Part::Shortcut => &self.shortcut,
+            Part::ScreenKeysInfo => &self.screen_keys_info,
             Part::ScreenKeys => &self.screen_keys,
             Part::OpenEditor => &self.open_editor,
             Part::Sound => &self.sound,
@@ -226,9 +241,22 @@ impl Pages {
 
     /// Follows the pointer over `page`. Returns whether its look changes.
     pub fn hover(&mut self, page: Page, point: Option<Point>) -> bool {
+        // Only the part under the pointer sees it: the info glyph sits on its setting.
+        let under = point.and_then(|point| self.part_at(page, point));
         parts(page).iter().fold(false, |changed, &part| {
+            let point = point.filter(|_| under == Some(part));
             self.control(part).hover(point) | changed
         })
+    }
+
+    /// Whether resting the pointer where it is would show a tooltip on `page`.
+    pub fn awaits_rest(&self, page: Page) -> bool {
+        page == Page::Settings && self.screen_keys_info.awaits_rest()
+    }
+
+    /// The pointer rested at `point` on `page`. Returns whether a tooltip shows.
+    pub fn rest(&mut self, page: Page, point: Point) -> bool {
+        page == Page::Settings && self.screen_keys_info.rest(point)
     }
 
     pub fn draw(&self, page: Page, painter: &Painter, now: Instant) {
@@ -267,6 +295,9 @@ impl Pages {
         if let Some(part) = self.focused(page) {
             let (area, radius) = self.get(part).focus_area();
             painter.focus(area, radius);
+        }
+        if page == Page::Settings {
+            self.screen_keys_info.draw_tip(painter, now);
         }
     }
 
@@ -383,6 +414,8 @@ fn parts(page: Page) -> &'static [Part] {
         Page::Settings => &[
             Part::Back,
             Part::Shortcut,
+            // Before its setting, which it sits on.
+            Part::ScreenKeysInfo,
             Part::ScreenKeys,
             Part::OpenEditor,
             Part::Sound,

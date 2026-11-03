@@ -18,6 +18,8 @@ const KNOB_HOVERED: f32 = 7.0;
 
 pub struct Toggle {
     label: Label,
+    /// What assistive technologies hear about it besides its label.
+    help: &'static str,
     on: bool,
     left: f32,
     top: f32,
@@ -35,6 +37,7 @@ impl Toggle {
         let size = (label.width + GAP + SWITCH.0, HEIGHT);
         Self {
             label,
+            help: "",
             on,
             left: 0.0,
             top: 0.0,
@@ -46,8 +49,18 @@ impl Toggle {
         }
     }
 
+    /// The same, with `help` saying what it does, as its info tooltip does.
+    pub fn explained(self, help: &'static str) -> Self {
+        Self { help, ..self }
+    }
+
     pub fn width(&self) -> f32 {
         self.label.width + GAP + SWITCH.0
+    }
+
+    /// Where its label ends.
+    pub fn label_right(&self) -> f32 {
+        self.left + self.label.width
     }
 
     pub fn place(&mut self, left: f32, top: f32) {
@@ -154,6 +167,7 @@ impl Control for Toggle {
             name: self.label.text.clone(),
             role: Role::Toggle { on: self.on },
             area: self.area(),
+            help: self.help,
         });
     }
 

@@ -25,7 +25,7 @@ use windows::{
         Graphics::Gdi::{InvalidateRect, MONITOR_DEFAULTTONEAREST, MonitorFromPoint, ValidateRect},
         System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree, IBindCtx},
         UI::{
-            Controls::WM_MOUSELEAVE,
+            Controls::{WM_MOUSEHOVER, WM_MOUSELEAVE},
             Input::KeyboardAndMouse::{
                 ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_ESCAPE, VK_SHIFT, VK_SNAPSHOT, VK_TAB,
             },
@@ -225,6 +225,11 @@ impl Main {
                     self.invalidate();
                 }
             }
+            WM_MOUSEHOVER => {
+                if self.pressed.is_none() && self.pages.rest(self.page, self.point(lparam)) {
+                    self.invalidate();
+                }
+            }
             WM_LBUTTONDOWN => self.press(self.point(lparam)),
             WM_LBUTTONUP => self.release(self.point(lparam)),
             // Another window took the pointer.
@@ -316,6 +321,10 @@ impl Main {
         };
         if changed {
             self.invalidate();
+        }
+        // A tooltip shows once the pointer stops moving.
+        if self.pressed.is_none() && self.pages.awaits_rest(self.page) {
+            window::track_mouse_rest(self.hwnd);
         }
     }
 
@@ -420,6 +429,8 @@ impl Main {
                 let on = startup::set(self.pages.startup());
                 self.pages.set_startup(on);
             }
+            // It only explains.
+            Part::ScreenKeysInfo => {}
         }
     }
 

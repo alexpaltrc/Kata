@@ -54,6 +54,8 @@ pub struct Element {
     pub role: Role,
     /// In DIPs, from the client area's top-left corner.
     pub area: Area,
+    /// What a tooltip would explain about it, if anything.
+    pub help: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -499,6 +501,7 @@ impl IRawElementProviderSimple_Impl for Node_Impl {
             let enabled = element.role != Role::Button { enabled: false };
             match property {
                 UIA_NamePropertyId => element.name.as_str().into(),
+                UIA_HelpTextPropertyId => element.help.into(),
                 UIA_ControlTypePropertyId => {
                     let control_type = match element.role {
                         // Toggle switches are buttons that toggle, as in WinUI.

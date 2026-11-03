@@ -26,6 +26,8 @@ pub struct Strings {
     /// What assistive technologies call the button that changes the folder.
     pub change_folder: &'static str,
     pub screen_keys: &'static str,
+    /// The info tooltip beside it: which keys it takes, and what turning it off does.
+    pub screen_keys_help: &'static str,
     pub start_with_windows: &'static str,
     /// While waiting for a new shortcut.
     pub press_shortcut: &'static str,
@@ -63,7 +65,10 @@ static SPANISH: Strings = Strings {
     folder: "Carpeta de guardado",
     change: "Cambiar",
     change_folder: "Cambiar la carpeta de guardado",
-    screen_keys: "Capturar con Impr Pant y Win + Mayús + S",
+    screen_keys: "Kata es tu app de capturas",
+    screen_keys_help: "Impr Pant (sola o con Alt, Win, Ctrl o Mayús) y Win + Mayús + S abren un \
+        recorte de Kata en vez de Recortes. Al apagarlo, esas teclas vuelven a funcionar como \
+        siempre.",
     start_with_windows: "Iniciar con Windows",
     press_shortcut: "Pulsa el nuevo atajo",
     add_modifier: "Añade Ctrl o Alt",
@@ -90,7 +95,10 @@ static ENGLISH: Strings = Strings {
     folder: "Save folder",
     change: "Change",
     change_folder: "Change the save folder",
-    screen_keys: "Capture with Print Screen and Win + Shift + S",
+    screen_keys: "Kata is your screenshot app",
+    screen_keys_help: "Print Screen (alone or with Alt, Win, Ctrl or Shift) and Win + Shift + S \
+        start a capture in Kata instead of the Snipping Tool. Turned off, those keys work as \
+        usual again.",
     start_with_windows: "Start with Windows",
     press_shortcut: "Press the new shortcut",
     add_modifier: "Add Ctrl or Alt",

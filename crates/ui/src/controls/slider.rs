@@ -173,6 +173,7 @@ impl Control for Slider {
                 text: self.names[self.value].text.clone(),
             },
             area: Area::new(self.left, self.top, self.width(), HEIGHT),
+            help: "",
         });
     }
 

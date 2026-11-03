@@ -7,7 +7,8 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 **Por qué:**
 
 - **No hay una opción oficial:** WinUI 3, la interfaz nativa de Microsoft, no tiene soporte real para Rust.
-- **Son pocos controles:** botón (de acento, estándar y de icono), slider por niveles, interruptor, selector de herramienta, campo de atajo y lienzo. Hacerlos es abarcable.
+- **Son pocos controles:** botón (de acento, estándar y de icono), slider por niveles, interruptor, selector de herramienta, campo de atajo, icono de información con su globo y lienzo. Hacerlos es abarcable.
+- **El globo de información** aparece cuando el cursor se queda quieto sobre el icono «i», tras el tiempo que Windows fija para eso (`TrackMouseEvent` con `TME_HOVER`), como los globos nativos. Así no parpadea al cruzar el icono, y esperar no cuesta ni un cuadro.
 - **Rendimiento:** no carga ningún framework, por lo que arranca al instante y gasta muy poca memoria.
 - **Control total del diseño:** cada animación, sombra y transición se ajusta al detalle. Las animaciones las ejecuta el compositor de Windows, así que siguen fluidas aunque la app esté ocupada.
 
@@ -20,7 +21,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 - **Movimiento:** con «Efectos de animación» apagado en Windows, cada animación salta a su final. Se lee en cada animación, así que el cambio se nota al momento.
 - **Teclado:** Tab y Mayús + Tab recorren los controles, marcados con el anillo de foco de Fluent. Enter o Espacio los pulsan; las flechas, Inicio y Fin mueven sliders y selectores.
 - **Contraste alto:** con un tema de contraste, los colores salen del tema y la ventana deja Mica por un fondo sólido.
-- **Narrador:** cada ventana describe sus controles a Windows con UI Automation (`crates/ui/src/access.rs`): nombre, tipo, estado y lugar. Lo que pide Narrador (pulsar, elegir, cambiar un nivel) llega a la ventana como una acción de teclado. Solo trabaja si un lector de pantalla lo pide; si no, no cuesta nada.
+- **Narrador:** cada ventana describe sus controles a Windows con UI Automation (`crates/ui/src/access.rs`): nombre, tipo, estado y lugar, y lo que explica su globo de información, si lo tiene. Lo que pide Narrador (pulsar, elegir, cambiar un nivel) llega a la ventana como una acción de teclado. Solo trabaja si un lector de pantalla lo pide; si no, no cuesta nada.
 
 ## Captura
 

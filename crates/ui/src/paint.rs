@@ -20,7 +20,10 @@ use windows::{
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
-use crate::{Graphics, theme::Palette};
+use crate::{
+    Graphics,
+    theme::{Palette, faded},
+};
 
 /// A position in DIPs.
 pub type Point = (f32, f32);
@@ -131,16 +134,18 @@ impl<'a> Painter<'a> {
         self.snap(1.0).max(self.pixel())
     }
 
-    /// Draws what `draw` paints at `opacity`, moved `offset` DIPs to the right.
+    /// Draws what `draw` paints at `opacity`, moved `offset` DIPs to the right, even
+    /// inside another layer.
     pub fn layer(&self, opacity: f32, offset: f32, draw: impl FnOnce()) {
         if opacity <= 0.0 {
             return;
         }
-        let scale = Matrix3x2::scale(self.scale, self.scale);
+        let mut outer = Matrix3x2::default();
         let translucent = opacity < 1.0;
         unsafe {
+            self.context.GetTransform(&mut outer);
             self.context
-                .SetTransform(&(Matrix3x2::translation(self.snap(offset), 0.0) * scale));
+                .SetTransform(&(Matrix3x2::translation(self.snap(offset), 0.0) * outer));
             if translucent {
                 let everything = D2D_RECT_F {
                     left: f32::MIN,
@@ -163,7 +168,24 @@ impl<'a> Painter<'a> {
             if translucent {
                 self.context.PopLayer();
             }
-            self.context.SetTransform(&scale);
+            self.context.SetTransform(&outer);
+        }
+    }
+
+    /// The soft shadow that a surface raised over `area`, with corners of `radius`,
+    /// casts below it: Fluent's, 4 DIPs down and blurred over 8.
+    pub fn shadow(&self, area: Area, radius: f32, color: D2D1_COLOR_F) {
+        const BLUR: f32 = 8.0;
+        const STEPS: u8 = 8;
+        // Each step a little wider and fainter, so together they fade out.
+        let step = faded(color, 1.0 / f32::from(STEPS));
+        let below = Area {
+            top: area.top + BLUR / 2.0,
+            ..area
+        };
+        for n in 0..STEPS {
+            let by = BLUR * ((f32::from(n) + 0.5) / f32::from(STEPS) - 0.5);
+            self.fill(below.inflate(by), (radius + by).max(0.0), step);
         }
     }
 
@@ -319,6 +341,11 @@ impl Fonts {
     /// Small text, as in title bars and hints.
     pub fn caption(&self, text: &str) -> Result<Label> {
         self.layout(text, &self.caption, f32::MAX)
+    }
+
+    /// Small text in lines at most `width` DIPs wide, as in tooltips.
+    pub fn wrapped(&self, text: &str, width: f32) -> Result<Label> {
+        self.layout(text, &self.caption, width)
     }
 
     /// A folder's path in small text, at most `width` DIPs wide: what doesn't fit

@@ -174,6 +174,7 @@ impl Control for Button {
                     enabled: self.enabled,
                 },
                 area: self.area(),
+                help: "",
             });
         }
     }

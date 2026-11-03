@@ -122,6 +122,11 @@ pub struct Palette {
     pub on_accent_disabled: D2D1_COLOR_F,
     /// The inner ring of the keyboard focus visual.
     pub focus_inner: D2D1_COLOR_F,
+    /// Surfaces raised over the window, such as tooltips, and their border.
+    pub flyout: D2D1_COLOR_F,
+    pub flyout_stroke: D2D1_COLOR_F,
+    /// What raised surfaces cast below them.
+    pub shadow: D2D1_COLOR_F,
 }
 
 impl Palette {
@@ -152,6 +157,9 @@ impl Palette {
                 accent_disabled: color(0x000000, 0.2169),
                 on_accent_disabled: color(0xFFFFFF, 1.0),
                 focus_inner: color(0xFFFFFF, 0.7),
+                flyout: color(0xF9F9F9, 1.0),
+                flyout_stroke: color(0x000000, 0.0578),
+                shadow: color(0x000000, 0.14),
             }
         } else {
             Self {
@@ -173,6 +181,9 @@ impl Palette {
                 accent_disabled: color(0xFFFFFF, 0.1581),
                 on_accent_disabled: color(0xFFFFFF, 0.5302),
                 focus_inner: color(0x000000, 0.7),
+                flyout: color(0x2C2C2C, 1.0),
+                flyout_stroke: color(0x000000, 0.2),
+                shadow: color(0x000000, 0.28),
             }
         }
     }
@@ -205,6 +216,9 @@ impl Palette {
             accent_disabled: system(COLOR_GRAYTEXT),
             on_accent_disabled: window,
             focus_inner: window,
+            flyout: window,
+            flyout_stroke: text,
+            shadow: none,
         }
     }
 }

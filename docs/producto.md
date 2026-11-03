@@ -49,7 +49,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Ajuste | Por defecto | Cómo funciona |
 |---|---|---|
 | Atajo | `Ctrl + Mayús + S` | Un clic y se pulsa el nuevo. Lleva `Ctrl` o `Alt`, salvo `Impr Pant`, que puede ir solo. Si otra app lo usa, lo avisa. `Esc` cancela. |
-| Capturar con Impr Pant y Win + Mayús + S | Desactivado | Esas teclas abren el recorte de Kata en vez de Recortes. Apagado, vuelven a Windows al instante. |
+| Kata es tu app de capturas | Desactivado | `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`) y `Win + Mayús + S` abren el recorte de Kata en vez de Recortes. Apagado, vuelven a Windows al instante. Lo explica el icono «i» de al lado, al dejar el cursor quieto encima. |
 | Abrir el editor al capturar | Activado | Apagado, la captura solo se copia y se guarda. |
 | Sonido | Activado | Al encenderlo suena, para oírlo. |
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |
@@ -63,7 +63,6 @@ En este orden:
 2. **Zoom en el editor.** La rueda del ratón acerca y aleja la captura, hacia donde está el cursor. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones.
 3. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
 4. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-5. **Un ajuste de Impr Pant que se entienda.** Que diga algo como «Kata es tu app de capturas», con un icono «i» que, al pasar el cursor, explique qué teclas toma (`Impr Pant`, sola o con `Alt`, `Win`, `Ctrl` o `Mayús`, y `Win + Mayús + S`) y qué pasa al apagarlo.
 
 ## Fuera de alcance por ahora
 
