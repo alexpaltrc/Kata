@@ -70,7 +70,8 @@ pub fn mouse_position(lparam: LPARAM) -> (i32, i32) {
     (x.into(), y.into())
 }
 
-/// The screen position carried by `WM_NCHITTEST`, in client pixels.
+/// The screen position carried by `WM_NCHITTEST` and `WM_MOUSEWHEEL`, in client
+/// pixels.
 pub fn hit_position(hwnd: HWND, lparam: LPARAM) -> (i32, i32) {
     let (x, y) = mouse_position(lparam);
     let mut point = POINT { x, y };

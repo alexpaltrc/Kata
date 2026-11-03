@@ -5,10 +5,10 @@ use windows::{
     Win32::Graphics::{
         Direct2D::{
             Common::{D2D_RECT_F, D2D1_COLOR_F},
-            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-            D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-            D2D1_LAYER_PARAMETERS1, D2D1_ROUNDED_RECT, ID2D1Bitmap, ID2D1DeviceContext, ID2D1Layer,
-            ID2D1SolidColorBrush,
+            D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+            D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_PARAMETERS1, D2D1_ROUNDED_RECT,
+            ID2D1Bitmap, ID2D1DeviceContext, ID2D1Layer, ID2D1SolidColorBrush,
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
@@ -169,6 +169,16 @@ impl<'a> Painter<'a> {
                 self.context.PopLayer();
             }
             self.context.SetTransform(&outer);
+        }
+    }
+
+    /// Draws what `draw` paints, only inside `area`.
+    pub fn clip(&self, area: Area, draw: impl FnOnce()) {
+        unsafe {
+            self.context
+                .PushAxisAlignedClip(&area.rect(), D2D1_ANTIALIAS_MODE_ALIASED);
+            draw();
+            self.context.PopAxisAlignedClip();
         }
     }
 

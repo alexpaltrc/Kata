@@ -21,6 +21,7 @@ Reglas:
 - Se ve un solo slider, el de la herramienta activa. Tiene pocos niveles y recuerda el último valor usado.
 - Un clic selecciona un rectángulo: se mueve arrastrándolo, se redimensiona desde sus esquinas y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover el slider cambia el rectángulo seleccionado.
 - Un rectángulo que cubre toda la captura no tiene adónde moverse: arrastrar sobre él dibuja uno nuevo con la herramienta activa.
+- **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
 - `1` y `2` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
 - La herramienta, los niveles y el Autoguardado se recuerdan para la siguiente captura.
 
@@ -60,9 +61,8 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 
 En este orden:
 
-1. **Zoom en el editor.** La rueda del ratón acerca y aleja la captura, hacia donde está el cursor. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones.
-2. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
-3. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
+1. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
+2. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 
 ## Fuera de alcance por ahora
 

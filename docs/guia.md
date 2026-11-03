@@ -52,6 +52,8 @@ Solo hay dos herramientas. Se arrastra sobre la captura para usarlas.
   el rectángulo seleccionado.
 - Si un rectángulo cubre toda la captura, arrastrar sobre él dibuja uno nuevo; un clic lo
   selecciona.
+- **Zoom:** la rueda del ratón acerca y aleja la captura hacia donde está el cursor. `Ctrl + 0`
+  la devuelve a su tamaño.
 - Kata recuerda la herramienta, sus niveles y el Autoguardado para la siguiente captura.
 
 ## Guardar y copiar, sin pensar
@@ -82,6 +84,8 @@ Solo hay dos herramientas. Se arrastra sobre la captura para usarlas.
 | `Ctrl + C` | Copiar |
 | `Supr` o `Retroceso` | Borrar el rectángulo seleccionado |
 | `Esc` (en el editor) | Quitar la selección |
+| Rueda del ratón | Acercar o alejar la captura |
+| `Ctrl + 0` | Devolver la captura a su tamaño |
 
 ## Bandeja y ventana principal
 

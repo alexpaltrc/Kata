@@ -19,32 +19,37 @@ use kata_ui::{
     access::{self, Access},
     controls::Action,
     motion::{self, Animation, Easing},
-    paint::{Area, Fonts, Label, Point},
+    paint::{Area, Fonts, Label, Painter, Point},
     theme::{Palette, faded},
     window::{self, WorkArea},
 };
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
-        Graphics::Gdi::{
-            InvalidateRect, MONITOR_DEFAULTTONEAREST, MonitorFromRect, ScreenToClient, ValidateRect,
+        Graphics::{
+            Direct2D::ID2D1Bitmap1,
+            Gdi::{
+                InvalidateRect, MONITOR_DEFAULTTONEAREST, MonitorFromRect, ScreenToClient,
+                ValidateRect,
+            },
         },
         UI::{
             Controls::WM_MOUSELEAVE,
             HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
-                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_1, VK_2, VK_BACK, VK_C, VK_CONTROL,
-                VK_DELETE, VK_ESCAPE, VK_NUMPAD1, VK_NUMPAD2, VK_S, VK_SHIFT, VK_TAB, VK_Y, VK_Z,
+                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_BACK, VK_C,
+                VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_S,
+                VK_SHIFT, VK_TAB, VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
                 IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENWSE, LoadCursorW,
                 PostMessageW, SIZE_MINIMIZED, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor,
-                SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_CAPTURECHANGED, WM_CLOSE,
-                WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
+                SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WHEEL_DELTA, WM_CAPTURECHANGED,
+                WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
                 WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE,
-                WM_SIZE,
+                WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETCURSOR,
+                WM_SETTINGCHANGE, WM_SIZE,
             },
         },
     },
@@ -57,7 +62,7 @@ use crate::{
     report,
     settings::EditorSettings,
 };
-use canvas::{Gpu, HANDLE_REACH, View, WHITE};
+use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
 
 /// The title bar's height, in DIPs. The toolbar sits in it.
@@ -68,6 +73,8 @@ const MARGIN: f32 = 24.0;
 const MIN_CANVAS: f32 = 100.0;
 /// The most of the screen a new editor takes, in each direction.
 const MAX_SHARE: f32 = 0.85;
+/// How much each notch of the mouse wheel zooms.
+const ZOOM_STEP: f32 = 1.25;
 const CLASS: PCWSTR = w!("Kata.Editor");
 
 /// A capture to edit.
@@ -160,6 +167,7 @@ unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Resul
             toolbar,
             chip,
             view: View::default(),
+            glide: Glide::rest(View::default()),
             gpu: Some(gpu),
             selected: None,
             hovered: None,
@@ -280,7 +288,9 @@ struct Editor {
     toolbar: Toolbar,
     /// The remove chip's glyph.
     chip: Label,
+    /// Where the capture shows, and where it's heading as it zooms.
     view: View,
+    glide: Glide,
     /// Made again after the graphics device goes away.
     gpu: Option<Gpu>,
     selected: Option<Shape>,
@@ -319,6 +329,7 @@ impl Editor {
                     self.invalidate();
                 }
             }
+            WM_MOUSEWHEEL => self.wheel(wparam, lparam),
             WM_LBUTTONDOWN => self.press(self.point(lparam)),
             WM_LBUTTONUP => self.release(self.point(lparam)),
             // Another window took the pointer.
@@ -378,14 +389,19 @@ impl Editor {
         }
     }
 
-    /// Shows what pressing would do.
-    fn set_cursor(&self) {
+    /// Where the pointer is now, in DIPs.
+    fn pointer(&self) -> Point {
         let mut pointer = POINT::default();
         unsafe {
             let _ = GetCursorPos(&mut pointer);
             let _ = ScreenToClient(self.hwnd, &mut pointer);
         }
-        let point = (pointer.x as f32 / self.scale, pointer.y as f32 / self.scale);
+        (pointer.x as f32 / self.scale, pointer.y as f32 / self.scale)
+    }
+
+    /// Shows what pressing would do.
+    fn set_cursor(&self) {
+        let point = self.pointer();
         let cursor = if self.toolbar.part_at(point).is_some() || self.chip_at(point) {
             IDC_ARROW
         } else if let Some(corner) = self.handle_at(point) {
@@ -407,6 +423,26 @@ impl Editor {
                 SetCursor(Some(cursor));
             }
         }
+    }
+
+    /// Zooms the capture around the pointer, as `WM_MOUSEWHEEL` asks: in as the wheel
+    /// turns away from the user, out as it turns back, down to fitting the window.
+    fn wheel(&mut self, wparam: WPARAM, lparam: LPARAM) {
+        if self.gesture.is_some() {
+            return;
+        }
+        let (x, y) = window::hit_position(self.hwnd, lparam);
+        let at = (x as f32 / self.scale, y as f32 / self.scale);
+        let notches = f32::from((wparam.0 >> 16) as u16 as i16) / WHEEL_DELTA as f32;
+        let to = self
+            .frame()
+            .zoom(self.glide.target(), ZOOM_STEP.powf(notches), at);
+        self.glide_to(to);
+    }
+
+    fn glide_to(&mut self, view: View) {
+        self.glide = self.glide.retarget(view, Instant::now());
+        self.invalidate();
     }
 
     fn pointer_moved(&mut self, point: Point) {
@@ -606,6 +642,7 @@ impl Editor {
             VK_Z if ctrl => self.step(Document::undo),
             VK_DELETE | VK_BACK => self.remove_selected(),
             VK_ESCAPE => self.select(None),
+            VK_0 | VK_NUMPAD0 if ctrl => self.glide_to(self.frame().fit()),
             VK_S if ctrl => self.save(),
             VK_C if ctrl => {
                 self.render_document();
@@ -830,6 +867,15 @@ impl Editor {
     fn paint(&mut self) {
         let _ = unsafe { ValidateRect(Some(self.hwnd), None) };
         let now = Instant::now();
+        let view = self.glide.at(now);
+        if view != self.view {
+            self.view = view;
+            // The capture moved under the pointer.
+            if self.tracking && self.gesture.is_none() {
+                self.hover(Some(self.pointer()));
+                self.set_cursor();
+            }
+        }
         let zoom = self.zoom.value(now);
         let spot = self.edits.focus.map(|focus| Spot {
             rect: focus.rect,
@@ -855,7 +901,8 @@ impl Editor {
             // The graphics device went away (a driver update, say): start over.
             Err(_) => self.invalidate(),
         }
-        if self.toolbar.is_animating(now) || self.zoom.is_running(now) {
+        if self.toolbar.is_animating(now) || self.zoom.is_running(now) || self.glide.is_running(now)
+        {
             self.invalidate();
         }
         if self.unpublished && self.gesture.is_none() && !self.zoom.is_running(now) {
@@ -876,35 +923,44 @@ impl Editor {
     fn draw(&self, gpu: &mut Gpu, now: Instant) -> Result<()> {
         let Gpu { surface, image } = gpu;
         surface.draw(&self.palette, self.scale, |painter| {
-            let capture = self.view.area(self.bounds());
-            painter.bitmap(image, capture);
-            let border = painter.pixel();
-            painter.stroke(
-                capture.inflate(border),
-                0.0,
-                border,
-                self.palette.card_stroke,
-            );
-            if self.gesture.is_none()
-                && let Some(shape) = self.hovered.filter(|&shape| Some(shape) != self.selected)
-                && let Some(area) = self.shape_area(shape, now)
-            {
-                let color = faded(WHITE, 0.9);
-                canvas::draw_outline(painter, area, self.radius(shape), canvas::HOVERED, color);
-            }
-            if let Some(shape) = self.selected
-                && let Some(area) = self.shape_area(shape, now)
-            {
-                let accent = self.palette.accent;
-                canvas::draw_outline(painter, area, self.radius(shape), canvas::SELECTED, accent);
-                canvas::draw_handles(painter, area);
-                if matches!(self.gesture, None | Some(Gesture::Remove)) {
-                    let center = canvas::chip(area, self.width());
-                    canvas::draw_chip(painter, center, &self.chip, self.chip_hovered);
-                }
-            }
+            let (width, height) = self.window();
+            // A zoomed capture slides under the title bar, out of sight.
+            let canvas = Area::new(0.0, TITLE_BAR, width, height - TITLE_BAR);
+            painter.clip(canvas, || self.draw_capture(painter, image, now));
             self.toolbar.draw(painter, now);
         })
+    }
+
+    /// The capture with its frame, and the outlines, handles and chip over it.
+    fn draw_capture(&self, painter: &Painter, image: &ID2D1Bitmap1, now: Instant) {
+        let capture = self.view.area(self.bounds());
+        painter.bitmap(image, capture);
+        let border = painter.pixel();
+        painter.stroke(
+            capture.inflate(border),
+            0.0,
+            border,
+            self.palette.card_stroke,
+        );
+        if self.gesture.is_none()
+            && let Some(shape) = self.hovered.filter(|&shape| Some(shape) != self.selected)
+            && let Some(area) = self.shape_area(shape, now)
+        {
+            let color = faded(WHITE, 0.9);
+            canvas::draw_outline(painter, area, self.radius(shape), canvas::HOVERED, color);
+        }
+        if let Some(shape) = self.selected
+            && let Some(area) = self.shape_area(shape, now)
+        {
+            let accent = self.palette.accent;
+            canvas::draw_outline(painter, area, self.radius(shape), canvas::SELECTED, accent);
+            canvas::draw_handles(painter, area);
+            if matches!(self.gesture, None | Some(Gesture::Remove))
+                && let Some(center) = canvas::chip(area, self.window())
+            {
+                canvas::draw_chip(painter, center, &self.chip, self.chip_hovered);
+            }
+        }
     }
 
     /// Follows the window's new size.
@@ -935,13 +991,10 @@ impl Editor {
         self.invalidate();
     }
 
+    /// Fits the capture in the window again, unzoomed, and places the toolbar.
     fn layout(&mut self) {
-        let room = (
-            self.size.0 as f32 / self.scale,
-            self.size.1 as f32 / self.scale,
-        );
-        let image = self.document.image();
-        self.view = View::fit(room, (image.width(), image.height()), self.scale);
+        self.view = self.frame().fit();
+        self.glide = Glide::rest(self.view);
         self.toolbar
             .layout(window::caption_buttons(self.hwnd, self.scale).left);
     }
@@ -998,7 +1051,8 @@ impl Editor {
     fn chip_at(&self, point: Point) -> bool {
         self.selected
             .and_then(|shape| self.shape_area(shape, Instant::now()))
-            .is_some_and(|area| canvas::chip_contains(canvas::chip(area, self.width()), point))
+            .and_then(|area| canvas::chip(area, self.window()))
+            .is_some_and(|center| canvas::chip_contains(center, point))
     }
 
     /// Whether `shape` covers the whole capture. It has nowhere to move, so dragging
@@ -1012,9 +1066,21 @@ impl Editor {
         self.document.image().bounds()
     }
 
-    /// The window's width, in DIPs.
-    fn width(&self) -> f32 {
-        self.size.0 as f32 / self.scale
+    /// The window's size, in DIPs.
+    fn window(&self) -> (f32, f32) {
+        (
+            self.size.0 as f32 / self.scale,
+            self.size.1 as f32 / self.scale,
+        )
+    }
+
+    fn frame(&self) -> Frame {
+        let image = self.document.image();
+        Frame {
+            window: self.window(),
+            image: (image.width(), image.height()),
+            scale: self.scale,
+        }
     }
 
     fn dpi(&self) -> u32 {

@@ -36,6 +36,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 - **Efectos en el procesador:** el desenfoque y el foco se calculan con Rust puro (`crates/editor`). Lo que se ve en pantalla es exactamente lo que se guarda y se copia, y se puede probar sin Windows.
 - **Solo lo que cambia:** tras cada edición se recalcula y se envía a la tarjeta gráfica únicamente la zona afectada.
 - **En todos los núcleos:** el Foco se dibuja por franjas de filas, una por núcleo, a la vez. Un Foco sobre toda una captura 4K pasó de 55 a 11 ms por cuadro de su animación.
+- **Zoom:** cada paso de la rueda acerca un 25 %, hasta que cada píxel de la captura ocupa 8 de la pantalla. Solo cambia cómo la tarjeta gráfica dibuja la captura, así que no se recalcula ningún píxel. Va y viene en 167 ms; el píxel bajo el cursor no se mueve en todo el camino, porque la posición y la escala avanzan a la par.
 - **Entrega:** la captura se copia y se guarda en cuanto se abre el editor. Cada cambio, al terminar, se copia de nuevo (y, con Autoguardado, se guarda). Al cerrar, se entrega lo último.
 - **Deshacer:** el historial vive solo en memoria, mientras el editor está abierto.
 

@@ -1,9 +1,12 @@
 //! Showing the capture: its place in the window, its copy on the graphics card, and
 //! the outlines, handles and chip drawn over it.
 
+use std::time::Instant;
+
 use kata_editor::{Image, Rect};
 use kata_ui::{
     Graphics, Surface,
+    motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
 };
 use windows::{
@@ -34,6 +37,8 @@ pub const HANDLE_REACH: f32 = 8.0;
 /// The remove chip's radius, and where it sits from the shape's top-right corner.
 const CHIP: f32 = 10.0;
 const CHIP_OFFSET: f32 = 16.0;
+/// The most the capture magnifies: each of its pixels this many screen pixels wide.
+const MAX_ZOOM: f32 = 8.0;
 
 const SHADOW: D2D1_COLOR_F = D2D1_COLOR_F {
     r: 0.0,
@@ -105,8 +110,74 @@ impl Gpu {
     }
 }
 
+/// What the capture shows in: a window of `window` DIPs, each `scale` pixels wide,
+/// for an image of `image` pixels.
+#[derive(Clone, Copy)]
+pub struct Frame {
+    pub window: (f32, f32),
+    pub image: (u32, u32),
+    pub scale: f32,
+}
+
+impl Frame {
+    /// The capture centered below the title bar: pixel for pixel when it fits, and
+    /// shrunk to fit otherwise.
+    pub fn fit(&self) -> View {
+        let room = self.room();
+        let zoom = (1.0 / self.scale)
+            .min(room.0 / self.image.0 as f32)
+            .min(room.1 / self.image.1 as f32)
+            .max(1e-3);
+        self.place(View {
+            left: 0.0,
+            top: 0.0,
+            zoom,
+        })
+    }
+
+    /// `view` magnified `factor` times around `at`, no less than fitting and no more
+    /// than `MAX_ZOOM`.
+    pub fn zoom(&self, view: View, factor: f32, at: Point) -> View {
+        let zoom = (view.zoom * factor).clamp(self.fit().zoom, MAX_ZOOM / self.scale);
+        let grow = zoom / view.zoom;
+        self.place(View {
+            left: at.0 - (at.0 - view.left) * grow,
+            top: at.1 - (at.1 - view.top) * grow,
+            zoom,
+        })
+    }
+
+    /// The room for the capture, inside the margins.
+    fn room(&self) -> (f32, f32) {
+        (
+            self.window.0 - 2.0 * MARGIN,
+            self.window.1 - TITLE_BAR - 2.0 * MARGIN,
+        )
+    }
+
+    /// `view`, centered along each side the capture fits, and filling the room along
+    /// each side it doesn't.
+    fn place(&self, view: View) -> View {
+        let room = self.room();
+        let snap = |value: f32| (value * self.scale).round() / self.scale;
+        let place = |at: f32, start: f32, room: f32, pixels: u32| {
+            let size = pixels as f32 * view.zoom;
+            snap(if size <= room {
+                start + (room - size) / 2.0
+            } else {
+                at.clamp(start + room - size, start)
+            })
+        };
+        View {
+            left: place(view.left, MARGIN, room.0, self.image.0),
+            top: place(view.top, TITLE_BAR + MARGIN, room.1, self.image.1),
+            zoom: view.zoom,
+        }
+    }
+}
+
 /// Where the capture sits in the window.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct View {
     /// The capture's top-left corner, in DIPs.
     left: f32,
@@ -116,21 +187,14 @@ pub struct View {
 }
 
 impl View {
-    /// Centers an image of `image` pixels below the title bar of a window of `window`
-    /// DIPs, each `scale` pixels wide. It shows pixel for pixel when it fits, and
-    /// shrinks to fit otherwise.
-    pub fn fit(window: (f32, f32), image: (u32, u32), scale: f32) -> Self {
-        let room = (window.0 - 2.0 * MARGIN, window.1 - TITLE_BAR - 2.0 * MARGIN);
-        let zoom = (1.0 / scale)
-            .min(room.0 / image.0 as f32)
-            .min(room.1 / image.1 as f32)
-            .max(1e-3);
-        let snap = |value: f32| (value * scale).round() / scale;
-        let (width, height) = (image.0 as f32 * zoom, image.1 as f32 * zoom);
+    /// The view `progress` of the way to `to`. A capture pixel both show in the same
+    /// place stays there all the way.
+    fn toward(self, to: Self, progress: f32) -> Self {
+        let mix = |from: f32, to: f32| from + (to - from) * progress;
         Self {
-            left: snap((window.0 - width) / 2.0),
-            top: snap(TITLE_BAR + (window.1 - TITLE_BAR - height) / 2.0),
-            zoom,
+            left: mix(self.left, to.left),
+            top: mix(self.top, to.top),
+            zoom: mix(self.zoom, to.zoom),
         }
     }
 
@@ -161,6 +225,45 @@ impl View {
     }
 }
 
+/// A view gliding to another as the capture zooms.
+#[derive(Clone, Copy)]
+pub struct Glide {
+    from: View,
+    to: View,
+    progress: Animation,
+}
+
+impl Glide {
+    pub fn rest(view: View) -> Self {
+        Self {
+            from: view,
+            to: view,
+            progress: Animation::idle(1.0),
+        }
+    }
+
+    /// Heads for `to` from where the view is now.
+    pub fn retarget(&self, to: View, now: Instant) -> Self {
+        Self {
+            from: self.at(now),
+            to,
+            progress: Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE),
+        }
+    }
+
+    pub fn target(&self) -> View {
+        self.to
+    }
+
+    pub fn at(&self, now: Instant) -> View {
+        self.from.toward(self.to, self.progress.value(now))
+    }
+
+    pub fn is_running(&self, now: Instant) -> bool {
+        self.progress.is_running(now)
+    }
+}
+
 /// A rectangle's corners, clockwise from the top-left.
 pub fn corners<T: Copy>(left: T, top: T, right: T, bottom: T) -> [(T, T); 4] {
     [(left, top), (right, top), (right, bottom), (left, bottom)]
@@ -172,12 +275,19 @@ pub fn handles(shape: Area) -> [Point; 4] {
     corners(line.left, line.top, line.right(), line.bottom())
 }
 
-/// Where a shape's remove chip is, in a window `width` DIPs wide.
-pub fn chip(shape: Area, width: f32) -> Point {
-    (
-        (shape.right() + CHIP_OFFSET).min(width - CHIP - 4.0),
-        (shape.top - CHIP_OFFSET).max(TITLE_BAR + CHIP + 2.0),
-    )
+/// Where a shape's remove chip is, in a window of `window` DIPs, while the shape
+/// shows in it.
+pub fn chip(shape: Area, window: (f32, f32)) -> Option<Point> {
+    let shows = shape.right() > 0.0
+        && shape.left < window.0
+        && shape.bottom() > TITLE_BAR
+        && shape.top < window.1;
+    shows.then(|| {
+        (
+            (shape.right() + CHIP_OFFSET).min(window.0 - CHIP - 4.0),
+            (shape.top - CHIP_OFFSET).max(TITLE_BAR + CHIP + 2.0),
+        )
+    })
 }
 
 pub fn chip_contains(center: Point, point: Point) -> bool {
@@ -220,4 +330,40 @@ pub fn draw_chip(painter: &Painter, center: Point, glyph: &Label, hovered: bool)
     }
     painter.ring(center, CHIP, painter.pixel(), palette.control_stroke);
     painter.text(glyph, center.0 - glyph.width / 2.0, center.1, palette.text);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 1000 x 500 window at 100 %, for a capture twice as big.
+    const FRAME: Frame = Frame {
+        window: (1000.0, 500.0),
+        image: (1904, 856),
+        scale: 1.0,
+    };
+
+    #[test]
+    fn zooming_keeps_the_pixel_under_the_pointer() {
+        let at = (600.0, 300.0);
+        let fit = FRAME.fit();
+        let zoomed = FRAME.zoom(fit, 2.0, at);
+        assert_eq!(zoomed.zoom, 2.0 * fit.zoom);
+        assert_eq!(fit.pixel(at), zoomed.pixel(at));
+    }
+
+    #[test]
+    fn zoom_stays_between_fitting_and_the_most() {
+        let fit = FRAME.fit();
+        assert_eq!(FRAME.zoom(fit, 0.5, (0.0, 0.0)), fit);
+        let most = FRAME.zoom(fit, 1000.0, (500.0, 300.0));
+        assert_eq!(most.zoom, MAX_ZOOM);
+    }
+
+    #[test]
+    fn a_zoomed_capture_leaves_no_gap_at_its_edges() {
+        let zoomed = FRAME.zoom(FRAME.fit(), 4.0, (0.0, TITLE_BAR));
+        let capture = zoomed.area(Rect::new(0, 0, 1904, 856));
+        assert_eq!((capture.left, capture.top), (MARGIN, TITLE_BAR + MARGIN));
+    }
 }
