@@ -59,7 +59,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 
 ## Icono
 
-Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. Azul, sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
+Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el naranja de Kata, un caqui cálido que contrasta con todo y es el mismo de los pasos; sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
 
 ## Pendiente
 

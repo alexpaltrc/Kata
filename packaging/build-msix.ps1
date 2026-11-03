@@ -62,12 +62,13 @@ $assets = Join-Path $stage "Assets"
 New-Item -ItemType Directory -Force $assets | Out-Null
 
 # --- Logos: Kata's glyph, the four corners of the tray icon (crates/ui/src/icon.rs), around a lit
-# area: the Focus. No plate, like Windows 11's own icons, in Fluent blues lit from the top left.
+# area: the Focus. No plate, like Windows 11's own icons, in Kata's persimmon orange (the one its
+# step markers use), lit from the top left.
 # `share` is how much of the image the glyph's 16-unit grid takes, which tiles keep small.
-$Bright = [System.Drawing.Color]::FromArgb(0x3A, 0xB0, 0xFF)
-$Deep = [System.Drawing.Color]::FromArgb(0x00, 0x5A, 0xC8)
-$Glow = [System.Drawing.Color]::FromArgb(0xD2, 0xF0, 0xFF)
-$Lit = [System.Drawing.Color]::FromArgb(0x7F, 0xCF, 0xFF)
+$Bright = [System.Drawing.Color]::FromArgb(0xFF, 0xA3, 0x5E)
+$Deep = [System.Drawing.Color]::FromArgb(0xEC, 0x5A, 0x22)
+$Glow = [System.Drawing.Color]::FromArgb(0xFF, 0xD6, 0xAE)
+$Lit = [System.Drawing.Color]::FromArgb(0xFF, 0x9E, 0x5C)
 
 function Rounded([single]$left, [single]$top, [single]$width, [single]$height, [single]$radius) {
     $d = 2 * $radius
