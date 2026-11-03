@@ -111,12 +111,14 @@ impl Gpu {
 }
 
 /// What the capture shows in: a window of `window` DIPs, each `scale` pixels wide,
-/// for an image of `image` pixels.
+/// for an image of `image` pixels, with the toolbar taking `bottom` DIPs at the
+/// bottom.
 #[derive(Clone, Copy)]
 pub struct Frame {
     pub window: (f32, f32),
     pub image: (u32, u32),
     pub scale: f32,
+    pub bottom: f32,
 }
 
 impl Frame {
@@ -147,11 +149,11 @@ impl Frame {
         })
     }
 
-    /// The room for the capture, inside the margins.
+    /// The room for the capture, inside the margins and above the toolbar.
     fn room(&self) -> (f32, f32) {
         (
             self.window.0 - 2.0 * MARGIN,
-            self.window.1 - TITLE_BAR - 2.0 * MARGIN,
+            self.window.1 - TITLE_BAR - MARGIN - self.bottom,
         )
     }
 
@@ -341,6 +343,7 @@ mod tests {
         window: (1000.0, 500.0),
         image: (1904, 856),
         scale: 1.0,
+        bottom: 124.0,
     };
 
     #[test]

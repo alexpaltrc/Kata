@@ -3,18 +3,12 @@
 
 use std::time::Instant;
 
-use super::{Action, Control};
+use super::{Action, Control, tip};
 use crate::{
     access::Element,
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
 };
-
-/// Between the glyph's square and the tooltip.
-const GAP: f32 = 4.0;
-/// Around the tooltip's text: on each side, above and below, as in Fluent.
-const PADDING: (f32, f32, f32) = (9.0, 6.0, 8.0);
-const RADIUS: f32 = 8.0;
 
 pub struct Info {
     glyph: Label,
@@ -72,16 +66,8 @@ impl Info {
 
     /// Draws the tooltip, while it shows. It goes over everything else.
     pub fn draw_tip(&self, painter: &Painter, now: Instant) {
-        let palette = painter.palette;
-        painter.layer(self.shown.value(now), 0.0, || {
-            let tip = painter.align(self.tip());
-            painter.shadow(tip, RADIUS, palette.shadow);
-            painter.fill(tip, RADIUS, palette.flyout);
-            painter.stroke(tip, RADIUS, painter.border(), palette.flyout_stroke);
-            let (side, above, _) = PADDING;
-            let middle = tip.top + above + self.text.height / 2.0;
-            painter.text(&self.text, tip.left + side, middle, palette.text);
-        });
+        let shown = self.shown.value(now);
+        tip::draw(painter, &self.text, self.area(), self.bounds, shown);
     }
 
     fn show(&mut self, shown: bool) {
@@ -93,25 +79,6 @@ impl Info {
 
     fn area(&self) -> Area {
         Area::new(self.left, self.top, Self::SIZE, Self::SIZE)
-    }
-
-    /// Centered above the glyph, or below it when there's no room above.
-    fn tip(&self) -> Area {
-        let (side, above, below) = PADDING;
-        let width = self.text.width + 2.0 * side;
-        let height = above + self.text.height + below;
-        let glyph = self.area();
-        let centered = glyph.left + (glyph.width - width) / 2.0;
-        let left = centered
-            .min(self.bounds.right() - width)
-            .max(self.bounds.left);
-        let over = glyph.top - GAP - height;
-        let top = if over >= self.bounds.top {
-            over
-        } else {
-            glyph.bottom() + GAP
-        };
-        Area::new(left, top, width, height)
     }
 }
 

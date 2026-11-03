@@ -3,6 +3,7 @@
 //! capture's file.
 
 mod canvas;
+mod icons;
 mod toolbar;
 
 use std::{
@@ -34,7 +35,7 @@ use windows::{
             },
         },
         UI::{
-            Controls::WM_MOUSELEAVE,
+            Controls::{WM_MOUSEHOVER, WM_MOUSELEAVE},
             HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
                 ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_BACK, VK_C,
@@ -65,7 +66,7 @@ use crate::{
 use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
 
-/// The title bar's height, in DIPs. The toolbar sits in it.
+/// The title bar's height, in DIPs. Saving sits in it.
 const TITLE_BAR: f32 = 48.0;
 /// The least room around the capture.
 const MARGIN: f32 = 24.0;
@@ -112,7 +113,7 @@ pub fn close() {
 unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
     let settings = EditorSettings::load();
-    let toolbar = Toolbar::new(&fonts, &settings)?;
+    let toolbar = Toolbar::new(graphics, &fonts, &settings, false)?;
     let chip = fonts.icon('\u{E711}', 10.0)?;
     let palette = Palette::current();
     let min = min_size(&toolbar);
@@ -135,7 +136,7 @@ unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Resul
             (image.0 + 2.0 * MARGIN * scale)
                 .min(work.width() as f32 * MAX_SHARE)
                 .max((min.0 * scale).ceil()),
-            (image.1 + (TITLE_BAR + 2.0 * MARGIN) * scale)
+            (image.1 + (TITLE_BAR + MARGIN + toolbar.bottom()) * scale)
                 .min(work.height() as f32 * MAX_SHARE)
                 .max((min.1 * scale).ceil()),
         );
@@ -225,8 +226,8 @@ unsafe fn release(hwnd: HWND) {
 /// The smallest client area, in DIPs: the toolbar and a little of the capture.
 fn min_size(toolbar: &Toolbar) -> (f32, f32) {
     (
-        toolbar.min_width() + window::CAPTION_BUTTONS,
-        TITLE_BAR + 2.0 * MARGIN + MIN_CANVAS,
+        toolbar.min_width(),
+        TITLE_BAR + MARGIN + MIN_CANVAS + toolbar.bottom(),
     )
 }
 
@@ -329,6 +330,12 @@ impl Editor {
                     self.invalidate();
                 }
             }
+            // The pointer rested: a tool's name may show.
+            WM_MOUSEHOVER => {
+                if self.gesture.is_none() && self.toolbar.rest(self.point(lparam)) {
+                    self.invalidate();
+                }
+            }
             WM_MOUSEWHEEL => self.wheel(wparam, lparam),
             WM_LBUTTONDOWN => self.press(self.point(lparam)),
             WM_LBUTTONUP => self.release(self.point(lparam)),
@@ -402,7 +409,7 @@ impl Editor {
     /// Shows what pressing would do.
     fn set_cursor(&self) {
         let point = self.pointer();
-        let cursor = if self.toolbar.part_at(point).is_some() || self.chip_at(point) {
+        let cursor = if self.toolbar.covers(point) || self.chip_at(point) {
             IDC_ARROW
         } else if let Some(corner) = self.handle_at(point) {
             // The top-left and bottom-right corners pull along one diagonal.
@@ -456,12 +463,16 @@ impl Editor {
         if changed {
             self.invalidate();
         }
+        // A tool's name shows once the pointer stops moving.
+        if self.gesture.is_none() && self.toolbar.awaits_rest() {
+            window::track_mouse_rest(self.hwnd);
+        }
     }
 
     /// Follows the pointer while no button is down. Returns whether the look changes.
     fn hover(&mut self, point: Option<Point>) -> bool {
         let toolbar = self.toolbar.hover(point);
-        let chip = point.is_some_and(|point| self.chip_at(point));
+        let chip = point.is_some_and(|point| !self.toolbar.covers(point) && self.chip_at(point));
         let shape = point
             .filter(|_| !chip)
             .and_then(|point| self.shape_at(point));
@@ -478,6 +489,8 @@ impl Editor {
                 self.slider_changed(part);
             }
             Gesture::Control(part)
+        } else if self.toolbar.covers(point) {
+            return;
         } else if self.chip_at(point) {
             Gesture::Remove
         } else if let Some(shape) = self.selected
@@ -731,6 +744,7 @@ impl Editor {
 
     /// Only a shape of the current tool stays selected.
     fn tool_changed(&mut self) {
+        self.toolbar.follow_tool();
         let tool = self.toolbar.tool();
         self.selected = self.selected.filter(|&shape| Tool::of(shape) == tool);
     }
@@ -995,8 +1009,8 @@ impl Editor {
     fn layout(&mut self) {
         self.view = self.frame().fit();
         self.glide = Glide::rest(self.view);
-        self.toolbar
-            .layout(window::caption_buttons(self.hwnd, self.scale).left);
+        let caption_buttons = window::caption_buttons(self.hwnd, self.scale).left;
+        self.toolbar.layout(self.window(), caption_buttons);
     }
 
     /// Where `shape` shows, in capture pixels: a focus follows its zoom as it glides.
@@ -1031,7 +1045,7 @@ impl Editor {
 
     /// The topmost shape under `point`.
     fn shape_at(&self, point: Point) -> Option<Shape> {
-        if point.1 < TITLE_BAR {
+        if point.1 < TITLE_BAR || self.toolbar.covers(point) {
             return None;
         }
         let (x, y) = self.view.pixel(point);
@@ -1080,6 +1094,7 @@ impl Editor {
             window: self.window(),
             image: (image.width(), image.height()),
             scale: self.scale,
+            bottom: self.toolbar.bottom(),
         }
     }
 

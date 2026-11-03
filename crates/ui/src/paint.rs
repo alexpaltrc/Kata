@@ -8,7 +8,7 @@ use windows::{
             D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
             D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
             D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_PARAMETERS1, D2D1_ROUNDED_RECT,
-            ID2D1Bitmap, ID2D1DeviceContext, ID2D1Layer, ID2D1SolidColorBrush,
+            ID2D1Bitmap, ID2D1Brush, ID2D1DeviceContext, ID2D1Layer, ID2D1SolidColorBrush,
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
@@ -22,6 +22,7 @@ use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::{
     Graphics,
+    figure::Figure,
     theme::{Palette, faded},
 };
 
@@ -196,6 +197,33 @@ impl<'a> Painter<'a> {
         for n in 0..STEPS {
             let by = BLUR * ((f32::from(n) + 0.5) / f32::from(STEPS) - 0.5);
             self.fill(below.inflate(by), (radius + by).max(0.0), step);
+        }
+    }
+
+    /// A surface raised over the window, such as a tooltip: its shadow, its fill and
+    /// a hairline around it.
+    pub fn flyout(&self, area: Area, radius: f32) {
+        let area = self.align(area);
+        self.shadow(area, radius, self.palette.shadow);
+        self.fill(area, radius, self.palette.flyout);
+        self.stroke(area, radius, self.border(), self.palette.flyout_stroke);
+    }
+
+    /// Fills `figure`, drawn with its origin at `origin` on a pixel edge, so the
+    /// same figure looks the same anywhere.
+    pub fn figure(&self, figure: &Figure, (x, y): Point, color: D2D1_COLOR_F) {
+        if color.a <= 0.0 {
+            return;
+        }
+        let mut outer = Matrix3x2::default();
+        unsafe {
+            self.context.GetTransform(&mut outer);
+            let at = Matrix3x2::translation(self.snap(x), self.snap(y));
+            self.context.SetTransform(&(at * outer));
+            self.brush.SetColor(&color);
+            self.context
+                .FillGeometry(&figure.geometry, self.brush, None::<&ID2D1Brush>);
+            self.context.SetTransform(&outer);
         }
     }
 

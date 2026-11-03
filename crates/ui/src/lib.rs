@@ -2,6 +2,7 @@
 
 pub mod access;
 pub mod controls;
+pub mod figure;
 mod graphics;
 pub mod icon;
 pub mod motion;
