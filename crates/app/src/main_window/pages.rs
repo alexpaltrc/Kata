@@ -32,7 +32,7 @@ const HINT_GAP: f32 = 12.0;
 const INFO_GAP: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 const MIN_WIDTH: f32 = 320.0;
-const CARDS: usize = 6;
+const CARDS: usize = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Page {
@@ -49,6 +49,7 @@ pub enum Part {
     ScreenKeysInfo,
     ScreenKeys,
     OpenEditor,
+    ToolNames,
     Sound,
     Folder,
     Startup,
@@ -84,6 +85,7 @@ pub struct Pages {
     screen_keys: Toggle,
     screen_keys_info: Info,
     open_editor: Toggle,
+    tool_names: Toggle,
     sound: Toggle,
     folder_title: Label,
     folder: PathBuf,
@@ -127,6 +129,7 @@ impl Pages {
                 fonts.wrapped(text.screen_keys_help, Info::TEXT_WIDTH)?,
             ),
             open_editor: Toggle::new(fonts.label(text.open_editor)?, settings.open_editor),
+            tool_names: Toggle::new(fonts.label(text.tool_names)?, settings.tool_names),
             sound: Toggle::new(fonts.label(text.sound)?, settings.sound),
             folder_title: fonts.label(text.folder)?,
             folder: folder.to_owned(),
@@ -146,6 +149,7 @@ impl Pages {
             self.shortcut_title.width + PADDING + self.shortcut.width(),
             self.screen_keys.width() + INFO_GAP + Info::SIZE,
             self.open_editor.width(),
+            self.tool_names.width(),
             self.sound.width(),
             self.folder_title.width + PADDING + self.change_folder.width(),
             self.startup.width(),
@@ -170,12 +174,21 @@ impl Pages {
         self.open_settings.place(left, button_top);
 
         self.back.place(EDGE, button_top);
-        let [shortcut, screen_keys, open_editor, sound, folder, startup] = self.cards();
+        let [
+            shortcut,
+            screen_keys,
+            open_editor,
+            tool_names,
+            sound,
+            folder,
+            startup,
+        ] = self.cards();
         self.shortcut
             .place(shortcut.right() - PADDING, shortcut.middle());
         for (toggle, card) in [
             (&mut self.screen_keys, screen_keys),
             (&mut self.open_editor, open_editor),
+            (&mut self.tool_names, tool_names),
             (&mut self.sound, sound),
             (&mut self.startup, startup),
         ] {
@@ -218,6 +231,7 @@ impl Pages {
             Part::ScreenKeysInfo => &mut self.screen_keys_info,
             Part::ScreenKeys => &mut self.screen_keys,
             Part::OpenEditor => &mut self.open_editor,
+            Part::ToolNames => &mut self.tool_names,
             Part::Sound => &mut self.sound,
             Part::Folder => &mut self.change_folder,
             Part::Startup => &mut self.startup,
@@ -233,6 +247,7 @@ impl Pages {
             Part::ScreenKeysInfo => &self.screen_keys_info,
             Part::ScreenKeys => &self.screen_keys,
             Part::OpenEditor => &self.open_editor,
+            Part::ToolNames => &self.tool_names,
             Part::Sound => &self.sound,
             Part::Folder => &self.change_folder,
             Part::Startup => &self.startup,
@@ -277,7 +292,7 @@ impl Pages {
                     painter.fill(card, RADIUS, palette.card);
                     painter.stroke(card, RADIUS, painter.border(), palette.control_stroke);
                 }
-                let [shortcut, _, _, _, folder, _] = cards;
+                let [shortcut, _, _, _, _, folder, _] = cards;
                 let left = shortcut.left + PADDING;
                 painter.text(&self.shortcut_title, left, shortcut.middle(), palette.text);
                 // The folder's title and path, one above the other.
@@ -364,6 +379,10 @@ impl Pages {
         self.open_editor.is_on()
     }
 
+    pub fn tool_names(&self) -> bool {
+        self.tool_names.is_on()
+    }
+
     pub fn sound(&self) -> bool {
         self.sound.is_on()
     }
@@ -392,7 +411,7 @@ impl Pages {
 
     /// Fits the folder's path between its card's edge and the Change button.
     fn trim_folder(&mut self) -> Result<()> {
-        let left = self.cards()[4].left + PADDING;
+        let left = self.cards()[5].left + PADDING;
         let width = self.change_folder.area().left - PADDING - left;
         let path = self.folder.to_string_lossy();
         self.folder_path = self.fonts.path(&path, width)?;
@@ -418,6 +437,7 @@ fn parts(page: Page) -> &'static [Part] {
             Part::ScreenKeysInfo,
             Part::ScreenKeys,
             Part::OpenEditor,
+            Part::ToolNames,
             Part::Sound,
             Part::Folder,
             Part::Startup,

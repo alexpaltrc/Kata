@@ -18,6 +18,8 @@ pub struct Settings {
     pub screen_keys: bool,
     /// Whether each new capture opens in the editor.
     pub open_editor: bool,
+    /// Whether the editor names its tools under their icons.
+    pub tool_names: bool,
     /// Whether a sound confirms each capture.
     pub sound: bool,
     /// Where captures go, when it isn't the Pictures folder named after Kata.
@@ -32,6 +34,7 @@ impl Settings {
                 .unwrap_or_default(),
             screen_keys: read(w!("ScreenKeys"), 0) != 0,
             open_editor: read(w!("OpenEditor"), 1) != 0,
+            tool_names: read(w!("ToolNames"), 0) != 0,
             sound: read(w!("Sound"), 1) != 0,
             folder: registry::read_string(KEY, w!("Folder")).map(PathBuf::from),
         }
@@ -41,6 +44,7 @@ impl Settings {
         registry::write_dword(KEY, w!("Hotkey"), self.hotkey.encode());
         write(w!("ScreenKeys"), usize::from(self.screen_keys));
         write(w!("OpenEditor"), usize::from(self.open_editor));
+        write(w!("ToolNames"), usize::from(self.tool_names));
         write(w!("Sound"), usize::from(self.sound));
         match &self.folder {
             Some(folder) => registry::write_string(KEY, w!("Folder"), folder.as_os_str()),

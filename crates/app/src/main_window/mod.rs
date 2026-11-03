@@ -410,8 +410,9 @@ impl Main {
                 hotkey::unregister(self.owner);
                 self.pages.listen(Prompt::Press);
             }
-            Part::OpenEditor | Part::Sound => {
+            Part::OpenEditor | Part::ToolNames | Part::Sound => {
                 self.settings.open_editor = self.pages.open_editor();
+                self.settings.tool_names = self.pages.tool_names();
                 self.settings.sound = self.pages.sound();
                 self.settings.save();
                 if part == Part::Sound && self.settings.sound {

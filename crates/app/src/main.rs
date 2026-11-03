@@ -266,7 +266,7 @@ impl App {
             sound::play();
         }
         if settings.open_editor {
-            editor::open(&self.graphics, self.hwnd, capture);
+            editor::open(&self.graphics, self.hwnd, capture, settings.tool_names);
         } else {
             drop(export::Output::new(self.hwnd, capture.image));
         }

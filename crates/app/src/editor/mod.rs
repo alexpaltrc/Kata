@@ -93,12 +93,13 @@ thread_local! {
 }
 
 /// Edits `capture`, which is delivered from the start: on the clipboard, through
-/// `owner`, and in a new file. The capture already open, if any, closes first.
-pub fn open(graphics: &Graphics, owner: HWND, capture: Capture) {
+/// `owner`, and in a new file, with the tools named under their icons if
+/// `tool_names`. The capture already open, if any, closes first.
+pub fn open(graphics: &Graphics, owner: HWND, capture: Capture, tool_names: bool) {
     // Closing delivers the open capture's last changes, which mustn't follow this one.
     close();
     let output = Output::new(owner, capture.image.clone());
-    match unsafe { create(graphics, capture, output) } {
+    match unsafe { create(graphics, capture, output, tool_names) } {
         Ok(hwnd) => OPEN.set(Some(hwnd)),
         Err(error) => report("editor", &error),
     }
@@ -110,10 +111,15 @@ pub fn close() {
     }
 }
 
-unsafe fn create(graphics: &Graphics, capture: Capture, output: Output) -> Result<HWND> {
+unsafe fn create(
+    graphics: &Graphics,
+    capture: Capture,
+    output: Output,
+    tool_names: bool,
+) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
     let settings = EditorSettings::load();
-    let toolbar = Toolbar::new(graphics, &fonts, &settings, false)?;
+    let toolbar = Toolbar::new(graphics, &fonts, &settings, tool_names)?;
     let chip = fonts.icon('\u{E711}', 10.0)?;
     let palette = Palette::current();
     let min = min_size(&toolbar);
