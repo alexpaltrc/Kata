@@ -63,6 +63,8 @@ pub struct Pages {
     fonts: Fonts,
     /// The client area.
     room: (f32, f32),
+    /// The middle of the title bar's row of buttons and titles.
+    title_row: f32,
 
     title: Label,
     capture: Button,
@@ -100,6 +102,7 @@ impl Pages {
         let text = strings();
         let mut pages = Self {
             room: (0.0, 0.0),
+            title_row: TITLE_BAR / 2.0,
             title: fonts.caption(channel::name())?,
             capture: Button::new(fonts.label(text.new_capture)?, true),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
@@ -144,18 +147,20 @@ impl Pages {
         (MIN_WIDTH.max(cards).max(title_bar + PADDING), height)
     }
 
-    /// Arranges both pages in a client area of `room`, with the caption buttons
-    /// starting at `caption_buttons`.
-    pub fn layout(&mut self, room: (f32, f32), caption_buttons: f32) -> Result<()> {
+    /// Arranges both pages in a client area of `room`, with the caption buttons at
+    /// `caption_buttons`. The title bar's buttons and titles line up with them.
+    pub fn layout(&mut self, room: (f32, f32), caption_buttons: Area) -> Result<()> {
         self.room = room;
+        self.title_row = caption_buttons.middle();
         let group = HEIGHT + HINT_GAP + self.hint.height;
         let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
         self.capture
             .place((room.0 - self.capture.width()) / 2.0, top);
-        let left = caption_buttons - EDGE - IconButton::WIDTH;
-        self.open_settings.place(left, EDGE);
+        let button_top = self.title_row - IconButton::HEIGHT / 2.0;
+        let left = caption_buttons.left - EDGE - IconButton::WIDTH;
+        self.open_settings.place(left, button_top);
 
-        self.back.place(EDGE, EDGE);
+        self.back.place(EDGE, button_top);
         let [shortcut, screen_keys, open_editor, sound, folder, startup] = self.cards();
         self.shortcut
             .place(shortcut.right() - PADDING, shortcut.middle());
@@ -230,14 +235,14 @@ impl Pages {
         let palette = painter.palette;
         match page {
             Page::Home => {
-                painter.text(&self.title, PADDING, TITLE_BAR / 2.0, palette.text);
+                painter.text(&self.title, PADDING, self.title_row, palette.text);
                 let left = (self.room.0 - self.hint.width) / 2.0;
                 let middle = self.capture.area().bottom() + HINT_GAP + self.hint.height / 2.0;
                 painter.text(&self.hint, left, middle, palette.text_secondary);
             }
             Page::Settings => {
                 let left = EDGE + IconButton::WIDTH;
-                painter.text(&self.settings_title, left, TITLE_BAR / 2.0, palette.text);
+                painter.text(&self.settings_title, left, self.title_row, palette.text);
                 let cards = self.cards();
                 for card in cards {
                     let card = painter.align(card);

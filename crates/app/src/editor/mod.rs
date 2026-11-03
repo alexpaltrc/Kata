@@ -940,7 +940,7 @@ impl Editor {
         let image = self.document.image();
         self.view = View::fit(room, (image.width(), image.height()), self.scale);
         self.toolbar
-            .layout(window::caption_buttons(self.hwnd, self.scale));
+            .layout(window::caption_buttons(self.hwnd, self.scale).left);
     }
 
     /// Where `shape` shows, in capture pixels: a focus follows its zoom as it glides.

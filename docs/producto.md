@@ -36,7 +36,7 @@ Un clic en el icono inicia un recorte. Su menú: **Nuevo recorte** · **Abrir ca
 
 ## Ventana principal
 
-El botón **Nuevo recorte**, el atajo debajo y un acceso a Ajustes. Nada más.
+El botón **Nuevo recorte**, el atajo debajo y el engranaje de Ajustes, junto a los botones de la ventana y a su misma altura. Nada más.
 
 - Se abre al iniciar Kata. Si Kata ya está en la bandeja, abrirlo otra vez la muestra.
 - **Nuevo recorte** cierra la ventana antes de capturar, para que no salga en la captura.
@@ -62,9 +62,8 @@ En este orden:
 2. **Zoom en el editor.** La rueda del ratón acerca y aleja la captura, hacia donde está el cursor. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones.
 3. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
 4. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-5. **Botón de Ajustes.** Analizar dónde va el engranaje de la ventana principal.
-6. **Abrir capturas desde el editor.** Quizá un botón que abra la carpeta de las capturas.
-7. **Un ajuste de Impr Pant que se entienda.** Que diga algo como «Kata es tu app de capturas», con un icono «i» que, al pasar el cursor, explique qué teclas toma (`Impr Pant`, sola o con `Alt`, `Win`, `Ctrl` o `Mayús`, y `Win + Mayús + S`) y qué pasa al apagarlo.
+5. **Abrir capturas desde el editor.** Quizá un botón que abra la carpeta de las capturas.
+6. **Un ajuste de Impr Pant que se entienda.** Que diga algo como «Kata es tu app de capturas», con un icono «i» que, al pasar el cursor, explique qué teclas toma (`Impr Pant`, sola o con `Alt`, `Win`, `Ctrl` o `Mayús`, y `Win + Mayús + S`) y qué pasa al apagarlo.
 
 ## Fuera de alcance por ahora
 

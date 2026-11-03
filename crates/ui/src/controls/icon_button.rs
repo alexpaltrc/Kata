@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use super::{Action, Control, HEIGHT};
+use super::{Action, Control};
 use crate::{
     access::{Element, Role},
     paint::{Area, Label, Painter, Point},
@@ -22,6 +22,8 @@ pub struct IconButton {
 
 impl IconButton {
     pub const WIDTH: f32 = 40.0;
+    /// Short enough to fit beside the caption buttons.
+    pub const HEIGHT: f32 = 28.0;
 
     pub fn new(glyph: Label, name: &str) -> Self {
         Self {
@@ -39,7 +41,7 @@ impl IconButton {
     }
 
     fn area(&self) -> Area {
-        Area::new(self.left, self.top, Self::WIDTH, HEIGHT)
+        Area::new(self.left, self.top, Self::WIDTH, Self::HEIGHT)
     }
 }
 

@@ -36,8 +36,12 @@ use windows::{
     core::{BOOL, HSTRING, PCWSTR, Result},
 };
 
+use crate::paint::Area;
+
 /// How wide the caption buttons are, in DIPs, when Windows doesn't say.
 pub const CAPTION_BUTTONS: f32 = 138.0;
+/// How tall they are, then.
+const CAPTION_HEIGHT: f32 = 30.0;
 
 /// The state linked to `hwnd`. Call it first thing in the window procedure: on
 /// `WM_NCCREATE` it links the pointer passed as `CreateWindowExW`'s last argument.
@@ -146,11 +150,22 @@ pub unsafe fn frame_proc(
     }
 }
 
-/// Where the caption buttons start, in DIPs from the client area's left edge.
-pub fn caption_buttons(hwnd: HWND, scale: f32) -> f32 {
+/// Where the caption buttons are, in DIPs.
+pub fn caption_buttons(hwnd: HWND, scale: f32) -> Area {
     caption_button_bounds(hwnd).map_or_else(
-        || client_size(hwnd).0 as f32 / scale - CAPTION_BUTTONS,
-        |bounds| bounds.left as f32 / scale,
+        || {
+            let left = client_size(hwnd).0 as f32 / scale - CAPTION_BUTTONS;
+            Area::new(left, 0.0, CAPTION_BUTTONS, CAPTION_HEIGHT)
+        },
+        |bounds| {
+            let (width, height) = (bounds.right - bounds.left, bounds.bottom - bounds.top);
+            Area::new(
+                bounds.left as f32 / scale,
+                bounds.top as f32 / scale,
+                width as f32 / scale,
+                height as f32 / scale,
+            )
+        },
     )
 }
 
