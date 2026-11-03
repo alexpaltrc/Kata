@@ -57,12 +57,13 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |
 | Iniciar con Windows | Desactivado | Kata arranca en la bandeja, sin abrir ventanas. |
 
+## Icono
+
+Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. Azul, sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
+
 ## Pendiente
 
-En este orden:
-
-1. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
-2. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
+**Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 
 ## Fuera de alcance por ahora
 
