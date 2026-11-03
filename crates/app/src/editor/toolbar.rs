@@ -1,12 +1,12 @@
-//! The controls in the editor's title bar: the tools, the active tool's slider and
-//! saving.
+//! The controls in the editor's title bar: the tools, the active tool's slider,
+//! saving and the capture's folder.
 
 use std::time::Instant;
 
 use kata_editor::{Shape, ZOOMS};
 use kata_ui::{
     access::Element,
-    controls::{self, Button, Control, HEIGHT, SelectorBar, Slider, Toggle},
+    controls::{self, Button, Control, HEIGHT, IconButton, SelectorBar, Slider, Toggle},
     paint::{Fonts, Painter, Point},
 };
 use windows::core::Result;
@@ -45,6 +45,7 @@ pub enum Part {
     Zoom,
     Save,
     Autosave,
+    Folder,
 }
 
 pub struct Toolbar {
@@ -53,6 +54,7 @@ pub struct Toolbar {
     zoom: Slider,
     save: Button,
     autosave: Toggle,
+    folder: IconButton,
     /// Which of the parts on show has the keyboard focus, by its place among them.
     focus: Option<usize>,
 }
@@ -79,6 +81,7 @@ impl Toolbar {
             zoom: Slider::new(strings.focus, zooms, settings.zoom_level),
             save,
             autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
+            folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             focus: None,
         })
     }
@@ -103,6 +106,8 @@ impl Toolbar {
             + self.save.width()
             + EDGE
             + self.autosave.width()
+            + EDGE
+            + IconButton::WIDTH
             + END
     }
 
@@ -114,7 +119,9 @@ impl Toolbar {
         let slider = EDGE + self.tools.width() + GAP;
         self.blur.place(slider, top(HEIGHT));
         self.zoom.place(slider, top(HEIGHT));
-        let toggle = caption_buttons - END - self.autosave.width();
+        let folder = caption_buttons - END - IconButton::WIDTH;
+        self.folder.place(folder, top(IconButton::HEIGHT));
+        let toggle = folder - EDGE - self.autosave.width();
         self.autosave.place(toggle, top(HEIGHT));
         self.save
             .place(toggle - EDGE - self.save.width(), top(HEIGHT));
@@ -150,6 +157,7 @@ impl Toolbar {
             Part::Zoom => &mut self.zoom,
             Part::Save => &mut self.save,
             Part::Autosave => &mut self.autosave,
+            Part::Folder => &mut self.folder,
         }
     }
 
@@ -242,12 +250,18 @@ impl Toolbar {
     }
 
     /// The parts on show: one slider at a time, the active tool's.
-    fn parts(&self) -> [Part; 4] {
+    fn parts(&self) -> [Part; 5] {
         let slider = match self.tool() {
             Tool::Blur => Part::Blur,
             Tool::Focus => Part::Zoom,
         };
-        [Part::Tools, slider, Part::Save, Part::Autosave]
+        [
+            Part::Tools,
+            slider,
+            Part::Save,
+            Part::Autosave,
+            Part::Folder,
+        ]
     }
 
     fn get(&self, part: Part) -> &dyn Control {
@@ -257,6 +271,7 @@ impl Toolbar {
             Part::Zoom => &self.zoom,
             Part::Save => &self.save,
             Part::Autosave => &self.autosave,
+            Part::Folder => &self.folder,
         }
     }
 }

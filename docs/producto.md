@@ -28,6 +28,7 @@ Reglas:
 - **Autoguardado** (interruptor en el editor, activado por defecto): cada cambio sobrescribe el PNG. Al apagarlo aparece el botón **Guardar**.
 - **El portapapeles siempre tiene la versión más reciente:** la captura recién tomada y, después, cada edición, aunque el Autoguardado esté apagado.
 - **La versión editada reemplaza a la original.** No quedan copias ni archivos extra.
+- **El botón de la carpeta** (junto al Autoguardado) abre la carpeta de las capturas, con esta seleccionada.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan fijos en el archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
 
 ## Bandeja
@@ -62,8 +63,7 @@ En este orden:
 2. **Zoom en el editor.** La rueda del ratón acerca y aleja la captura, hacia donde está el cursor. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones.
 3. **Identidad definitiva.** El icono sigue siendo provisional: el símbolo de Kata sobre una placa azul.
 4. **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-5. **Abrir capturas desde el editor.** Quizá un botón que abra la carpeta de las capturas.
-6. **Un ajuste de Impr Pant que se entienda.** Que diga algo como «Kata es tu app de capturas», con un icono «i» que, al pasar el cursor, explique qué teclas toma (`Impr Pant`, sola o con `Alt`, `Win`, `Ctrl` o `Mayús`, y `Win + Mayús + S`) y qué pasa al apagarlo.
+5. **Un ajuste de Impr Pant que se entienda.** Que diga algo como «Kata es tu app de capturas», con un icono «i» que, al pasar el cursor, explique qué teclas toma (`Impr Pant`, sola o con `Alt`, `Win`, `Ctrl` o `Mayús`, y `Win + Mayús + S`) y qué pasa al apagarlo.
 
 ## Fuera de alcance por ahora
 

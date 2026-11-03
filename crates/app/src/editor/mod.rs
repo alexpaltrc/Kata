@@ -739,6 +739,7 @@ impl Editor {
                 }
             }
             Part::Blur | Part::Zoom => self.slider_changed(part),
+            Part::Folder => self.output.show(),
         }
     }
 

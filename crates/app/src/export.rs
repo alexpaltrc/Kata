@@ -28,7 +28,10 @@ use windows::{
             SystemInformation::GetLocalTime,
         },
         UI::{
-            Shell::{FOLDERID_Pictures, KF_FLAG_DEFAULT, SHGetKnownFolderPath, ShellExecuteW},
+            Shell::{
+                FOLDERID_Pictures, ILCreateFromPathW, ILFree, KF_FLAG_DEFAULT,
+                SHGetKnownFolderPath, SHOpenFolderAndSelectItems, ShellExecuteW,
+            },
             WindowsAndMessaging::SW_SHOWNORMAL,
         },
     },
@@ -47,6 +50,7 @@ pub struct Output {
 }
 
 struct Saver {
+    path: PathBuf,
     slot: Arc<Slot>,
     thread: JoinHandle<()>,
 }
@@ -77,11 +81,11 @@ impl Output {
         let slot = Arc::new(Slot::default());
         lock(&slot).next = Some(image);
         let thread = thread::spawn({
-            let slot = Arc::clone(&slot);
+            let (path, slot) = (path.clone(), Arc::clone(&slot));
             move || write_versions(&path, &slot)
         });
         Self {
-            saver: Some(Saver { slot, thread }),
+            saver: Some(Saver { path, slot, thread }),
         }
     }
 
@@ -92,11 +96,28 @@ impl Output {
             saver.slot.changed.notify_one();
         }
     }
+
+    /// Opens the captures folder in File Explorer, with this capture's file selected.
+    pub fn show(&self) {
+        let Some(saver) = &self.saver else {
+            return open_folder();
+        };
+        unsafe {
+            let file = ILCreateFromPathW(&HSTRING::from(saver.path.as_path()));
+            if file.is_null() {
+                return open_folder();
+            }
+            if let Err(error) = SHOpenFolderAndSelectItems(file, None, 0) {
+                report("folder", &error);
+            }
+            ILFree(Some(file));
+        }
+    }
 }
 
 impl Drop for Output {
     fn drop(&mut self) {
-        if let Some(Saver { slot, thread }) = self.saver.take() {
+        if let Some(Saver { slot, thread, .. }) = self.saver.take() {
             lock(&slot).closed = true;
             slot.changed.notify_one();
             let mut finishing = FINISHING.lock().unwrap_or_else(PoisonError::into_inner);
