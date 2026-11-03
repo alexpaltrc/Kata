@@ -5,7 +5,7 @@ use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::thread;
 
-use crate::{BLUR_LEVELS, Blur, Image, Rect, Spot};
+use crate::{BLUR_LEVELS, Blur, Image, Rect, Spot, Step, marker};
 
 /// The side of the cells each blur level averages, in pixels at 100 % scale.
 const BLUR_CELLS: [f32; BLUR_LEVELS] = [8.0, 14.0, 24.0];
@@ -37,6 +37,7 @@ pub struct Renderer {
     /// The blurs in `base`.
     blurs: Vec<Patch>,
     focus: Option<Spot>,
+    steps: Vec<Step>,
 }
 
 /// A blur and its pixels, which cover the part of it inside the image.
@@ -57,6 +58,7 @@ impl Renderer {
             output: image.clone(),
             blurs: Vec::new(),
             focus: None,
+            steps: Vec::new(),
         }
     }
 
@@ -64,8 +66,15 @@ impl Renderer {
         &self.output
     }
 
-    /// Redraws `image` with `blurs` and `focus`, returning the areas that changed.
-    pub fn update(&mut self, image: &Image, blurs: &[Blur], focus: Option<Spot>) -> Vec<Rect> {
+    /// Redraws `image` with `blurs`, `focus` and `steps`, returning the areas that
+    /// changed.
+    pub fn update(
+        &mut self,
+        image: &Image,
+        blurs: &[Blur],
+        focus: Option<Spot>,
+        steps: &[Step],
+    ) -> Vec<Rect> {
         let bounds = image.bounds();
         let mut stale: Vec<Rect> = self
             .blurs
@@ -109,6 +118,17 @@ impl Renderer {
         {
             dirty.push(self.footprint(spot));
         }
+        // A step moved, came, went or took another number.
+        for at in 0..self.steps.len().max(steps.len()) {
+            let (old, new) = (self.steps.get(at), steps.get(at));
+            if old != new {
+                let marks = old.into_iter().chain(new);
+                dirty.extend(marks.filter_map(|step| {
+                    marker::footprint(step.rect, self.scale).intersect(&bounds)
+                }));
+            }
+        }
+        self.steps = steps.to_vec();
         self.focus = focus;
         for area in &dirty {
             self.compose(*area);
@@ -142,13 +162,22 @@ impl Renderer {
         lit.intersect(&bounds).unwrap_or_default()
     }
 
-    /// Redraws `area` of the output from `base`, in bands of rows drawn at once on
-    /// every core.
+    /// Redraws `area` of the output: `base` in the focus's light, with the steps on
+    /// top.
     fn compose(&mut self, area: Rect) {
-        let bounds = self.base.bounds();
-        let Some(area) = area.intersect(&bounds) else {
+        let Some(area) = area.intersect(&self.base.bounds()) else {
             return;
         };
+        self.light(area);
+        for (at, step) in self.steps.iter().enumerate() {
+            marker::draw(&mut self.output, step.rect, at + 1, self.scale, area);
+        }
+    }
+
+    /// Redraws `area` of the output from `base`, in bands of rows drawn at once on
+    /// every core.
+    fn light(&mut self, area: Rect) {
+        let bounds = self.base.bounds();
         let Some(spot) = self.focus else {
             self.output.paste(&self.base, (0, 0), area);
             return;
@@ -493,7 +522,7 @@ mod tests {
     fn nothing_to_draw_shows_the_capture() {
         let image = stripes();
         let mut renderer = Renderer::new(&image, 1.0);
-        assert!(renderer.update(&image, &[], None).is_empty());
+        assert!(renderer.update(&image, &[], None, &[]).is_empty());
         assert_eq!(renderer.output(), &image);
     }
 
@@ -502,7 +531,7 @@ mod tests {
         let image = stripes();
         let mut renderer = Renderer::new(&image, 1.0);
         let rect = Rect::new(8, 8, 40, 40);
-        renderer.update(&image, &[blur(rect)], None);
+        renderer.update(&image, &[blur(rect)], None, &[]);
         let output = renderer.output();
         for y in 0..48 {
             for x in 0..64 {
@@ -524,7 +553,7 @@ mod tests {
             rect: Rect::new(10, 10, 50, 40),
             zoom: 1.0,
         };
-        renderer.update(&image, &[], Some(focus));
+        renderer.update(&image, &[], Some(focus), &[]);
         let output = renderer.output();
         assert_eq!(pixel(output, 1, 1), [128, 128, 128, 255]);
         assert_eq!(pixel(output, 30, 20), pixel(&image, 30, 20));
@@ -542,7 +571,7 @@ mod tests {
             rect: Rect::new(24, 16, 40, 32),
             zoom: ZOOMS[3],
         };
-        renderer.update(&image, &[], Some(focus));
+        renderer.update(&image, &[], Some(focus), &[]);
         // The lit area spans columns 16..48 around the same center, and each column
         // shows half a column of the capture: 2 levels instead of 4.
         let output = renderer.output();
@@ -555,8 +584,11 @@ mod tests {
     #[test]
     fn redrawing_only_changes_matches_drawing_from_scratch() {
         let image = stripes();
-        let steps: [(&[Blur], Option<Spot>); 5] = [
-            (&[blur(Rect::new(0, 0, 20, 20))], None),
+        let mark = |left, top| Step {
+            rect: Rect::new(left, top, left + 12, top + 12),
+        };
+        let frames: [(&[Blur], Option<Spot>, &[Step]); 6] = [
+            (&[blur(Rect::new(0, 0, 20, 20))], None, &[mark(30, 4)]),
             (
                 &[
                     blur(Rect::new(0, 0, 20, 20)),
@@ -566,6 +598,7 @@ mod tests {
                     rect: Rect::new(20, 20, 40, 40),
                     zoom: 1.5,
                 }),
+                &[mark(30, 4), mark(2, 30)],
             ),
             (
                 &[blur(Rect::new(10, 10, 30, 30))],
@@ -573,6 +606,7 @@ mod tests {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 2.0,
                 }),
+                &[mark(2, 30)],
             ),
             (
                 &[Blur {
@@ -583,18 +617,35 @@ mod tests {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 1.0,
                 }),
+                &[mark(2, 30), mark(40, 30)],
             ),
-            (&[], None),
+            (&[], None, &[mark(40, 30)]),
+            (&[], None, &[]),
         ];
         let mut renderer = Renderer::new(&image, 1.0);
-        for (blurs, focus) in steps {
-            renderer.update(&image, blurs, focus);
+        for (blurs, focus, steps) in frames {
+            renderer.update(&image, blurs, focus, steps);
             let mut fresh = Renderer::new(&image, 1.0);
             fresh.seed = renderer.seed;
-            fresh.update(&image, blurs, focus);
+            fresh.update(&image, blurs, focus, steps);
             assert_eq!(renderer.output(), fresh.output());
         }
         assert_eq!(renderer.output(), &image);
+    }
+
+    #[test]
+    fn a_step_is_orange_with_a_white_edge_and_number() {
+        let black = [0, 0, 0, 255].repeat(64 * 64);
+        let image = Image::new(64, 64, black);
+        let mut renderer = Renderer::new(&image, 1.0);
+        let rect = Rect::new(18, 18, 46, 46);
+        renderer.update(&image, &[], None, &[Step { rect }]);
+        let output = renderer.output();
+        // The edge, the disc beside the number, and the 1's stem.
+        assert_eq!(pixel(output, 32, 19), [255, 255, 255, 255]);
+        assert_eq!(pixel(output, 22, 32), [34, 90, 236, 255]);
+        assert_eq!(pixel(output, 33, 32), [255, 255, 255, 255]);
+        assert_eq!(pixel(output, 2, 2), [0, 0, 0, 255]);
     }
 
     #[test]

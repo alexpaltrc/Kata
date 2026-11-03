@@ -63,6 +63,22 @@ pub fn focus(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
     Ok((corners.and(&outline)?, corners.and(&area.and(&outline)?)?))
 }
 
+/// Pasos's icon: a step marker, a circle with a 1 in it, `size` DIPs square. Filled
+/// in, the 1 is cut out of the disc.
+pub fn steps(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
+    let unit = size / GRID;
+    let at = |x: f32, y: f32| (x * unit, y * unit);
+    let disc = Figure::new(graphics, |pen| pen.circle(at(10.0, 10.0), 7.5 * unit))?;
+    let ring = disc.traced(LINE * unit)?;
+    let one = Figure::new(graphics, |pen| {
+        pen.start(at(8.875, 8.0));
+        pen.line(at(11.125, 6.25));
+        pen.line(at(11.125, 13.75));
+    })?
+    .traced(LINE * unit)?;
+    Ok((ring.and(&one)?, disc.and(&ring)?.without(&one)?))
+}
+
 /// The magnifier that leads the focus's zoom, `size` DIPs square.
 pub fn zoom(graphics: &Graphics, size: f32) -> Result<Figure> {
     let unit = size / GRID;

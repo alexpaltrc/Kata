@@ -68,7 +68,7 @@ pub struct EditorSettings {
 impl EditorSettings {
     pub fn load() -> Self {
         Self {
-            tool: read(w!("Tool"), 0).min(1),
+            tool: read(w!("Tool"), 0).min(2),
             blur_level: read(w!("BlurLevel"), 1).min(BLUR_LEVELS - 1),
             zoom_level: read(w!("ZoomLevel"), 0).min(ZOOMS.len() - 1),
             autosave: read(w!("Autosave"), 1) != 0,

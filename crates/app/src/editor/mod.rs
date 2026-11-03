@@ -1,6 +1,6 @@
-//! The editor: a window showing a capture, where the user blurs parts of it or puts
-//! one in focus. Each change reaches the clipboard and, with autosave on, the
-//! capture's file.
+//! The editor: a window showing a capture, where the user blurs parts of it, puts one
+//! in focus and numbers the steps to follow. Each change reaches the clipboard and,
+//! with autosave on, the capture's file.
 
 mod canvas;
 mod icons;
@@ -13,7 +13,8 @@ use std::{
 };
 
 use kata_editor::{
-    Blur, Document, Edits, FOCUS_CORNER, Focus, Image, Rect, Renderer, Shape, Spot, ZOOMS,
+    Blur, Document, Edits, FOCUS_CORNER, Focus, Image, Rect, Renderer, STEP_SIZE, Shape, Spot,
+    Step, ZOOMS,
 };
 use kata_ui::{
     Graphics,
@@ -38,9 +39,9 @@ use windows::{
             Controls::{WM_MOUSEHOVER, WM_MOUSELEAVE},
             HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
-                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_BACK, VK_C,
-                VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_S,
-                VK_SHIFT, VK_TAB, VK_Y, VK_Z,
+                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_BACK, VK_C,
+                VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
+                VK_S, VK_SHIFT, VK_TAB, VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
@@ -238,6 +239,11 @@ fn min_size(toolbar: &Toolbar) -> (f32, f32) {
 }
 
 /// `rect`, at least a pixel wide and high.
+/// Whether `shape` has handles to resize it: steps keep their size.
+fn resizable(shape: Shape) -> bool {
+    !matches!(shape, Shape::Step(_))
+}
+
 fn solid(rect: Rect) -> Rect {
     Rect::new(
         rect.left,
@@ -508,6 +514,18 @@ impl Editor {
                 shape,
                 anchor: corners[(corner + 2) % 4],
             }
+        } else if self.places_step(point) {
+            // A click places the next step there, and dragging carries it along.
+            let grab = self.view.edge(point, bounds);
+            let shape = self.add(grab);
+            let Some(outline) = self.edits.outline(shape, bounds) else {
+                return;
+            };
+            Gesture::Move {
+                shape,
+                grab,
+                outline,
+            }
         } else if point.1 >= TITLE_BAR {
             let on = self.shape_at(point);
             if let Some(shape) = on.filter(|&shape| !self.fills(shape)) {
@@ -554,6 +572,8 @@ impl Editor {
                         grab: start,
                         outline,
                     },
+                    // Steps are placed with a click, not drawn.
+                    None if self.toolbar.tool() == Tool::Steps => return false,
                     None => Gesture::Draw {
                         shape: self.add(start),
                         start,
@@ -570,7 +590,7 @@ impl Editor {
                             focus.rect = rect;
                         }
                     }
-                    Shape::Blur(_) => self.edits.reshape(shape, rect, bounds),
+                    Shape::Blur(_) | Shape::Step(_) => self.edits.reshape(shape, rect, bounds),
                 }
                 true
             }
@@ -656,6 +676,7 @@ impl Editor {
             VK_TAB => self.toolbar.tab(shift),
             VK_1 | VK_NUMPAD1 if !ctrl => self.choose_tool(Tool::Blur),
             VK_2 | VK_NUMPAD2 if !ctrl => self.choose_tool(Tool::Focus),
+            VK_3 | VK_NUMPAD3 if !ctrl => self.choose_tool(Tool::Steps),
             VK_Z if ctrl && shift => self.step(Document::redo),
             VK_Y if ctrl => self.step(Document::redo),
             VK_Z if ctrl => self.step(Document::undo),
@@ -693,10 +714,10 @@ impl Editor {
             || ((to.1 - from.1) * self.scale).abs() > y as f32
     }
 
-    /// Starts a shape of the current tool at `start`, selected.
+    /// Starts a shape of the current tool at `start`, selected: a step centered on it.
     fn add(&mut self, start: (i32, i32)) -> Shape {
-        let rect =
-            solid(Rect::new(start.0, start.1, start.0, start.1)).moved_inside(&self.bounds());
+        let bounds = self.bounds();
+        let rect = solid(Rect::new(start.0, start.1, start.0, start.1)).moved_inside(&bounds);
         let shape = match self.toolbar.tool() {
             Tool::Blur => {
                 let level = self.toolbar.blur_level();
@@ -709,6 +730,14 @@ impl Editor {
                 self.edits.focus = Some(Focus { rect, level });
                 self.zoom = Animation::idle(1.0);
                 Shape::Focus
+            }
+            Tool::Steps => {
+                // As big as on the display it was taken on.
+                let side = (STEP_SIZE * self.capture_scale).round() as i32;
+                let (left, top) = (start.0 - side / 2, start.1 - side / 2);
+                let rect = Rect::new(left, top, left + side, top + side).moved_inside(&bounds);
+                self.edits.steps.push(Step { rect });
+                Shape::Step(self.edits.steps.len() - 1)
             }
         };
         self.selected = Some(shape);
@@ -739,6 +768,7 @@ impl Editor {
                     self.toolbar.set_zoom_level(focus.level);
                 }
             }
+            Some(Shape::Step(_)) => self.toolbar.select_tool(Tool::Steps),
             None => {}
         }
     }
@@ -876,7 +906,7 @@ impl Editor {
         let spot = edits.focus.map(|focus| focus.spot());
         let changed = self
             .renderer
-            .update(self.document.image(), &edits.blurs, spot);
+            .update(self.document.image(), &edits.blurs, spot, &edits.steps);
         if !changed.is_empty() {
             // The window was showing something else, such as a zoom halfway.
             self.stale.extend(changed);
@@ -901,9 +931,12 @@ impl Editor {
             rect: focus.rect,
             zoom,
         });
-        let changed = self
-            .renderer
-            .update(self.document.image(), &self.edits.blurs, spot);
+        let changed = self.renderer.update(
+            self.document.image(),
+            &self.edits.blurs,
+            spot,
+            &self.edits.steps,
+        );
         self.stale.extend(changed);
         let fresh = self.gpu.is_none();
         let output = self.renderer.output();
@@ -974,7 +1007,9 @@ impl Editor {
         {
             let accent = self.palette.accent;
             canvas::draw_outline(painter, area, self.radius(shape), canvas::SELECTED, accent);
-            canvas::draw_handles(painter, area);
+            if resizable(shape) {
+                canvas::draw_handles(painter, area);
+            }
             if matches!(self.gesture, None | Some(Gesture::Remove))
                 && let Some(center) = canvas::chip(area, self.window())
             {
@@ -1046,22 +1081,37 @@ impl Editor {
         match shape {
             Shape::Blur(_) => 0.0,
             Shape::Focus => FOCUS_CORNER * self.capture_scale * self.view.zoom,
+            Shape::Step(_) => STEP_SIZE * self.capture_scale * self.view.zoom / 2.0,
         }
     }
 
-    /// The topmost shape under `point`.
+    /// The topmost shape under `point`. The steps' tool reaches only steps, so new ones
+    /// go over the other shapes.
     fn shape_at(&self, point: Point) -> Option<Shape> {
         if point.1 < TITLE_BAR || self.toolbar.covers(point) {
             return None;
         }
         let (x, y) = self.view.pixel(point);
-        self.edits.shape_at(x, y, self.bounds())
+        let tool = self.toolbar.tool();
+        self.edits
+            .shape_at(x, y, self.bounds())
+            .filter(|&shape| tool != Tool::Steps || Tool::of(shape) == tool)
+    }
+
+    /// Whether pressing at `point` places a step: with the steps' tool, on the capture,
+    /// away from the other steps.
+    fn places_step(&self, point: Point) -> bool {
+        self.toolbar.tool() == Tool::Steps
+            && point.1 >= TITLE_BAR
+            && self.view.area(self.bounds()).contains(point)
+            && self.shape_at(point).is_none()
     }
 
     /// The selected shape's resize handle under `point`, numbered clockwise from the
     /// top-left.
     fn handle_at(&self, point: Point) -> Option<usize> {
-        let area = self.shape_area(self.selected?, Instant::now())?;
+        let shape = self.selected.filter(|&shape| resizable(shape))?;
+        let area = self.shape_area(shape, Instant::now())?;
         canvas::handles(area)
             .iter()
             .position(|&handle| canvas::distance(handle, point) <= HANDLE_REACH)

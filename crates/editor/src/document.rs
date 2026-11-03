@@ -64,18 +64,28 @@ impl Spot {
     }
 }
 
+/// A numbered marker that shows the order to follow. Steps count from 1, in the
+/// order they were added.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Step {
+    /// The square its disc fills.
+    pub rect: Rect,
+}
+
 /// Everything the user added to the image.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Edits {
     pub blurs: Vec<Blur>,
     pub focus: Option<Focus>,
+    pub steps: Vec<Step>,
 }
 
-/// One thing the user drew: a blur, by its place in `Edits::blurs`, or the focus.
+/// One thing the user drew: a blur or a step, by its place in `Edits`, or the focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     Blur(usize),
     Focus,
+    Step(usize),
 }
 
 impl Edits {
@@ -84,16 +94,24 @@ impl Edits {
         match shape {
             Shape::Blur(index) => self.blurs.get(index).map(|blur| blur.rect),
             Shape::Focus => self.focus.map(|focus| focus.spot().lit(bounds)),
+            Shape::Step(index) => self.steps.get(index).map(|step| step.rect),
         }
     }
 
-    /// The topmost shape under a pixel. The focus is drawn over the blurs, and newer
-    /// blurs over older ones.
+    /// The topmost shape under a pixel. The steps are drawn over the focus, and the
+    /// focus over the blurs; newer steps and blurs over older ones.
     pub fn shape_at(&self, x: i32, y: i32, bounds: Rect) -> Option<Shape> {
         let under = |shape| {
             self.outline(shape, bounds)
                 .is_some_and(|rect| rect.contains(x, y))
         };
+        if let Some(step) = (0..self.steps.len())
+            .rev()
+            .map(Shape::Step)
+            .find(|&shape| under(shape))
+        {
+            return Some(step);
+        }
         if under(Shape::Focus) {
             return Some(Shape::Focus);
         }
@@ -119,6 +137,11 @@ impl Edits {
                     focus.rect = Spot::source(outline, ZOOMS[focus.level]);
                 }
             }
+            Shape::Step(index) => {
+                if let Some(step) = self.steps.get_mut(index) {
+                    step.rect = outline;
+                }
+            }
         }
     }
 
@@ -127,8 +150,11 @@ impl Edits {
             Shape::Blur(index) if index < self.blurs.len() => {
                 self.blurs.remove(index);
             }
-            Shape::Blur(_) => {}
             Shape::Focus => self.focus = None,
+            Shape::Step(index) if index < self.steps.len() => {
+                self.steps.remove(index);
+            }
+            Shape::Blur(_) | Shape::Step(_) => {}
         }
     }
 }
@@ -204,6 +230,7 @@ mod tests {
                 level: 1,
             }],
             focus: None,
+            steps: Vec::new(),
         }
     }
 
@@ -255,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn the_focus_is_on_top_then_the_newest_blur() {
+    fn steps_are_on_top_then_the_focus_then_the_newest_blur() {
         let bounds = Rect::new(0, 0, 100, 100);
         let edits = Edits {
             blurs: vec![
@@ -272,11 +299,15 @@ mod tests {
                 rect: Rect::new(40, 40, 50, 50),
                 level: 3,
             }),
+            steps: vec![Step {
+                rect: Rect::new(44, 44, 60, 60),
+            }],
         };
         assert_eq!(edits.shape_at(10, 10, bounds), Some(Shape::Blur(0)));
         assert_eq!(edits.shape_at(30, 30, bounds), Some(Shape::Blur(1)));
         // Doubled, the focus lights 35..55.
         assert_eq!(edits.shape_at(36, 36, bounds), Some(Shape::Focus));
+        assert_eq!(edits.shape_at(50, 50, bounds), Some(Shape::Step(0)));
         assert_eq!(edits.shape_at(90, 90, bounds), None);
     }
 
@@ -289,6 +320,7 @@ mod tests {
                 rect: Rect::new(10, 10, 30, 30),
                 level: 2,
             }),
+            steps: Vec::new(),
         };
         let outline = Rect::new(100, 60, 160, 120);
         edits.reshape(Shape::Focus, outline, bounds);
@@ -318,6 +350,23 @@ mod tests {
         assert_eq!(edits, blurred(0));
         edits.remove(Shape::Blur(0));
         assert_eq!(edits, Edits::default());
+    }
+
+    #[test]
+    fn removing_a_step_renumbers_the_ones_after_it() {
+        let step = |left| Step {
+            rect: Rect::new(left, 0, left + 10, 10),
+        };
+        let mut edits = Edits {
+            steps: vec![step(0), step(20), step(40)],
+            ..Edits::default()
+        };
+        edits.remove(Shape::Step(1));
+        assert_eq!(edits.steps, [step(0), step(40)]);
+        assert_eq!(
+            edits.shape_at(45, 5, Rect::new(0, 0, 100, 100)),
+            Some(Shape::Step(1))
+        );
     }
 
     #[test]

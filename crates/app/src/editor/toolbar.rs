@@ -1,6 +1,6 @@
 //! The editor's controls: saving and the capture's folder in the title bar, and two
 //! capsules floating at the bottom, centered: the tools' dock and, above it, the
-//! chosen tool's options.
+//! chosen tool's options, when it has any.
 
 use std::{mem, time::Instant};
 
@@ -37,22 +37,26 @@ const SETTING_ICON: f32 = 16.0;
 const ICON_GAP: f32 = 8.0;
 /// Between two settings.
 const GAP: f32 = 20.0;
+/// How far the options sink toward the dock as they hide.
+const SINK: f32 = 8.0;
 
-/// What dragging over the capture draws, in the dock's order.
+/// What dragging or clicking on the capture adds, in the dock's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Blur,
     Focus,
+    Steps,
 }
 
 impl Tool {
-    const ALL: [Self; 2] = [Self::Blur, Self::Focus];
+    const ALL: [Self; 3] = [Self::Blur, Self::Focus, Self::Steps];
 
-    /// The tool that draws `shape`.
+    /// The tool that adds `shape`.
     pub fn of(shape: Shape) -> Self {
         match shape {
             Shape::Blur(_) => Self::Blur,
             Shape::Focus => Self::Focus,
+            Shape::Step(_) => Self::Steps,
         }
     }
 
@@ -66,6 +70,7 @@ impl Tool {
         match self {
             Self::Blur => &[Part::Blur],
             Self::Focus => &[Part::Zoom],
+            Self::Steps => &[],
         }
     }
 }
@@ -135,6 +140,8 @@ pub struct Toolbar {
     fade: Animation,
     /// The options' width, which glides from one tool's to the next.
     width: Animation,
+    /// From 0 to 1 as the options show: they hide for a tool without any.
+    shown: Animation,
 }
 
 impl Toolbar {
@@ -165,6 +172,7 @@ impl Toolbar {
         let tools = vec![
             item(icons::blur(graphics, Dock::ICON)?, strings.blur)?,
             item(icons::focus(graphics, Dock::ICON)?, strings.focus)?,
+            item(icons::steps(graphics, Dock::ICON)?, strings.steps)?,
         ];
         let (droplet, _) = icons::blur(graphics, SETTING_ICON)?;
         // Shown only while autosave is off, and only useful once there's a change.
@@ -190,6 +198,7 @@ impl Toolbar {
             leaving: tool,
             fade: Animation::idle(1.0),
             width: Animation::idle(0.0),
+            shown: Animation::idle(if tool.options().is_empty() { 0.0 } else { 1.0 }),
         };
         toolbar.width = Animation::idle(toolbar.options_width(tool));
         Ok(toolbar)
@@ -266,7 +275,9 @@ impl Toolbar {
 
     /// Whether `point` is on the toolbar: on a control, or between the options.
     pub fn covers(&self, point: Point) -> bool {
-        self.part_at(point).is_some() || self.options_area(self.tool()).contains(point)
+        let tool = self.tool();
+        self.part_at(point).is_some()
+            || !tool.options().is_empty() && self.options_area(tool).contains(point)
     }
 
     /// The controls on show, as assistive technologies know them, each numbered as
@@ -357,12 +368,19 @@ impl Toolbar {
             let (area, radius) = self.get(part).focus_area();
             painter.focus(area, radius);
         }
-        self.tools.draw_tip(painter, self.options_top(), now);
+        // Above the options, or just above the dock without them.
+        let top = if self.tool().options().is_empty() {
+            self.dock_top()
+        } else {
+            self.options_top()
+        };
+        self.tools.draw_tip(painter, top, now);
     }
 
     pub fn is_animating(&self, now: Instant) -> bool {
         self.fade.is_running(now)
             || self.width.is_running(now)
+            || self.shown.is_running(now)
             || self
                 .parts()
                 .into_iter()
@@ -386,10 +404,21 @@ impl Toolbar {
         }
         self.leaving = mem::replace(&mut self.showing, tool);
         self.fade = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
+        let now = Instant::now();
+        if tool.options().is_empty() {
+            // The options sink into the dock as they fade, keeping their width.
+            self.shown = self.shown.retarget(0.0, motion::FAST, Easing::ACCELERATE);
+            return;
+        }
         let width = self.options_width(tool);
-        self.width = self
-            .width
-            .retarget(width, motion::NORMAL, Easing::POINT_TO_POINT);
+        // Out of sight, they take the new width at once.
+        self.width = if self.shown.value(now) == 0.0 {
+            Animation::idle(width)
+        } else {
+            self.width
+                .retarget(width, motion::NORMAL, Easing::POINT_TO_POINT)
+        };
+        self.shown = self.shown.retarget(1.0, motion::NORMAL, Easing::DECELERATE);
     }
 
     pub fn blur_level(&self) -> usize {
@@ -422,18 +451,24 @@ impl Toolbar {
     }
 
     /// The options' capsule, as wide as it glides to, with the settings crossfading
-    /// inside it as the tool changes.
+    /// inside it as the tool changes. It rises out of the dock as it shows.
     fn draw_options(&self, painter: &Painter, now: Instant) {
+        let shown = self.shown.value(now);
+        if shown == 0.0 {
+            return;
+        }
         let width = self.width.value(now);
         let left = (self.window.0 - width) / 2.0;
         let area = painter.align(Area::new(left, self.options_top(), width, OPTIONS));
-        painter.flyout(area, OPTIONS / 2.0);
         let fade = self.fade.value(now);
-        painter.clip(area, || {
-            painter.layer(1.0 - fade, 0.0, || {
-                self.draw_settings(painter, self.leaving, now)
+        painter.layer(shown, SINK * (1.0 - shown), || {
+            painter.flyout(area, OPTIONS / 2.0);
+            painter.clip(area, || {
+                painter.layer(1.0 - fade, 0.0, || {
+                    self.draw_settings(painter, self.leaving, now)
+                });
+                painter.layer(fade, 0.0, || self.draw_settings(painter, self.showing, now));
             });
-            painter.layer(fade, 0.0, || self.draw_settings(painter, self.showing, now));
         });
     }
 
@@ -445,8 +480,12 @@ impl Toolbar {
         }
     }
 
+    fn dock_top(&self) -> f32 {
+        self.window.1 - BOTTOM - self.tools.height()
+    }
+
     fn options_top(&self) -> f32 {
-        self.window.1 - BOTTOM - self.tools.height() - STACK - OPTIONS
+        self.dock_top() - STACK - OPTIONS
     }
 
     fn options_width(&self, tool: Tool) -> f32 {
