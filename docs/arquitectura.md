@@ -35,6 +35,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 - **Efectos en el procesador:** el desenfoque y el foco se calculan con Rust puro (`crates/editor`). Lo que se ve en pantalla es exactamente lo que se guarda y se copia, y se puede probar sin Windows.
 - **Solo lo que cambia:** tras cada edición se recalcula y se envía a la tarjeta gráfica únicamente la zona afectada.
+- **En todos los núcleos:** el Foco se dibuja por franjas de filas, una por núcleo, a la vez. Un Foco sobre toda una captura 4K pasó de 55 a 11 ms por cuadro de su animación.
 - **Entrega:** la captura se copia y se guarda en cuanto se abre el editor. Cada cambio, al terminar, se copia de nuevo (y, con Autoguardado, se guarda). Al cerrar, se entrega lo último.
 - **Deshacer:** el historial vive solo en memoria, mientras el editor está abierto.
 
@@ -76,6 +77,6 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 | CPU en reposo | 0 % | 0 % |
 | Atajo → selección visible | < 100 ms | 30–40 ms |
 | Aplicar un desenfoque | < 16 ms | 7.8 ms |
-| Cuadro de la animación del Foco (captura 4K) | < 16 ms | 12 ms (peor caso) |
+| Cuadro de la animación del Foco (captura 4K) | < 16 ms | 11 ms (peor caso: sobre toda la captura, 12 núcleos) |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
 | PNG frente al de Windows | Nunca mayor | 18 % menor de media en las pruebas; con fotos, hasta 0,5 % mayor |

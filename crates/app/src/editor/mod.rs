@@ -395,7 +395,7 @@ impl Editor {
             } else {
                 IDC_SIZENESW
             }
-        } else if self.shape_at(point).is_some() {
+        } else if self.shape_at(point).is_some_and(|shape| !self.fills(shape)) {
             IDC_SIZEALL
         } else if point.1 >= TITLE_BAR {
             IDC_CROSS
@@ -455,8 +455,8 @@ impl Editor {
             }
         } else if point.1 >= TITLE_BAR {
             let on = self.shape_at(point);
-            if on.is_some() {
-                self.select(on);
+            if let Some(shape) = on.filter(|&shape| !self.fills(shape)) {
+                self.select(Some(shape));
             }
             Gesture::Press {
                 at: point,
@@ -490,8 +490,9 @@ impl Editor {
                 if !self.dragged(at, point) {
                     return false;
                 }
-                let grabbed =
-                    on.and_then(|shape| Some((shape, self.edits.outline(shape, bounds)?)));
+                let grabbed = on
+                    .filter(|&shape| !self.fills(shape))
+                    .and_then(|shape| Some((shape, self.edits.outline(shape, bounds)?)));
                 self.gesture = Some(match grabbed {
                     Some((shape, outline)) => Gesture::Move {
                         shape,
@@ -552,8 +553,9 @@ impl Editor {
                     self.activated(part);
                 }
             }
-            // A click away from the shapes clears the selection.
-            Gesture::Press { on: None, .. } => self.select(None),
+            // A click selects the shape under it, and away from the shapes clears the
+            // selection.
+            Gesture::Press { on, .. } => self.select(on),
             Gesture::Draw {
                 shape: Shape::Focus,
                 ..
@@ -997,6 +999,13 @@ impl Editor {
         self.selected
             .and_then(|shape| self.shape_area(shape, Instant::now()))
             .is_some_and(|area| canvas::chip_contains(canvas::chip(area, self.width()), point))
+    }
+
+    /// Whether `shape` covers the whole capture. It has nowhere to move, so dragging
+    /// on it draws a new shape instead.
+    fn fills(&self, shape: Shape) -> bool {
+        let bounds = self.bounds();
+        self.edits.outline(shape, bounds) == Some(bounds)
     }
 
     fn bounds(&self) -> Rect {

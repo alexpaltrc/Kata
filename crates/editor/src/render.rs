@@ -3,6 +3,7 @@
 
 use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
+use std::thread;
 
 use crate::{BLUR_LEVELS, Blur, Image, Rect, Spot};
 
@@ -20,10 +21,14 @@ pub const FOCUS_CORNER: f32 = 8.0;
 const SHADOW_REACH: f32 = 24.0;
 const SHADOW_DROP: f32 = 4.0;
 const SHADOW_DARKNESS: f32 = 0.4;
+/// The fewest rows a core draws at once, so a small change isn't worth splitting.
+const BAND_ROWS: usize = 32;
 
 /// Keeps a rendering of the capture with its edits, redrawing only what changes.
 pub struct Renderer {
     scale: f32,
+    /// How many rows the focus draws at once.
+    cores: usize,
     /// Makes this session's blur noise unpredictable.
     seed: u64,
     /// The capture with its blurs.
@@ -46,6 +51,7 @@ impl Renderer {
     pub fn new(image: &Image, scale: f32) -> Self {
         Self {
             scale,
+            cores: thread::available_parallelism().map_or(1, usize::from),
             seed: RandomState::new().hash_one(0),
             base: image.clone(),
             output: image.clone(),
@@ -136,7 +142,8 @@ impl Renderer {
         lit.intersect(&bounds).unwrap_or_default()
     }
 
-    /// Redraws `area` of the output from `base`.
+    /// Redraws `area` of the output from `base`, in bands of rows drawn at once on
+    /// every core.
     fn compose(&mut self, area: Rect) {
         let bounds = self.base.bounds();
         let Some(area) = area.intersect(&bounds) else {
@@ -148,33 +155,23 @@ impl Renderer {
         };
         let light = Light::new(spot, bounds, self.scale);
         let footprint = self.footprint(spot);
-        let len = area.width() as usize * Image::BYTES_PER_PIXEL;
-        // Where a column falls in `area`'s rows.
-        let column = |x: i32| (x.clamp(area.left, area.right) - area.left) as usize;
-        for y in area.top..area.bottom {
-            let row = self.base.offset(area.left, y);
-            let from = self.base.pixels()[row..row + len].as_chunks::<4>().0;
-            let to = self.output.pixels_mut()[row..row + len]
-                .as_chunks_mut::<4>()
-                .0;
-            let near = if (footprint.top..footprint.bottom).contains(&y) {
-                column(footprint.left)..column(footprint.right)
-            } else {
-                0..0
-            };
-            let solid = if light.solid.contains(&y) {
-                column(light.lit.left)..column(light.lit.right)
-            } else {
-                near.end..near.end
-            };
-            dim(&from[..near.start], &mut to[..near.start]);
-            dim(&from[near.end..], &mut to[near.end..]);
-            for i in (near.start..solid.start).chain(solid.end..near.end) {
-                to[i] = light.shade(&self.base, area.left + i as i32, y, &from[i]);
+        let (base, stride) = (&self.base, self.base.stride());
+        let band = (area.height() as usize).div_ceil(self.cores).max(BAND_ROWS);
+        let rows = area.top as usize * stride..area.bottom as usize * stride;
+        thread::scope(|scope| {
+            for (n, rows) in self.output.pixels_mut()[rows]
+                .chunks_mut(band * stride)
+                .enumerate()
+            {
+                let top = area.top + (n * band) as i32;
+                let light = &light;
+                scope.spawn(move || {
+                    for (y, row) in (top..).zip(rows.chunks_exact_mut(stride)) {
+                        light.row(base, footprint, area, y, row);
+                    }
+                });
             }
-            let left = area.left + solid.start as i32;
-            light.lens(&self.base, left, y, &mut to[solid]);
-        }
+        });
     }
 }
 
@@ -225,6 +222,34 @@ impl Light {
                 bounds.bottom,
             ),
         }
+    }
+
+    /// Draws the part of row `y` inside `area` into `to`, the output's whole row,
+    /// from `base`. `footprint` is where the focus does more than dim.
+    fn row(&self, base: &Image, footprint: Rect, area: Rect, y: i32, to: &mut [u8]) {
+        let span = base.offset(area.left, 0)..base.offset(area.right, 0);
+        let row = base.offset(0, y);
+        let from = base.pixels()[row..][span.clone()].as_chunks::<4>().0;
+        let to = to[span].as_chunks_mut::<4>().0;
+        // Where a column falls in `area`'s rows.
+        let column = |x: i32| (x.clamp(area.left, area.right) - area.left) as usize;
+        let near = if (footprint.top..footprint.bottom).contains(&y) {
+            column(footprint.left)..column(footprint.right)
+        } else {
+            0..0
+        };
+        let solid = if self.solid.contains(&y) {
+            column(self.lit.left)..column(self.lit.right)
+        } else {
+            near.end..near.end
+        };
+        dim(&from[..near.start], &mut to[..near.start]);
+        dim(&from[near.end..], &mut to[near.end..]);
+        for i in (near.start..solid.start).chain(solid.end..near.end) {
+            to[i] = self.shade(base, area.left + i as i32, y, &from[i]);
+        }
+        let left = area.left + solid.start as i32;
+        self.lens(base, left, y, &mut to[solid]);
     }
 
     /// Fills `to` with the magnified pixels of row `y`, from column `left` on, all

@@ -50,6 +50,8 @@ Solo hay dos herramientas. Se arrastra sobre la captura para usarlas.
 - Un clic selecciona un rectángulo: se mueve arrastrándolo, cambia de tamaño desde sus esquinas
   y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover el control deslizante cambia
   el rectángulo seleccionado.
+- Si un rectángulo cubre toda la captura, arrastrar sobre él dibuja uno nuevo; un clic lo
+  selecciona.
 - Kata recuerda la herramienta, sus niveles y el Autoguardado para la siguiente captura.
 
 ## Guardar y copiar, sin pensar
