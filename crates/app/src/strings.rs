@@ -15,6 +15,10 @@ pub struct Strings {
     pub focus: &'static str,
     pub steps: &'static str,
     pub blur_levels: [&'static str; BLUR_LEVELS],
+    /// What assistive technologies call the setting that blurs around the focus, and
+    /// its first step.
+    pub blur_around: &'static str,
+    pub no_blur: &'static str,
     pub autosave: &'static str,
     pub save: &'static str,
     /// What assistive technologies call the button that shows the capture's file.
@@ -59,6 +63,8 @@ static SPANISH: Strings = Strings {
     focus: "Foco",
     steps: "Pasos",
     blur_levels: ["Suave", "Medio", "Fuerte"],
+    blur_around: "Desenfocar alrededor",
+    no_blur: "Ninguno",
     autosave: "Autoguardado",
     save: "Guardar",
     open_file_location: "Abrir la ubicación del archivo",
@@ -91,6 +97,8 @@ static ENGLISH: Strings = Strings {
     focus: "Focus",
     steps: "Steps",
     blur_levels: ["Soft", "Medium", "Strong"],
+    blur_around: "Blur around",
+    no_blur: "None",
     autosave: "Autosave",
     save: "Save",
     open_file_location: "Open file location",

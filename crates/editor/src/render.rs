@@ -37,6 +37,8 @@ pub struct Renderer {
     /// The blurs in `base`.
     blurs: Vec<Patch>,
     focus: Option<Spot>,
+    /// `base` blurred all over, while the focus blurs what's around it.
+    haze: Option<Haze>,
     steps: Vec<Step>,
 }
 
@@ -44,6 +46,12 @@ pub struct Renderer {
 struct Patch {
     blur: Blur,
     area: Rect,
+    pixels: Image,
+}
+
+/// The image blurred all over at a blur level.
+struct Haze {
+    level: usize,
     pixels: Image,
 }
 
@@ -58,6 +66,7 @@ impl Renderer {
             output: image.clone(),
             blurs: Vec::new(),
             focus: None,
+            haze: None,
             steps: Vec::new(),
         }
     }
@@ -102,8 +111,26 @@ impl Renderer {
             }
         }
 
+        // Around a focus that blurs, the haze follows `base`, and a change in it
+        // spreads to the cells beside.
+        let level = focus.and_then(|spot| spot.blur);
         let mut dirty = stale.clone();
-        if self.focus.is_some() != focus.is_some() {
+        if self.haze.as_ref().map(|haze| haze.level) != level {
+            self.haze = level.map(|level| Haze {
+                level,
+                pixels: blurred(
+                    &self.base,
+                    bounds,
+                    cell(level, self.scale),
+                    self.seed,
+                    self.cores,
+                ),
+            });
+        } else if self.haze.is_some() {
+            dirty = stale.iter().map(|&area| self.rehaze(area)).collect();
+        }
+        // Showing, hiding or blurring around the focus changes the whole image.
+        if self.focus.map(|spot| spot.blur) != focus.map(|spot| spot.blur) {
             dirty = vec![bounds];
         } else if let Some(old) = self.focus
             && let Some(new) = focus
@@ -142,12 +169,40 @@ impl Renderer {
 
     fn patch(&self, image: &Image, blur: Blur) -> Option<Patch> {
         let area = blur.rect.intersect(&image.bounds())?;
-        let cell = (BLUR_CELLS[blur.level] * self.scale).round().max(2.0) as usize;
+        let cell = cell(blur.level, self.scale);
         Some(Patch {
             blur,
             area,
-            pixels: blurred(image, area, cell, self.seed),
+            pixels: blurred(image, area, cell, self.seed, self.cores),
         })
+    }
+
+    /// Blurs the haze again after `base` changed in `area`, and returns where the
+    /// haze changed: each pixel blends the cells up to two away from its own.
+    fn rehaze(&mut self, area: Rect) -> Rect {
+        let Some(haze) = &mut self.haze else {
+            return area;
+        };
+        let cell = cell(haze.level, self.scale);
+        let bounds = self.base.bounds();
+        // On the image's grid of cells, as the haze was blurred all at once.
+        let around = |area: Rect| {
+            let reach = 2 * cell as i32;
+            let down = |at: i32| at - at.rem_euclid(cell as i32) - reach;
+            let up = |at: i32| at + (-at).rem_euclid(cell as i32) + reach;
+            let grown = Rect::new(
+                down(area.left),
+                down(area.top),
+                up(area.right),
+                up(area.bottom),
+            );
+            grown.intersect(&bounds).unwrap_or_default()
+        };
+        let changed = around(area);
+        let read = around(changed);
+        let pixels = blurred(&self.base, read, cell, self.seed, self.cores);
+        haze.pixels.paste(&pixels, (read.left, read.top), changed);
+        changed
     }
 
     /// Everything a focus changes besides the dimming: its lit area and shadow.
@@ -185,6 +240,7 @@ impl Renderer {
         let light = Light::new(spot, bounds, self.scale);
         let footprint = self.footprint(spot);
         let (base, stride) = (&self.base, self.base.stride());
+        let around = self.haze.as_ref().map_or(base, |haze| &haze.pixels);
         let band = (area.height() as usize).div_ceil(self.cores).max(BAND_ROWS);
         let rows = area.top as usize * stride..area.bottom as usize * stride;
         thread::scope(|scope| {
@@ -196,7 +252,7 @@ impl Renderer {
                 let light = &light;
                 scope.spawn(move || {
                     for (y, row) in (top..).zip(rows.chunks_exact_mut(stride)) {
-                        light.row(base, footprint, area, y, row);
+                        light.row(base, around, footprint, area, y, row);
                     }
                 });
             }
@@ -253,12 +309,21 @@ impl Light {
         }
     }
 
-    /// Draws the part of row `y` inside `area` into `to`, the output's whole row,
-    /// from `base`. `footprint` is where the focus does more than dim.
-    fn row(&self, base: &Image, footprint: Rect, area: Rect, y: i32, to: &mut [u8]) {
+    /// Draws the part of row `y` inside `area` into `to`, the output's whole row: the
+    /// lit area from `base`, and `around` dimmed around it. `footprint` is where the
+    /// focus does more than dim.
+    fn row(
+        &self,
+        base: &Image,
+        around: &Image,
+        footprint: Rect,
+        area: Rect,
+        y: i32,
+        to: &mut [u8],
+    ) {
         let span = base.offset(area.left, 0)..base.offset(area.right, 0);
         let row = base.offset(0, y);
-        let from = base.pixels()[row..][span.clone()].as_chunks::<4>().0;
+        let from = around.pixels()[row..][span.clone()].as_chunks::<4>().0;
         let to = to[span].as_chunks_mut::<4>().0;
         // Where a column falls in `area`'s rows.
         let column = |x: i32| (x.clamp(area.left, area.right) - area.left) as usize;
@@ -404,11 +469,14 @@ impl RoundedRect {
 
 /// `area` of `image`, blurred beyond recovery: every `cell` × `cell` square is
 /// averaged into one color, and those colors are blended smoothly into each other.
-fn blurred(image: &Image, area: Rect, cell: usize, seed: u64) -> Image {
+fn blurred(image: &Image, area: Rect, cell: usize, seed: u64, cores: usize) -> Image {
     let (width, height) = (area.width() as usize, area.height() as usize);
     let (columns, rows) = (width.div_ceil(cell), height.div_ceil(cell));
 
     let stride = width * Image::BYTES_PER_PIXEL;
+    // Where the first cell falls on the image's grid of cells, so each cell's noise
+    // stays the same however much of the image is blurred at once.
+    let origin = (area.left as usize / cell, area.top as usize / cell);
 
     let mut sums = vec![[0u32; 3]; columns * rows];
     for y in 0..height {
@@ -428,9 +496,11 @@ fn blurred(image: &Image, area: Rect, cell: usize, seed: u64) -> Image {
         .iter()
         .enumerate()
         .map(|(at, sum)| {
-            let count = side(at % columns, width) * side(at / columns, height);
+            let (column, row) = (at % columns, at / columns);
+            let count = side(column, width) * side(row, height);
+            let key = (origin.0 + column, origin.1 + row);
             std::array::from_fn(|channel| {
-                sum[channel] as f32 / count + BLUR_NOISE * noise(seed, at, channel)
+                sum[channel] as f32 / count + BLUR_NOISE * noise(seed, key, channel)
             })
         })
         .collect();
@@ -452,16 +522,25 @@ fn blurred(image: &Image, area: Rect, cell: usize, seed: u64) -> Image {
             to[3] = 255.0;
         }
     }
+    // Down, the most work, in bands of rows on every core.
     let mut pixels = vec![0; height * stride];
-    for (y, to) in pixels.chunks_exact_mut(stride).enumerate() {
-        let [a, b, c, d] =
-            spline(y, cell, rows).map(|(row, weight)| (&wide[row * stride..][..stride], weight));
-        for (i, value) in to.iter_mut().enumerate() {
-            let blended = a.0[i] * a.1 + b.0[i] * b.1 + c.0[i] * c.1 + d.0[i] * d.1;
-            // Rounds, and clamps what the noise pushed past black or white.
-            *value = (blended + 0.5) as u8;
+    let band = height.div_ceil(cores).max(BAND_ROWS);
+    thread::scope(|scope| {
+        for (n, lines) in pixels.chunks_mut(band * stride).enumerate() {
+            let wide = &wide;
+            scope.spawn(move || {
+                for (y, to) in (n * band..).zip(lines.chunks_exact_mut(stride)) {
+                    let [a, b, c, d] = spline(y, cell, rows)
+                        .map(|(row, weight)| (&wide[row * stride..][..stride], weight));
+                    for (i, value) in to.iter_mut().enumerate() {
+                        let blended = a.0[i] * a.1 + b.0[i] * b.1 + c.0[i] * c.1 + d.0[i] * d.1;
+                        // Rounds, and clamps what the noise pushed past black or white.
+                        *value = (blended + 0.5) as u8;
+                    }
+                }
+            });
         }
-    }
+    });
     Image::new(width as u32, height as u32, pixels)
 }
 
@@ -482,10 +561,17 @@ fn spline(at: usize, cell: usize, count: usize) -> [(usize, f32); 4] {
     })
 }
 
-/// A repeatable random number between -1 and 1 for each cell and channel.
-fn noise(seed: u64, cell: usize, channel: usize) -> f32 {
+/// The side of the cells blur `level` averages, in pixels at `scale`.
+fn cell(level: usize, scale: f32) -> usize {
+    (BLUR_CELLS[level] * scale).round().max(2.0) as usize
+}
+
+/// A repeatable random number between -1 and 1 for each cell, by its column and
+/// row, and channel.
+fn noise(seed: u64, (column, row): (usize, usize), channel: usize) -> f32 {
     // SplitMix64's finalizer.
-    let key = ((cell as u64) << 2) | channel as u64;
+    let cell = ((row as u64) << 32) | column as u64;
+    let key = (cell << 2) | channel as u64;
     let mut z = seed ^ key.wrapping_mul(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -552,10 +638,30 @@ mod tests {
         let focus = Spot {
             rect: Rect::new(10, 10, 50, 40),
             zoom: 1.0,
+            blur: None,
         };
         renderer.update(&image, &[], Some(focus), &[]);
         let output = renderer.output();
         assert_eq!(pixel(output, 1, 1), [128, 128, 128, 255]);
+        assert_eq!(pixel(output, 30, 20), pixel(&image, 30, 20));
+        assert_eq!(pixel(output, 31, 20), pixel(&image, 31, 20));
+    }
+
+    #[test]
+    fn focus_can_blur_around_too() {
+        let image = stripes();
+        let mut renderer = Renderer::new(&image, 1.0);
+        let focus = Spot {
+            rect: Rect::new(10, 10, 50, 40),
+            zoom: 1.0,
+            blur: Some(0),
+        };
+        renderer.update(&image, &[], Some(focus), &[]);
+        let output = renderer.output();
+        // Away from the focus, the stripes blend into a dimmed gray.
+        for x in 0..4 {
+            assert!((48..=80).contains(&pixel(output, x, 1)[0]), "{x}");
+        }
         assert_eq!(pixel(output, 30, 20), pixel(&image, 30, 20));
         assert_eq!(pixel(output, 31, 20), pixel(&image, 31, 20));
     }
@@ -570,6 +676,7 @@ mod tests {
         let focus = Spot {
             rect: Rect::new(24, 16, 40, 32),
             zoom: ZOOMS[3],
+            blur: None,
         };
         renderer.update(&image, &[], Some(focus), &[]);
         // The lit area spans columns 16..48 around the same center, and each column
@@ -587,7 +694,12 @@ mod tests {
         let mark = |left, top| Step {
             rect: Rect::new(left, top, left + 12, top + 12),
         };
-        let frames: [(&[Blur], Option<Spot>, &[Step]); 6] = [
+        let hazy = |zoom, level| Spot {
+            rect: Rect::new(20, 20, 36, 36),
+            zoom,
+            blur: Some(level),
+        };
+        let frames: [(&[Blur], Option<Spot>, &[Step]); 10] = [
             (&[blur(Rect::new(0, 0, 20, 20))], None, &[mark(30, 4)]),
             (
                 &[
@@ -597,6 +709,7 @@ mod tests {
                 Some(Spot {
                     rect: Rect::new(20, 20, 40, 40),
                     zoom: 1.5,
+                    blur: None,
                 }),
                 &[mark(30, 4), mark(2, 30)],
             ),
@@ -605,6 +718,7 @@ mod tests {
                 Some(Spot {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 2.0,
+                    blur: None,
                 }),
                 &[mark(2, 30)],
             ),
@@ -616,9 +730,15 @@ mod tests {
                 Some(Spot {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 1.0,
+                    blur: None,
                 }),
                 &[mark(2, 30), mark(40, 30)],
             ),
+            // A blur moving away from the image's corner, under a haze.
+            (&[blur(Rect::new(0, 0, 20, 20))], Some(hazy(1.0, 0)), &[]),
+            (&[blur(Rect::new(40, 30, 52, 42))], Some(hazy(1.0, 0)), &[]),
+            (&[blur(Rect::new(44, 30, 56, 42))], Some(hazy(1.5, 0)), &[]),
+            (&[blur(Rect::new(44, 30, 56, 42))], Some(hazy(1.5, 2)), &[]),
             (&[], None, &[mark(40, 30)]),
             (&[], None, &[]),
         ];
@@ -651,7 +771,7 @@ mod tests {
     #[test]
     fn noise_stays_in_range() {
         for cell in 0..1000 {
-            let value = noise(7, cell, cell % 3);
+            let value = noise(7, (cell, cell / 7), cell % 3);
             assert!((-1.0..1.0).contains(&value));
         }
     }

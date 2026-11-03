@@ -12,12 +12,15 @@ pub struct Blur {
     pub level: usize,
 }
 
-/// The one area that stays lit while the rest of the image darkens.
+/// The one area that stays lit while the rest of the image darkens, and blurs if
+/// asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Focus {
     pub rect: Rect,
     /// An index into `ZOOMS`.
     pub level: usize,
+    /// The blur level around it, if it blurs what's around.
+    pub blur: Option<usize>,
 }
 
 impl Focus {
@@ -25,16 +28,18 @@ impl Focus {
         Spot {
             rect: self.rect,
             zoom: ZOOMS[self.level],
+            blur: self.blur,
         }
     }
 }
 
-/// A focus as drawn: the area it lights and how much it magnifies it. The zoom is
-/// free so it can animate between levels.
+/// A focus as drawn: the area it lights, how much it magnifies it and how it blurs
+/// what's around. The zoom is free so it can animate between levels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spot {
     pub rect: Rect,
     pub zoom: f32,
+    pub blur: Option<usize>,
 }
 
 impl Spot {
@@ -269,7 +274,11 @@ mod tests {
     #[test]
     fn lit_grows_around_the_center_and_stays_inside() {
         let bounds = Rect::new(0, 0, 100, 100);
-        let spot = |rect, zoom| Spot { rect, zoom };
+        let spot = |rect, zoom| Spot {
+            rect,
+            zoom,
+            blur: None,
+        };
         assert_eq!(
             spot(Rect::new(40, 40, 60, 60), 2.0).lit(bounds),
             Rect::new(30, 30, 70, 70)
@@ -298,6 +307,7 @@ mod tests {
             focus: Some(Focus {
                 rect: Rect::new(40, 40, 50, 50),
                 level: 3,
+                blur: None,
             }),
             steps: vec![Step {
                 rect: Rect::new(44, 44, 60, 60),
@@ -319,13 +329,15 @@ mod tests {
             focus: Some(Focus {
                 rect: Rect::new(10, 10, 30, 30),
                 level: 2,
+                blur: Some(1),
             }),
             steps: Vec::new(),
         };
         let outline = Rect::new(100, 60, 160, 120);
         edits.reshape(Shape::Focus, outline, bounds);
         assert_eq!(edits.outline(Shape::Focus, bounds), Some(outline));
-        assert_eq!(edits.focus.map(|focus| focus.level), Some(2));
+        let focus = edits.focus.map(|focus| (focus.level, focus.blur));
+        assert_eq!(focus, Some((2, Some(1))));
     }
 
     #[test]
@@ -344,6 +356,7 @@ mod tests {
         edits.focus = Some(Focus {
             rect: Rect::new(0, 0, 10, 10),
             level: 0,
+            blur: None,
         });
         edits.remove(Shape::Blur(3));
         edits.remove(Shape::Focus);
@@ -372,7 +385,12 @@ mod tests {
     #[test]
     fn source_undoes_lit() {
         let rect = Rect::new(40, 30, 60, 70);
-        let lit = Spot { rect, zoom: 1.5 }.lit(Rect::new(0, 0, 200, 200));
+        let lit = Spot {
+            rect,
+            zoom: 1.5,
+            blur: None,
+        }
+        .lit(Rect::new(0, 0, 200, 200));
         assert_eq!(Spot::source(lit, 1.5), rect);
     }
 }

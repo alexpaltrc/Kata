@@ -727,7 +727,11 @@ impl Editor {
             Tool::Focus => {
                 // There's one focus at most: a new one replaces it.
                 let level = self.toolbar.zoom_level();
-                self.edits.focus = Some(Focus { rect, level });
+                self.edits.focus = Some(Focus {
+                    rect,
+                    level,
+                    blur: self.toolbar.around(),
+                });
                 self.zoom = Animation::idle(1.0);
                 Shape::Focus
             }
@@ -766,6 +770,7 @@ impl Editor {
                 self.toolbar.select_tool(Tool::Focus);
                 if let Some(focus) = self.edits.focus {
                     self.toolbar.set_zoom_level(focus.level);
+                    self.toolbar.set_around(focus.blur);
                 }
             }
             Some(Shape::Step(_)) => self.toolbar.select_tool(Tool::Steps),
@@ -802,6 +807,11 @@ impl Editor {
                         .retarget(zoom, motion::NORMAL, Easing::POINT_TO_POINT);
                 }
             }
+            (Part::Around, Some(Shape::Focus)) => {
+                if let Some(focus) = &mut self.edits.focus {
+                    focus.blur = self.toolbar.around();
+                }
+            }
             _ => {}
         }
     }
@@ -827,7 +837,7 @@ impl Editor {
                     self.save();
                 }
             }
-            Part::Blur | Part::Zoom => self.slider_changed(part),
+            Part::Blur | Part::Zoom | Part::Around => self.slider_changed(part),
             Part::Folder => self.output.show(),
         }
     }
@@ -928,8 +938,8 @@ impl Editor {
         }
         let zoom = self.zoom.value(now);
         let spot = self.edits.focus.map(|focus| Spot {
-            rect: focus.rect,
             zoom,
+            ..focus.spot()
         });
         let changed = self.renderer.update(
             self.document.image(),
@@ -1061,8 +1071,8 @@ impl Editor {
                 let zoom = self.zoom.value(now);
                 Some(
                     Spot {
-                        rect: focus.rect,
                         zoom,
+                        ..focus.spot()
                     }
                     .lit(self.bounds()),
                 )

@@ -2,7 +2,7 @@
 //! capsules floating at the bottom, centered: the tools' dock and, above it, the
 //! chosen tool's options, when it has any.
 
-use std::{mem, time::Instant};
+use std::{iter, mem, time::Instant};
 
 use kata_editor::{Shape, ZOOMS};
 use kata_ui::{
@@ -69,7 +69,7 @@ impl Tool {
     fn options(self) -> &'static [Part] {
         match self {
             Self::Blur => &[Part::Blur],
-            Self::Focus => &[Part::Zoom],
+            Self::Focus => &[Part::Zoom, Part::Around],
             Self::Steps => &[],
         }
     }
@@ -80,6 +80,7 @@ pub enum Part {
     Tools,
     Blur,
     Zoom,
+    Around,
     Save,
     Autosave,
     Folder,
@@ -126,6 +127,7 @@ pub struct Toolbar {
     tools: Dock,
     blur: Setting,
     zoom: Setting,
+    around: Setting,
     save: Button,
     autosave: Toggle,
     folder: IconButton,
@@ -162,6 +164,10 @@ impl Toolbar {
             .iter()
             .map(|&zoom| fonts.label(&strings.percent(zoom)))
             .collect::<Result<_>>()?;
+        let around = iter::once(strings.no_blur)
+            .chain(strings.blur_levels)
+            .map(|name| fonts.label(name))
+            .collect::<Result<_>>()?;
         let item = |(outlined, filled), name| -> Result<Item> {
             Ok(Item {
                 outlined,
@@ -174,7 +180,7 @@ impl Toolbar {
             item(icons::focus(graphics, Dock::ICON)?, strings.focus)?,
             item(icons::steps(graphics, Dock::ICON)?, strings.steps)?,
         ];
-        let (droplet, _) = icons::blur(graphics, SETTING_ICON)?;
+        let droplet = || icons::blur(graphics, SETTING_ICON).map(|(outlined, _)| outlined);
         // Shown only while autosave is off, and only useful once there's a change.
         let mut save = Button::new(fonts.label(strings.save)?, !settings.autosave);
         save.enable(false);
@@ -182,12 +188,16 @@ impl Toolbar {
         let mut toolbar = Self {
             tools: Dock::new(tools, tool as usize, named),
             blur: Setting::new(
-                droplet,
+                droplet()?,
                 Slider::new(strings.blur, blur_levels, settings.blur_level),
             ),
             zoom: Setting::new(
                 icons::zoom(graphics, SETTING_ICON)?,
                 Slider::new(strings.focus, zooms, settings.zoom_level),
+            ),
+            around: Setting::new(
+                droplet()?,
+                Slider::new(strings.blur_around, around, settings.around),
             ),
             save,
             autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
@@ -210,6 +220,7 @@ impl Toolbar {
             tool: self.tool() as usize,
             blur_level: self.blur.slider.value(),
             zoom_level: self.zoom.slider.value(),
+            around: self.around.slider.value(),
             autosave: self.autosave.is_on(),
         }
     }
@@ -302,6 +313,7 @@ impl Toolbar {
             Part::Tools => &mut self.tools,
             Part::Blur => &mut self.blur.slider,
             Part::Zoom => &mut self.zoom.slider,
+            Part::Around => &mut self.around.slider,
             Part::Save => &mut self.save,
             Part::Autosave => &mut self.autosave,
             Part::Folder => &mut self.folder,
@@ -438,6 +450,17 @@ impl Toolbar {
         self.zoom.slider.set_value(level);
     }
 
+    /// The blur level around the focus, if it blurs what's around.
+    pub fn around(&self) -> Option<usize> {
+        self.around.slider.value().checked_sub(1)
+    }
+
+    pub fn set_around(&mut self, level: Option<usize>) {
+        self.around
+            .slider
+            .set_value(level.map_or(0, |level| level + 1));
+    }
+
     pub fn autosave(&self) -> bool {
         self.autosave.is_on()
     }
@@ -516,6 +539,7 @@ impl Toolbar {
             Part::Tools => &self.tools,
             Part::Blur => &self.blur.slider,
             Part::Zoom => &self.zoom.slider,
+            Part::Around => &self.around.slider,
             Part::Save => &self.save,
             Part::Autosave => &self.autosave,
             Part::Folder => &self.folder,
@@ -526,6 +550,7 @@ impl Toolbar {
         match part {
             Part::Blur => Some(&self.blur),
             Part::Zoom => Some(&self.zoom),
+            Part::Around => Some(&self.around),
             _ => None,
         }
     }
@@ -534,6 +559,7 @@ impl Toolbar {
         match part {
             Part::Blur => Some(&mut self.blur),
             Part::Zoom => Some(&mut self.zoom),
+            Part::Around => Some(&mut self.around),
             _ => None,
         }
     }
