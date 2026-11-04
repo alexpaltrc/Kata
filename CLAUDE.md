@@ -23,6 +23,7 @@ Ante cualquier duda, gana la opción más simple.
 - **Respuesta inmediata.** Cada acción se siente desde el primer instante, y lo que termina se confirma con un gesto discreto.
 - **Colores de firma.** Los efectos especiales usan colores elegidos a mano, afinados para cada tema, no el color de acento.
 - **Cada elemento pasa por el sello.** Se evalúa con Alex buscando qué lo haría más mágico, y se itera hasta lograrlo. Claude propone mejoras más allá de lo pedido.
+- **Cómo se busca:** partir de lo que se debe sentir, no de la función; mover la cosa real, no un símbolo; que todo venga de algún sitio y vuelva si se cancela; repetir la firma (los colores del destello) en vez de inventar efectos; capas sutiles de profundidad, luz y firma; costuras invisibles con el sistema; mejor que lo estándar sin dejar de ser nativo; y elegir viendo opciones con vista previa.
 
 ## Cómo comunicarse con Alex
 

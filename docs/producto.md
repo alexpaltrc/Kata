@@ -73,7 +73,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 - **Bienvenida (onboarding)**, a la altura del resto de Kata. Enseñará lo que hoy no se ve a simple vista, como arrastrar la captura desde su nombre, y permitirá quitar el interruptor de Autoguardado: Kata guardará siempre.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
-- **Llegar a Ajustes sin la bandeja.** Hay quien nunca la usa. Alex y Claude evalúan juntos la forma más natural.
+- **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 
 ## Antes de vender
 
