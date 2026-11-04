@@ -1,6 +1,7 @@
 //! Draws the edits onto the capture. The window shows these same pixels, so what
 //! the user sees is exactly what gets saved.
 
+use std::borrow::Cow;
 use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::thread;
@@ -8,16 +9,20 @@ use std::thread;
 use crate::geometry::{RoundedRect, center};
 use crate::{BLUR_LEVELS, Blur, Figure, Image, Rect, Spot, Step, figure, marker};
 
-/// The side of the cells each blur level averages, in pixels at 100 % scale.
-const BLUR_CELLS: [f32; BLUR_LEVELS] = [8.0, 14.0, 24.0];
-/// How far each cell's brightness is randomly shifted, in levels out of 255: the same
-/// for red, green and blue, so it never tints. Too little to see, but it keeps the
-/// blur from being matched against guessed text.
-const BLUR_NOISE: f32 = 4.0;
-/// How each cell's average blends with the two cells on each side, across and then
-/// down, before the cells blend into each other. Without it, detail finer than a
-/// cell, such as text, mottles the blur.
-const SOFTEN: [f32; 5] = [0.0625, 0.25, 0.375, 0.25, 0.0625];
+/// How far each blur level spreads every pixel, in pixels at 100 % scale: the
+/// standard deviation of the Gaussian blur it follows.
+const BLUR_SIZES: [f32; BLUR_LEVELS] = [10.0, 16.0, 26.0];
+/// A blur first averages the image into cells this many times smaller than its
+/// spread, so a strong blur costs no more than a soft one. Bigger cells would let fine
+/// detail, such as text, mottle the blur.
+const CELLS_PER_SIZE: f32 = 3.0;
+/// How far each blurred pixel's brightness is randomly shifted, in levels out of 255:
+/// the same for red, green and blue, so it never tints. A grain too fine to notice,
+/// which keeps smooth blurs from banding and the blur from being matched against
+/// guessed text.
+const GRAIN: f32 = 3.0;
+/// How many random shifts the grain holds, read again from a new place on each row.
+const GRAIN_RUN: usize = 4096;
 /// How much light the image keeps around the focus.
 const FOCUS_LIGHT: f32 = 0.5;
 /// The lit area's corner radius at 100 %.
@@ -35,7 +40,7 @@ pub struct Renderer {
     scale: f32,
     /// How many rows the focus draws at once.
     cores: usize,
-    /// Makes this session's blur noise unpredictable.
+    /// Makes this session's blur grain unpredictable.
     seed: u64,
     /// The capture with its blurs.
     base: Image,
@@ -130,7 +135,7 @@ impl Renderer {
                 pixels: blurred(
                     &self.base,
                     bounds,
-                    cell(level, self.scale),
+                    Kernel::new(level, self.scale),
                     self.seed,
                     self.cores,
                 ),
@@ -187,28 +192,27 @@ impl Renderer {
 
     fn patch(&self, image: &Image, blur: Blur) -> Option<Patch> {
         let area = blur.rect.intersect(&image.bounds())?;
-        let cell = cell(blur.level, self.scale);
+        let kernel = Kernel::new(blur.level, self.scale);
         Some(Patch {
             blur,
             area,
-            pixels: blurred(image, area, cell, self.seed, self.cores),
+            pixels: blurred(image, area, kernel, self.seed, self.cores),
         })
     }
 
     /// Blurs the haze again after `base` changed in `area`, and returns where the
-    /// haze changed: each pixel blends the cells up to two away from its own, and each
-    /// of those was softened with the cells up to two away from it.
+    /// haze changed: as far as its kernel reaches from the cells `area` touches.
     fn rehaze(&mut self, area: Rect) -> Rect {
         let Some(haze) = &mut self.haze else {
             return area;
         };
-        let cell = cell(haze.level, self.scale);
+        let kernel = Kernel::new(haze.level, self.scale);
+        let (cell, reach) = (kernel.cell as i32, (kernel.reach() * kernel.cell) as i32);
         let bounds = self.base.bounds();
         // On the image's grid of cells, as the haze was blurred all at once.
         let around = |area: Rect| {
-            let reach = (2 + SOFTEN.len() / 2) as i32 * cell as i32;
-            let down = |at: i32| at - at.rem_euclid(cell as i32) - reach;
-            let up = |at: i32| at + (-at).rem_euclid(cell as i32) + reach;
+            let down = |at: i32| at - at.rem_euclid(cell) - reach;
+            let up = |at: i32| at + (-at).rem_euclid(cell) + reach;
             let grown = Rect::new(
                 down(area.left),
                 down(area.top),
@@ -219,7 +223,7 @@ impl Renderer {
         };
         let changed = around(area);
         let read = around(changed);
-        let pixels = blurred(&self.base, read, cell, self.seed, self.cores);
+        let pixels = blurred(&self.base, read, kernel, self.seed, self.cores);
         haze.pixels.paste(&pixels, (read.left, read.top), changed);
         changed
     }
@@ -456,81 +460,120 @@ fn dim(from: &[[u8; 4]], to: &mut [[u8; 4]]) {
     }
 }
 
-/// `area` of `image`, blurred beyond recovery: every `cell` × `cell` square is
-/// averaged into one color, and those colors are blended smoothly into each other.
-fn blurred(image: &Image, area: Rect, cell: usize, seed: u64, cores: usize) -> Image {
+/// A cell's blue, green and red, in 1/256 levels. The fourth goes unused, so a cell
+/// fills a whole lane of the processor.
+type Cell = [u16; 4];
+
+/// How a blur level blurs. The image is averaged into square cells, the cells are
+/// blurred by three boxes across and three down, which together follow a Gaussian
+/// closely, and the cells blend smoothly back into pixels.
+#[derive(Clone, Copy)]
+struct Kernel {
+    /// The cells' side, in pixels.
+    cell: usize,
+    /// How many cells each box reaches to each side.
+    radii: [usize; 3],
+}
+
+impl Kernel {
+    /// The kernel for blur `level` at display `scale`.
+    fn new(level: usize, scale: f32) -> Self {
+        let size = BLUR_SIZES[level] * scale;
+        let cell = (size / CELLS_PER_SIZE).round().max(1.0) as usize;
+        let side = cell as f32;
+        // Averaging into cells and blending them back blur a little too, and the
+        // boxes add the rest. Spreads add up as variances, here in cells.
+        let variance =
+            ((size * size - (side * side - 1.0) / 12.0) / (side * side) - 1.0 / 3.0).max(0.0);
+        // Boxes of two odd widths a step apart, as many of each as comes closest
+        // (Kovesi, "Fast almost-Gaussian filtering").
+        let ideal = (4.0 * variance + 1.0).sqrt();
+        let narrow = ((ideal + 1.0) / 2.0).floor() * 2.0 - 1.0;
+        let narrows =
+            (3.0 * narrow * narrow + 12.0 * narrow + 9.0 - 12.0 * variance) / (4.0 * narrow + 4.0);
+        let radii = std::array::from_fn(|at| {
+            (narrow as usize - 1) / 2 + usize::from(at as f32 >= narrows.round())
+        });
+        Self { cell, radii }
+    }
+
+    /// How many cells away a change in one cell shows: as far as the boxes reach,
+    /// and then the two cells each pixel blends on each side.
+    fn reach(&self) -> usize {
+        self.radii.iter().sum::<usize>() + 2
+    }
+}
+
+/// `area` of `image`, blurred beyond recovery by `kernel`, with its grain.
+fn blurred(image: &Image, area: Rect, kernel: Kernel, seed: u64, cores: usize) -> Image {
+    let cell = kernel.cell;
     let (width, height) = (area.width() as usize, area.height() as usize);
     let (columns, rows) = (width.div_ceil(cell), height.div_ceil(cell));
+    let cells = across(image, area, kernel, cores);
+    let grain = Grain::new(seed, area.right as usize);
 
+    // Down, and blended back into pixels with cubic B-splines, in bands of rows on
+    // every core. Each band blurs down only the rows of cells it blends, and those
+    // the boxes reach from them, blends each of those rows across into a row of
+    // pixels, and then each row of pixels down from four of them.
     let stride = width * Image::BYTES_PER_PIXEL;
-    // Where the first cell falls on the image's grid of cells, so each cell's noise
-    // stays the same however much of the image is blurred at once.
-    let origin = (area.left as usize / cell, area.top as usize / cell);
-
-    let mut sums = vec![[0u32; 3]; columns * rows];
-    for y in 0..height {
-        let row = image.offset(area.left, area.top + y as i32);
-        let pixels = image.pixels()[row..row + stride].as_chunks::<4>().0;
-        let sums = &mut sums[y / cell * columns..][..columns];
-        for (sum, run) in sums.iter_mut().zip(pixels.chunks(cell)) {
-            for pixel in run {
-                for channel in 0..3 {
-                    sum[channel] += u32::from(pixel[channel]);
-                }
-            }
-        }
-    }
-    let side = |index: usize, len: usize| (len - index * cell).min(cell) as f32;
-    let averages: Vec<[f32; 3]> = sums
-        .iter()
-        .enumerate()
-        .map(|(at, sum)| {
-            let count = side(at % columns, width) * side(at / columns, height);
-            sum.map(|sum| sum as f32 / count)
-        })
-        .collect();
-    let softened = soften(&soften(&averages, columns, true), columns, false);
-    let colors: Vec<[f32; 3]> = softened
-        .iter()
-        .enumerate()
-        .map(|(at, color)| {
-            let key = (origin.0 + at % columns, origin.1 + at / columns);
-            let shift = BLUR_NOISE * noise(seed, key);
-            color.map(|value| value + shift)
-        })
-        .collect();
-
-    // Cubic B-spline blending, first across each row of cells, then down. Alpha
-    // blends along as 255.
-    let across: Vec<[(usize, f32); 4]> = (0..width).map(|x| spline(x, cell, columns)).collect();
-    let mut wide = vec![0.0f32; rows * stride];
-    for (line, colors) in wide
-        .chunks_exact_mut(stride)
-        .zip(colors.chunks_exact(columns))
-    {
-        for (to, taps) in line.as_chunks_mut::<4>().0.iter_mut().zip(&across) {
-            for &(column, weight) in taps {
-                for channel in 0..3 {
-                    to[channel] += colors[column][channel] * weight;
-                }
-            }
-            to[3] = 255.0;
-        }
-    }
-    // Down, the most work, in bands of rows on every core.
+    let taps: Vec<[(usize, f32); 4]> = (0..width).map(|x| spline(x, cell, columns)).collect();
     let mut pixels = vec![0; height * stride];
     let band = height.div_ceil(cores).max(BAND_ROWS);
     thread::scope(|scope| {
         for (n, lines) in pixels.chunks_mut(band * stride).enumerate() {
-            let wide = &wide;
+            let (cells, taps, grain) = (&cells, &taps, &grain);
             scope.spawn(move || {
-                for (y, to) in (n * band..).zip(lines.chunks_exact_mut(stride)) {
-                    let [a, b, c, d] = spline(y, cell, rows)
-                        .map(|(row, weight)| (&wide[row * stride..][..stride], weight));
-                    for (i, value) in to.iter_mut().enumerate() {
-                        let blended = a.0[i] * a.1 + b.0[i] * b.1 + c.0[i] * c.1 + d.0[i] * d.1;
-                        // Rounds, and clamps what the noise pushed past black or white.
-                        *value = (blended + 0.5) as u8;
+                let top = n * band;
+                let bottom = top + lines.len() / stride;
+                let blended = spline(top, cell, rows)[0].0..spline(bottom - 1, cell, rows)[3].0 + 1;
+                // The rows each box gives, from the last box's back to what the first
+                // reads.
+                let mut wanted = vec![blended.clone()];
+                for &radius in kernel.radii.iter().rev() {
+                    let last = &wanted[wanted.len() - 1];
+                    wanted.push(last.start.saturating_sub(radius)..(last.end + radius).min(rows));
+                }
+                let read = wanted.pop().unwrap_or_default();
+                let mut done = Cow::Borrowed(&cells[read.start * columns..read.end * columns]);
+                for (&radius, range) in kernel.radii.iter().zip(wanted.into_iter().rev()) {
+                    done = Cow::Owned(boxed(&done, columns, rows, range, radius));
+                }
+
+                // The four rows of cells blended across that the row of pixels at
+                // hand blends down, each in the slot its row's number picks.
+                let mut wide = vec![[0.0f32; 4]; 4 * width];
+                let mut next = blended.start;
+                for (y, line) in (top..).zip(lines.chunks_exact_mut(stride)) {
+                    let rows = spline(y, cell, rows);
+                    while next <= rows[3].0 {
+                        let from = &done[(next - blended.start) * columns..][..columns];
+                        let to = &mut wide[next % 4 * width..][..width];
+                        for (to, taps) in to.iter_mut().zip(taps) {
+                            *to = [0.0; 4];
+                            for &(column, weight) in taps {
+                                for lane in 0..4 {
+                                    to[lane] += f32::from(from[column][lane]) * weight;
+                                }
+                            }
+                        }
+                        next += 1;
+                    }
+                    let [(a, wa), (b, wb), (c, wc), (d, wd)] = rows
+                        .map(|(row, weight)| (&wide[row % 4 * width..][..width], weight / 256.0));
+                    let shifts = &grain.row(area.top as usize + y)[area.left as usize..];
+                    let line = line.as_chunks_mut::<4>().0;
+                    let pixels = line.iter_mut().zip(a).zip(b).zip(c).zip(d);
+                    for (((((to, a), b), c), d), &shift) in pixels.zip(shifts) {
+                        // Opacity is pushed far past opaque, so it comes out opaque.
+                        let shifts = [shift, shift, shift, 256.0];
+                        *to = std::array::from_fn(|lane| {
+                            let color = a[lane] * wa + b[lane] * wb + c[lane] * wc + d[lane] * wd;
+                            // Clamps what the grain pushed past black or white. Adding
+                            // 1.5 × 2²³ leaves the level, rounded, in the lowest byte.
+                            let level = (color + shifts[lane]).clamp(0.0, 255.0);
+                            (level + 12_582_912.0).to_bits() as u8
+                        });
                     }
                 }
             });
@@ -539,29 +582,92 @@ fn blurred(image: &Image, area: Rect, cell: usize, seed: u64, cores: usize) -> I
     Image::new(width as u32, height as u32, pixels)
 }
 
-/// The cells of `colors`, a grid `columns` wide, each blended with those beside it by
-/// `SOFTEN`: across, or down. Past the edges, the edge cells stand in.
-fn soften(colors: &[[f32; 3]], columns: usize, across: bool) -> Vec<[f32; 3]> {
-    let rows = colors.len() / columns;
-    let reach = SOFTEN.len() / 2;
-    let near = |at: usize, tap: usize, len: usize| (at + tap).saturating_sub(reach).min(len - 1);
-    (0..colors.len())
-        .map(|at| {
-            let (column, row) = (at % columns, at / columns);
-            let mut color = [0.0; 3];
-            for (tap, weight) in SOFTEN.iter().enumerate() {
-                let from = if across {
-                    row * columns + near(column, tap, columns)
-                } else {
-                    near(row, tap, rows) * columns + column
-                };
-                for (sum, value) in color.iter_mut().zip(colors[from]) {
-                    *sum += value * weight;
+/// `area` of `image` averaged into the cells of `kernel` and blurred across by its
+/// boxes, in bands of rows on every core.
+fn across(image: &Image, area: Rect, kernel: Kernel, cores: usize) -> Vec<Cell> {
+    let cell = kernel.cell;
+    let (width, height) = (area.width() as usize, area.height() as usize);
+    let (columns, rows) = (width.div_ceil(cell), height.div_ceil(cell));
+    let stride = width * Image::BYTES_PER_PIXEL;
+    let mut cells = vec![[0; 4]; columns * rows];
+    let band = rows.div_ceil(cores).max(BAND_ROWS.div_ceil(cell));
+    thread::scope(|scope| {
+        for (n, lines) in cells.chunks_mut(band * columns).enumerate() {
+            scope.spawn(move || {
+                let mut sums = vec![[0u32; 4]; columns];
+                for (row, line) in (n * band..).zip(lines.chunks_exact_mut(columns)) {
+                    sums.fill([0; 4]);
+                    let tall = (height - row * cell).min(cell);
+                    for y in row * cell..row * cell + tall {
+                        let at = image.offset(area.left, area.top + y as i32);
+                        let pixels = image.pixels()[at..at + stride].as_chunks::<4>().0;
+                        for (sum, run) in sums.iter_mut().zip(pixels.chunks(cell)) {
+                            for pixel in run {
+                                for lane in 0..4 {
+                                    sum[lane] += u32::from(pixel[lane]);
+                                }
+                            }
+                        }
+                    }
+                    for (column, (to, sum)) in line.iter_mut().zip(&sums).enumerate() {
+                        let share = 256.0 / (tall * (width - column * cell).min(cell)) as f32;
+                        *to = sum.map(|sum| (sum as f32 * share + 0.5) as u16);
+                    }
+                    // A row of cells is a grid one cell wide, on its side.
+                    for &radius in &kernel.radii {
+                        let done = boxed(line, 1, columns, 0..columns, radius);
+                        line.copy_from_slice(&done);
+                    }
                 }
+            });
+        }
+    });
+    cells
+}
+
+/// Rows `range` of a grid of cells `columns` wide and `rows` tall, blurred down by a
+/// box `radius` cells to each side. `from` holds the rows the box reaches from
+/// `range`, those in the grid. Near the grid's top and bottom, the box averages only
+/// the cells there are. The sums are whole numbers, so each cell comes out the same
+/// however much of the grid is blurred at once.
+fn boxed(
+    from: &[Cell],
+    columns: usize,
+    rows: usize,
+    range: Range<usize>,
+    radius: usize,
+) -> Vec<Cell> {
+    let first = range.start.saturating_sub(radius);
+    let row = |at: usize| &from[(at - first) * columns..][..columns];
+    let add = |sums: &mut [[i32; 4]], at: usize, sign: i32| {
+        for (sum, cell) in sums.iter_mut().zip(row(at)) {
+            for lane in 0..4 {
+                sum[lane] += sign * i32::from(cell[lane]);
             }
-            color
-        })
-        .collect()
+        }
+    };
+    // The box around the first row, but for its last row.
+    let mut sums = vec![[0i32; 4]; columns];
+    for at in first..(range.start + radius).min(rows) {
+        add(&mut sums, at, 1);
+    }
+    let mut to = Vec::with_capacity(range.len() * columns);
+    for at in range {
+        if at + radius < rows {
+            add(&mut sums, at + radius, 1);
+        }
+        if let Some(gone) = at.checked_sub(radius + 1)
+            && gone >= first
+        {
+            add(&mut sums, gone, -1);
+        }
+        let count = ((at + radius).min(rows - 1) + 1 - at.saturating_sub(radius)) as f32;
+        to.extend(
+            sums.iter()
+                .map(|sum| sum.map(|sum| (sum as f32 / count + 0.5) as u16)),
+        );
+    }
+    to
 }
 
 /// The four cells around pixel `at` and their cubic B-spline weights.
@@ -581,20 +687,38 @@ fn spline(at: usize, cell: usize, count: usize) -> [(usize, f32); 4] {
     })
 }
 
-/// The side of the cells blur `level` averages, in pixels at `scale`.
-fn cell(level: usize, scale: f32) -> usize {
-    (BLUR_CELLS[level] * scale).round().max(2.0) as usize
+/// A blur's grain: a run of random brightness shifts, which each row of pixels
+/// starts reading at its own random place, so no pattern shows. The same `seed`
+/// always gives the same grain.
+struct Grain {
+    seed: u64,
+    shifts: Vec<f32>,
 }
 
-/// A repeatable random number between -1 and 1 for each cell, by its column and row.
-fn noise(seed: u64, (column, row): (usize, usize)) -> f32 {
-    // SplitMix64's finalizer.
-    let key = ((row as u64) << 32) | column as u64;
+impl Grain {
+    /// The grain for images up to `width` pixels wide.
+    fn new(seed: u64, width: usize) -> Self {
+        let shifts = (0..GRAIN_RUN + width)
+            .map(|at| {
+                let random = random(seed, at as u64) >> 40;
+                GRAIN * (random as f32 / (1 << 23) as f32 - 1.0)
+            })
+            .collect();
+        Self { seed, shifts }
+    }
+
+    /// The shifts of row `row` of the image, from its first column.
+    fn row(&self, row: usize) -> &[f32] {
+        &self.shifts[random(!self.seed, row as u64) as usize % GRAIN_RUN..]
+    }
+}
+
+/// A repeatable random number for each `key`: SplitMix64's finalizer.
+fn random(seed: u64, key: u64) -> u64 {
     let mut z = seed ^ key.wrapping_mul(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^= z >> 31;
-    (z >> 40) as f32 / (1u64 << 23) as f32 - 1.0
+    z ^ (z >> 31)
 }
 
 #[cfg(test)]
@@ -646,6 +770,33 @@ mod tests {
                     assert_eq!(shown, taken, "{x},{y}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn blur_spreads_as_far_as_its_level_says() {
+        // An edge from black to white: a Gaussian blur's spread is half the distance
+        // its ramp takes from 16 % to 84 % of the way.
+        let width = 400;
+        let pixels = (0..width * 100)
+            .flat_map(|at| [if at % width < width / 2 { 0 } else { 255 }; 4])
+            .collect();
+        let image = Image::new(width as u32, 100, pixels);
+        for (level, size) in BLUR_SIZES.iter().enumerate() {
+            let blurred = blurred(&image, image.bounds(), Kernel::new(level, 1.0), 7, 4);
+            // Down a column, the grain averages out.
+            let column = |x: i32| {
+                (0..100)
+                    .map(|y| f32::from(pixel(&blurred, x, y)[0]))
+                    .sum::<f32>()
+                    / 100.0
+            };
+            let reach = |share: f32| (0..width).find(|&x| column(x) >= share * 255.0);
+            let spread = (reach(0.8413).unwrap() - reach(0.1587).unwrap()) as f32 / 2.0;
+            assert!(
+                (spread - size).abs() <= size * 0.1,
+                "level {level}: {spread}"
+            );
         }
     }
 
@@ -864,10 +1015,9 @@ mod tests {
     }
 
     #[test]
-    fn noise_stays_in_range() {
-        for cell in 0..1000 {
-            let value = noise(7, (cell, cell / 7));
-            assert!((-1.0..1.0).contains(&value));
-        }
+    fn grain_stays_fine() {
+        let grain = Grain::new(7, 100);
+        assert!(grain.shifts.iter().all(|shift| shift.abs() <= GRAIN));
+        assert!(grain.shifts.iter().any(|&shift| shift != grain.shifts[0]));
     }
 }
