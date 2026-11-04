@@ -50,7 +50,7 @@ mostrar siempre.
    **desenfoca también lo de alrededor**, con los mismos niveles de Desenfocar.
 3. **Pasos:** cada clic pone el número siguiente, en un círculo naranja. Si se borra uno, los
    demás se renumeran. Su tamaño se ajusta solo a la captura; al lado está el **tamaño**
-   (Pequeño, Mediano o Grande), que cambia todos los pasos a la vez.
+   (Pequeño, Mediano, Grande o Muy grande), que cambia todos los pasos a la vez.
 4. **Formas:** se arrastra para dibujar un **rectángulo**, una **elipse** o una **flecha**, solo
    el contorno, en naranja. Encima se elige cuál, con su icono. El grosor se ajusta solo a la
    captura.
@@ -73,8 +73,8 @@ mostrar siempre.
 - **El portapapeles siempre tiene la última versión:** la captura recién tomada y, después, cada
   edición, aunque el Autoguardado esté apagado.
 - **Un solo archivo por captura.** La versión editada reemplaza a la original, sin copias extra.
-- **Ponerle nombre:** haz clic en el nombre, arriba al centro, y escribe. La fecha se queda
-  delante (`2026-11-03 - Pedidos.png`). Intro o un clic fuera lo guarda, aunque el Autoguardado
+- **Ponerle nombre:** haz clic en el nombre, arriba al centro, y escribe. La fecha y la
+  hora se quedan delante (`2026-11-03 14.32.05 - Pedidos.png`), así todas se ordenan solas. Intro o un clic fuera lo guarda, aunque el Autoguardado
   esté apagado; Esc lo deja como estaba. Si ya hay un archivo con ese nombre, se le añade «(2)».
 - **Arrastrar la captura:** arrastra el nombre hasta una carpeta, un documento, un chat o un
   correo, y suéltalo ahí. Se deja una copia; el archivo de la captura no se mueve.

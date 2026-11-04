@@ -15,7 +15,7 @@ Cuatro herramientas, como iconos en una barra centrada abajo. Encima, en otra c�
 
 1. **Desenfocar.** Se arrastra para cubrir uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
 2. **Foco.** Se arrastra sobre un área: queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 %, 200 %. **Desenfocar alrededor:** Ninguno, Suave, Medio o Fuerte, los mismos niveles de Desenfocar, aplicados a todo lo que queda fuera del foco.
-3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco. Borrar un paso renumera los que siguen. Su tamaño se ajusta solo a la captura, para que se lea aunque la captura se achique en un documento. **Tamaño:** Pequeño, Mediano o Grande, el mismo para todos los pasos: cambiarlo cambia los que ya están.
+3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco. Borrar un paso renumera los que siguen. Su tamaño se ajusta solo a la captura, para que se lea aunque la captura se achique en un documento. **Tamaño:** Pequeño, Mediano, Grande o Muy grande, el mismo para todos los pasos: cambiarlo cambia los que ya están.
 4. **Formas.** Se arrastra para dibujar un rectángulo, una elipse o una flecha: solo el contorno, en el naranja de los pasos, con el grosor ajustado a la captura. **Forma:** Rectángulo, Elipse o Flecha, elegida con su icono en la cápsula de encima.
 
 Reglas:
@@ -32,7 +32,7 @@ Reglas:
 - **Autoguardado** (interruptor en el editor, activado por defecto): cada cambio sobrescribe el PNG. Al apagarlo aparece el botón **Guardar**.
 - **El portapapeles siempre tiene la versión más reciente:** la captura recién tomada y, después, cada edición, aunque el Autoguardado esté apagado.
 - **La versión editada reemplaza a la original.** No quedan copias ni archivos extra.
-- **El nombre** va arriba, al centro del editor. Con un clic se escribe; la fecha se queda delante: `2026-11-03 - Pedidos.png`. El archivo cambia de nombre al terminar (Intro, un clic fuera o al cerrar el editor), con o sin Autoguardado. Esc deja el de antes, y un nombre vacío vuelve a la fecha y la hora.
+- **El nombre** va arriba, al centro del editor. Con un clic se escribe; la fecha y la hora se quedan delante, para que todas las capturas, con nombre o sin él, se ordenen solas por antigüedad: `2026-11-03 14.32.05 - Pedidos.png`. El archivo cambia de nombre al terminar (Intro, un clic fuera o al cerrar el editor), con o sin Autoguardado. Esc deja el de antes, y un nombre vacío vuelve a la fecha y la hora.
 - **Arrastrar la captura:** el nombre, arrastrado, lleva el archivo a una carpeta, un documento, un chat o un correo. Se copia: la captura conserva el suyo.
 - **El botón de la carpeta** (junto al Autoguardado) abre la carpeta de las capturas, con esta seleccionada.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan fijos en el archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.

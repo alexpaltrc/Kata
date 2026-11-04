@@ -1,20 +1,16 @@
-//! A capture's file name: the date it was taken, then what the user calls it, as in
-//! "2026-11-03 - Invoice". Until it's called something, the time it was taken
-//! follows the date instead, as in "2026-11-03 14.32.05".
+//! A capture's file name: when it was taken, then what the user calls it, as in
+//! "2026-11-03 14.32.05 - Invoice", so captures sort by time, named or not. Until
+//! it's called something, the time alone, as in "2026-11-03 14.32.05".
 
 use std::ops::Range;
 
 /// The most characters a name takes.
 pub const MAX: usize = 100;
 
-/// How long the date that starts the time a capture was taken is.
-const DATE: usize = "2026-11-03".len();
-
-/// What every name of the capture taken at `taken` starts with: its date and a
-/// dash, as in "2026-11-03 - ".
+/// What every name of the capture taken at `taken` starts with: that time and a
+/// dash, as in "2026-11-03 14.32.05 - ".
 pub fn prefix(taken: &str) -> String {
-    let date = taken.get(..DATE).unwrap_or(taken);
-    format!("{date} - ")
+    format!("{taken} - ")
 }
 
 /// What typing `c` puts in a name: itself, a dash for the characters that separate
@@ -202,11 +198,14 @@ mod tests {
     const TAKEN: &str = "2026-11-03 14.32.05";
 
     #[test]
-    fn names_follow_the_date() {
-        assert_eq!(prefix(TAKEN), "2026-11-03 - ");
-        assert_eq!(stem(TAKEN, "Invoice"), "2026-11-03 - Invoice");
-        assert_eq!(name(TAKEN, "2026-11-03 - Invoice"), "Invoice");
-        assert_eq!(name(TAKEN, "2026-11-03 - Invoice (2)"), "Invoice (2)");
+    fn names_follow_the_time() {
+        assert_eq!(prefix(TAKEN), "2026-11-03 14.32.05 - ");
+        assert_eq!(stem(TAKEN, "Invoice"), "2026-11-03 14.32.05 - Invoice");
+        assert_eq!(name(TAKEN, "2026-11-03 14.32.05 - Invoice"), "Invoice");
+        assert_eq!(
+            name(TAKEN, "2026-11-03 14.32.05 - Invoice (2)"),
+            "Invoice (2)"
+        );
     }
 
     #[test]
@@ -219,8 +218,11 @@ mod tests {
 
     #[test]
     fn names_lose_what_windows_drops() {
-        assert_eq!(stem(TAKEN, "  Invoice. . "), "2026-11-03 - Invoice");
-        assert_eq!(stem(TAKEN, "v1.2"), "2026-11-03 - v1.2");
+        assert_eq!(
+            stem(TAKEN, "  Invoice. . "),
+            "2026-11-03 14.32.05 - Invoice"
+        );
+        assert_eq!(stem(TAKEN, "v1.2"), "2026-11-03 14.32.05 - v1.2");
     }
 
     #[test]

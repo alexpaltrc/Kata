@@ -1,5 +1,5 @@
 //! The capture's file name, centered in the title bar. Clicking it opens a box to
-//! type the name in, after the date it keeps; dragging it carries the file away.
+//! type the name in, after the time it keeps; dragging it carries the file away.
 
 use std::time::{Duration, Instant};
 
@@ -27,7 +27,7 @@ use crate::strings::strings;
 /// Between the box's edges and the text.
 const PADDING: f32 = 11.0;
 /// How wide the box opens, room allowing.
-const WIDTH: f32 = 320.0;
+const WIDTH: f32 = 400.0;
 /// The least room the name has in the title bar.
 pub const MIN: f32 = 120.0;
 const RADIUS: f32 = 4.0;

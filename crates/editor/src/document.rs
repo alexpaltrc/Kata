@@ -5,8 +5,8 @@ use crate::{Image, Rect, marker::STEP_SIZE};
 pub const BLUR_LEVELS: usize = 3;
 /// How much each focus level magnifies.
 pub const ZOOMS: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
-/// How big each step size draws the markers, against the usual: Small, Medium, Large.
-pub const STEP_SIZES: [f32; 3] = [0.75, 1.0, 1.35];
+/// How big each step size draws the markers, against the usual: Small, Medium, Large, Extra large.
+pub const STEP_SIZES: [f32; 4] = [0.75, 1.0, 1.35, 1.8];
 /// The least a usual marker spans of the capture's shorter side, so it still reads once
 /// a big capture shrinks to fit a page.
 const STEP_SHARE: f32 = 0.036;
