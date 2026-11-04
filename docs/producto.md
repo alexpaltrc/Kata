@@ -7,7 +7,7 @@
 - **Ventanas tapadas:** si otra ventana tapa una parte, al pasar el cursor la ventana aparece completa, y así se captura. Lo que sale de la pantalla no se incluye.
 - **Al soltar:** la captura se copia al portapapeles al instante, suena un toque sutil y elegante (se puede desactivar) y se guarda en segundo plano.
 - **Después:** según el ajuste, se abre el editor o no aparece nada, para tomar varias capturas seguidas.
-- **Ubicación:** `Imágenes\Kata\Kata 2026-10-27 14.32.05.png`, o la carpeta elegida en Ajustes.
+- **Ubicación:** `Imágenes\Kata\2026-11-03 14.32.05.png`, o la carpeta elegida en Ajustes.
 
 ## Editar
 

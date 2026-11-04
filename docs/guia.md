@@ -71,7 +71,7 @@ mostrar siempre.
 - **Un solo archivo por captura.** La versión editada reemplaza a la original, sin copias extra.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan en el
   archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
-- **Dónde:** `Imágenes\Kata`, con nombres como `Kata 2026-10-27 14.32.05.png`, o en la carpeta
+- **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta
   elegida en Ajustes. El botón de la carpeta, en el editor, la abre con la captura ya seleccionada.
 - **Nunca a medias:** cada archivo se escribe aparte y luego reemplaza al anterior, así que nunca
   queda una imagen a medio guardar.

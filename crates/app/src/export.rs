@@ -204,14 +204,14 @@ pub fn folder() -> io::Result<PathBuf> {
     }
 }
 
-/// Creates an empty file named after the current time, such as
-/// "Kata 2026-10-27 14.32.05.png".
+/// Creates an empty file named after the current time, the date first, such as
+/// "2026-11-03 14.32.05.png".
 fn reserve_file() -> io::Result<PathBuf> {
     let folder = folder()?;
     fs::create_dir_all(&folder)?;
     let now = unsafe { GetLocalTime() };
     let stem = format!(
-        "Kata {:04}-{:02}-{:02} {:02}.{:02}.{:02}",
+        "{:04}-{:02}-{:02} {:02}.{:02}.{:02}",
         now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond
     );
     let mut copy = 1;
