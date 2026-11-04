@@ -11,7 +11,8 @@ use std::{
     cell::{Cell, RefCell},
     mem,
     path::PathBuf,
-    time::Instant,
+    rc::Rc,
+    time::{Duration, Instant},
 };
 
 use kata_editor::{
@@ -64,11 +65,11 @@ use windows::{
 
 use crate::{
     channel,
-    export::{self, Output, Picture},
+    export::{self, Handover, Output, Picture},
     report,
     settings::EditorSettings,
 };
-use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
+use canvas::{Frame, Glide, Gpu, HANDLE_REACH, Pose, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
 
 /// The title bar's height, in DIPs. Saving sits in it.
@@ -82,9 +83,10 @@ const MAX_SHARE: f32 = 0.85;
 /// How much each notch of the mouse wheel zooms.
 const ZOOM_STEP: f32 = 1.25;
 /// How much smaller and fainter the capture gets as it lifts off, its file dragged
-/// away.
+/// away, and how long it takes to fly to the pointer as a card, or back.
 const SINK: f32 = 0.04;
 const FADE: f32 = 0.5;
+const FLIGHT: Duration = Duration::from_millis(350);
 /// Blinks the caret while the name is typed.
 const BLINK_TIMER: usize = 1;
 const CLASS: PCWSTR = w!("Kata.Editor");
@@ -193,6 +195,7 @@ unsafe fn create(
             gesture: None,
             zoom: Animation::idle(1.0),
             lift: Animation::idle(0.0),
+            flight: None,
             carrying: None,
             tracking: false,
             unpublished: false,
@@ -229,13 +232,13 @@ unsafe extern "system" fn window_proc(
             .and_then(|mut editor| editor.handle(message, wparam, lparam));
         // Windows follows a drag from here until the file is dropped, while the editor
         // goes on drawing, free to show the capture lifting off.
-        if let Some((file, card)) =
+        if let Some((file, card, handover)) =
             state().and_then(|editor| editor.try_borrow_mut().ok()?.carrying.take())
         {
-            export::drag(hwnd, &file, card);
+            let went = export::drag(hwnd, &file, card, handover);
             // The window may have closed meanwhile, its editor with it.
             if let Some(mut editor) = state().and_then(|editor| editor.try_borrow_mut().ok()) {
-                editor.dropped();
+                editor.dropped(went);
             }
         }
         handled.unwrap_or_else(|| DefWindowProcW(hwnd, message, wparam, lparam))
@@ -310,6 +313,18 @@ enum Gesture {
     Remove,
 }
 
+/// How the card a dragged capture shrinks into flies in the window.
+enum Flight {
+    /// Out to the pointer, as a glint crosses it, until Windows takes it over.
+    Out {
+        glint: Animation,
+        handover: Rc<Handover>,
+    },
+    /// Back into the capture from `from`, where it was let go without going
+    /// anywhere.
+    Back { from: Point },
+}
+
 struct Editor {
     hwnd: HWND,
     graphics: Graphics,
@@ -346,8 +361,10 @@ struct Editor {
     /// From 0 to 1 as the capture lifts off into the card its file is dragged away
     /// as, and back as it's dropped.
     lift: Animation,
-    /// The file to drag away once the message at hand is handled, and its card.
-    carrying: Option<(PathBuf, Option<Picture>)>,
+    flight: Option<Flight>,
+    /// The file to drag away once the message at hand is handled, its card, and
+    /// how the card gets to the pointer.
+    carrying: Option<(PathBuf, Option<Picture>, Rc<Handover>)>,
     /// Whether Windows will say when the pointer leaves.
     tracking: bool,
     /// The document changed since it was last put on the clipboard.
@@ -1080,8 +1097,8 @@ impl Editor {
     }
 
     /// Drags the capture's file out of the window, once it's on disk: the capture
-    /// lifts off into a card that follows the pointer. Returns whether the look
-    /// changes.
+    /// lifts off into a card that flies to the pointer and follows it. Returns
+    /// whether the look changes.
     fn drag_file(&mut self) -> bool {
         let Some(file) = self.output.file() else {
             return false;
@@ -1094,14 +1111,34 @@ impl Editor {
                 .inspect_err(|error| report("drag", error))
                 .ok()
         });
-        self.carrying = Some((file, card));
-        self.lift = self.lift.retarget(1.0, motion::NORMAL, Easing::DECELERATE);
+        self.lift = self.lift.retarget(1.0, FLIGHT, Easing::DECELERATE);
+        // Windows takes the card over once the editor's own lands at the pointer.
+        let handover = Rc::new(Handover {
+            landing: if card.is_some() {
+                self.lift.end()
+            } else {
+                Instant::now()
+            },
+            taken: Cell::new(false),
+        });
+        self.flight = card.is_some().then(|| Flight::Out {
+            glint: Animation::new(0.0, 1.0, FLIGHT, name::SWEEP),
+            handover: handover.clone(),
+        });
+        self.carrying = Some((file, card, handover));
         true
     }
 
-    /// The dragged file was dropped, or the drag given up: the capture settles back.
-    fn dropped(&mut self) {
-        self.lift = self.lift.retarget(0.0, motion::NORMAL, Easing::DECELERATE);
+    /// The dragged file was dropped, or the drag given up: the capture settles back,
+    /// and its card flies back into it unless it `went` somewhere.
+    fn dropped(&mut self, went: bool) {
+        let flew = matches!(self.flight.take(), Some(Flight::Out { .. }));
+        if flew && !went {
+            self.flight = Some(Flight::Back {
+                from: self.pointer(),
+            });
+        }
+        self.lift = self.lift.retarget(0.0, FLIGHT, Easing::DECELERATE);
         self.hover(Some(self.pointer()));
         self.invalidate();
     }
@@ -1203,6 +1240,9 @@ impl Editor {
     fn paint(&mut self) {
         let _ = unsafe { ValidateRect(Some(self.hwnd), None) };
         let now = Instant::now();
+        if matches!(self.flight, Some(Flight::Back { .. })) && !self.lift.is_running(now) {
+            self.flight = None;
+        }
         let view = self.glide.at(now);
         if view != self.view {
             self.view = view;
@@ -1245,6 +1285,7 @@ impl Editor {
             || self.zoom.is_running(now)
             || self.glide.is_running(now)
             || self.lift.is_running(now)
+            || self.card(now).is_some()
         {
             self.invalidate();
         }
@@ -1279,7 +1320,31 @@ impl Editor {
                 });
             });
             self.toolbar.draw(painter, now);
+            if let Some((pose, glint)) = self.card(now) {
+                canvas::draw_card(painter, image, pose, glint);
+            }
         })
+    }
+
+    /// The card the capture flies as, while it shows, and how far across it the
+    /// glint is, if it's crossing.
+    fn card(&self, now: Instant) -> Option<(Pose, Option<f32>)> {
+        let (held, glint) = match self.flight.as_ref()? {
+            Flight::Out { glint, handover } if !handover.taken.get() => {
+                let crossing = glint.is_running(now).then(|| glint.value(now));
+                (self.pointer(), crossing)
+            }
+            Flight::Back { from } => (*from, None),
+            Flight::Out { .. } => return None,
+        };
+        let bounds = self.bounds();
+        let size = (
+            bounds.width() as f32 / self.scale,
+            bounds.height() as f32 / self.scale,
+        );
+        let flat = Pose::flat(self.view.area(bounds));
+        let pose = flat.toward(Pose::held(size, held), self.lift.value(now));
+        Some((pose, glint))
     }
 
     /// The capture with its frame, and the outlines, handles and chip over it.

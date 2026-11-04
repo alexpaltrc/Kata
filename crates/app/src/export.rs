@@ -3,16 +3,19 @@
 //! last one, and the file takes the name the user gives it.
 
 use std::{
+    cell::Cell,
     ffi::OsString,
     fs::{self, File},
     io,
     mem::{self, ManuallyDrop, size_of},
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
-    ptr, slice,
+    ptr,
+    rc::Rc,
+    slice,
     sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use kata_editor::Image;
@@ -279,11 +282,20 @@ pub struct Picture {
     pub pointer: (i32, i32),
 }
 
+/// How what's dragged gets to the pointer: `owner`, the window it comes from, flies
+/// it there itself, and Windows takes it over once it lands.
+pub struct Handover {
+    /// When it lands.
+    pub landing: Instant,
+    /// Whether Windows shows it now, there or anywhere else.
+    pub taken: Cell<bool>,
+}
+
 /// Drags the file at `path` out of `owner`, as File Explorer would, until it's
 /// dropped: into a folder, a document or a message. It's copied wherever it goes,
 /// so the capture keeps its file. `picture` follows the pointer, or else Windows'
-/// own.
-pub fn drag(owner: HWND, path: &Path, picture: Option<Picture>) {
+/// own, as `handover` says. Returns whether it went anywhere.
+pub fn drag(owner: HWND, path: &Path, picture: Option<Picture>, handover: Rc<Handover>) -> bool {
     let dragged = unsafe {
         SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(path), None)
             .and_then(|item| item.BindToHandler::<_, IDataObject>(None, &BHID_DataObject))
@@ -294,7 +306,7 @@ pub fn drag(owner: HWND, path: &Path, picture: Option<Picture>) {
                     report("drag", &error);
                 }
                 // Windows shows what's dragged only over windows that take drops.
-                let shown = show_over(owner, &data)
+                let shown = show_over(owner, &data, handover)
                     .inspect_err(|error| report("drag", error))
                     .is_ok();
                 let dragged =
@@ -305,9 +317,9 @@ pub fn drag(owner: HWND, path: &Path, picture: Option<Picture>) {
                 dragged
             })
     };
-    if let Err(error) = dragged {
-        report("drag", &error);
-    }
+    dragged
+        .inspect_err(|error| report("drag", error))
+        .is_ok_and(|effect| effect != DROPEFFECT_NONE)
 }
 
 /// Makes `picture` follow the pointer while `data` is dragged.
@@ -359,14 +371,17 @@ fn carry(data: &IDataObject, picture: &Picture) -> Result<()> {
 }
 
 /// Shows `data` over `owner` too, the window it's dragged out of, as it shows
-/// everywhere else, though it can't be dropped there.
-fn show_over(owner: HWND, data: &IDataObject) -> Result<()> {
+/// everywhere else, though it can't be dropped there: once `owner`'s own picture
+/// lands, as `handover` says.
+fn show_over(owner: HWND, data: &IDataObject, handover: Rc<Handover>) -> Result<()> {
     unsafe {
         let helper = CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)?;
         let origin: IDropTarget = Origin {
             owner,
             data: data.clone(),
             helper,
+            handover,
+            shows: Cell::new(false),
         }
         .into();
         RegisterDragDrop(owner, &origin)
@@ -379,6 +394,25 @@ struct Origin {
     owner: HWND,
     data: IDataObject,
     helper: IDropTargetHelper,
+    handover: Rc<Handover>,
+    /// Whether Windows shows what's dragged over the window.
+    shows: Cell<bool>,
+}
+
+impl Origin {
+    /// Has Windows show what's dragged at `point`, once the window's own picture
+    /// lands there.
+    fn show(&self, point: &POINTL) -> Result<()> {
+        if Instant::now() < self.handover.landing {
+            return Ok(());
+        }
+        self.shows.set(true);
+        self.handover.taken.set(true);
+        unsafe {
+            self.helper
+                .DragEnter(self.owner, &self.data, &on_screen(point), DROPEFFECT_NONE)
+        }
+    }
 }
 
 impl IDropTarget_Impl for Origin_Impl {
@@ -391,11 +425,8 @@ impl IDropTarget_Impl for Origin_Impl {
     ) -> Result<()> {
         // Just the picture, without the sign that says it can't go here.
         let _ = describe(&self.data, DROPIMAGE_NOIMAGE);
-        unsafe {
-            *effect = DROPEFFECT_NONE;
-            self.helper
-                .DragEnter(self.owner, &self.data, &on_screen(point), DROPEFFECT_NONE)
-        }
+        unsafe { *effect = DROPEFFECT_NONE };
+        self.show(point)
     }
 
     fn DragOver(
@@ -404,16 +435,23 @@ impl IDropTarget_Impl for Origin_Impl {
         point: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> Result<()> {
-        unsafe {
-            *effect = DROPEFFECT_NONE;
-            self.helper.DragOver(&on_screen(point), DROPEFFECT_NONE)
+        unsafe { *effect = DROPEFFECT_NONE };
+        if self.shows.get() {
+            unsafe { self.helper.DragOver(&on_screen(point), DROPEFFECT_NONE) }
+        } else {
+            self.show(point)
         }
     }
 
     fn DragLeave(&self) -> Result<()> {
-        // Elsewhere, Windows says again where it goes.
+        // Elsewhere, Windows shows it and says again where it goes.
+        self.handover.taken.set(true);
         let _ = describe(&self.data, DROPIMAGE_INVALID);
-        unsafe { self.helper.DragLeave() }
+        if self.shows.replace(false) {
+            unsafe { self.helper.DragLeave() }
+        } else {
+            Ok(())
+        }
     }
 
     fn Drop(
@@ -423,10 +461,14 @@ impl IDropTarget_Impl for Origin_Impl {
         point: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> Result<()> {
-        unsafe {
-            *effect = DROPEFFECT_NONE;
-            self.helper
-                .Drop(&self.data, &on_screen(point), DROPEFFECT_NONE)
+        unsafe { *effect = DROPEFFECT_NONE };
+        if self.shows.replace(false) {
+            unsafe {
+                self.helper
+                    .Drop(&self.data, &on_screen(point), DROPEFFECT_NONE)
+            }
+        } else {
+            Ok(())
         }
     }
 }

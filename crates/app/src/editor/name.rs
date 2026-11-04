@@ -43,7 +43,7 @@ const PAUSE: f32 = 0.35;
 const SETTLE: f32 = 0.1;
 const BAND: f32 = 96.0;
 /// The glint sweeps across evenly, easing in and out.
-const SWEEP: Easing = Easing::new(0.4, 0.0, 0.6, 1.0);
+pub const SWEEP: Easing = Easing::new(0.4, 0.0, 0.6, 1.0);
 /// How wide the box opens, room allowing.
 const WIDTH: f32 = 400.0;
 /// The least room the name has in the title bar.

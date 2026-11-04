@@ -82,8 +82,9 @@ mostrar siempre.
   Si ya hay un archivo con ese nombre, se le añade «(2)».
 - **Arrastrar la captura:** el asa de puntos que aparece a la izquierda del nombre lo recuerda.
   Arrastra el nombre hasta una carpeta, un documento, un chat o un correo, y suéltalo ahí: la
-  captura viaja con el cursor como una pequeña tarjeta inclinada, desde el primer movimiento. Se
-  deja una copia; el archivo de la captura no se mueve.
+  captura despega como una pequeña tarjeta inclinada, la cruza un destello y vuela hasta el
+  cursor. Se deja una copia; el archivo de la captura no se mueve. Si la sueltas sobre Kata o
+  pulsas Esc, vuelve volando a su sitio.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan en el
   archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
 - **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta

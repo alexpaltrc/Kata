@@ -11,8 +11,8 @@ use windows::{
             D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2,
             D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
             D2D1_LAYER_PARAMETERS1, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT,
-            ID2D1Bitmap, ID2D1Brush, ID2D1DeviceContext, ID2D1Layer, ID2D1RenderTarget,
-            ID2D1SolidColorBrush,
+            ID2D1Bitmap, ID2D1Brush, ID2D1DeviceContext, ID2D1Layer, ID2D1LinearGradientBrush,
+            ID2D1RenderTarget, ID2D1SolidColorBrush,
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
@@ -198,22 +198,52 @@ impl<'a> Painter<'a> {
     }
 
     /// Draws `labels`, each from its left edge and centered on `middle`, only where
-    /// a band of colored light `width` DIPs wide crosses them: centered on `x`,
-    /// leaning as a reflection does, and in the same colors whatever the accent.
+    /// a glint `width` DIPs wide, centered on `x`, crosses them.
     pub fn glint(&self, labels: &[(&Label, f32)], middle: f32, x: f32, width: f32) {
+        let Some(light) = self.band(x, middle, width, 1.0) else {
+            return;
+        };
+        for &(label, left) in labels {
+            unsafe {
+                self.context.DrawTextLayout(
+                    self.origin(label, left, middle),
+                    &label.layout,
+                    &light,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+            }
+        }
+    }
+
+    /// Lights `area`, with corners of `radius`, where a glint `width` DIPs wide,
+    /// centered on `x`, crosses it at `opacity`.
+    pub fn glint_across(&self, area: Area, radius: f32, x: f32, width: f32, opacity: f32) {
+        if let Some(light) = self.band(x, area.middle(), width, opacity) {
+            unsafe {
+                self.context
+                    .FillRoundedRectangle(&rounded(area, radius), &light);
+            }
+        }
+    }
+
+    /// A band of colored light `width` DIPs wide, centered on `x` and `middle`,
+    /// leaning as a reflection does, in Kata's own colors at `opacity`.
+    fn band(
+        &self,
+        x: f32,
+        middle: f32,
+        width: f32,
+        opacity: f32,
+    ) -> Option<ID2D1LinearGradientBrush> {
         /// How far the band leans from upright, in radians.
         const LEAN: f32 = 0.35;
-        /// Blue, violet, pink and orange, from its trailing edge to its leading one:
-        /// luminous over dark themes, and deeper over light ones, where light tones fade.
-        const DARK: [u32; 4] = [0x78A8FF, 0xB18CFF, 0xFF85C0, 0xFFB27A];
-        const LIGHT: [u32; 4] = [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D];
         let (across, down) = (LEAN.cos() * width / 2.0, LEAN.sin() * width / 2.0);
-        let stop = |position, rgb, alpha| D2D1_GRADIENT_STOP {
+        let stop = |position, rgb, alpha: f32| D2D1_GRADIENT_STOP {
             position,
-            color: color(rgb, alpha),
+            color: color(rgb, alpha * opacity),
         };
-        let [blue, violet, pink, orange] = if self.palette.light { LIGHT } else { DARK };
-        // It fades in and out at its edges.
+        // From its trailing edge to its leading one, fading in and out at both.
+        let [blue, violet, pink, orange] = self.signature();
         let stops = [
             stop(0.0, blue, 0.0),
             stop(0.2, blue, 1.0),
@@ -222,35 +252,92 @@ impl<'a> Painter<'a> {
             stop(0.8, orange, 1.0),
             stop(1.0, orange, 0.0),
         ];
-        let light = unsafe {
-            ID2D1RenderTarget::CreateGradientStopCollection(
+        let from = Vector2::new(x - across, middle - down);
+        self.gradient(&stops, from, Vector2::new(x + across, middle + down))
+            .ok()
+    }
+
+    /// Light falling from the top-left corner on a surface raised over `area`, with
+    /// corners of `radius`, at `opacity`.
+    pub fn sheen(&self, area: Area, radius: f32, opacity: f32) {
+        /// How bright it is at the corner, and how far across it reaches.
+        const LIGHT: f32 = 0.28;
+        const REACH: f32 = 0.38;
+        let white = |position, alpha| D2D1_GRADIENT_STOP {
+            position,
+            color: color(0xFFFFFF, alpha),
+        };
+        let stops = [white(0.0, LIGHT * opacity), white(REACH, 0.0)];
+        let (from, to) = diagonal(area);
+        if let Ok(light) = self.gradient(&stops, from, to) {
+            unsafe {
+                self.context
+                    .FillRoundedRectangle(&rounded(area, radius), &light);
+            }
+        }
+    }
+
+    /// A line `width` DIPs thick, just inside the edges of `area`, in Kata's own
+    /// colors from its top-left corner to its bottom-right, at `opacity`.
+    pub fn rim(&self, area: Area, radius: f32, width: f32, opacity: f32) {
+        let [blue, violet, pink, orange] = self.signature();
+        let stop = |position, rgb| D2D1_GRADIENT_STOP {
+            position,
+            color: color(rgb, opacity),
+        };
+        let stops = [
+            stop(0.0, blue),
+            stop(0.35, violet),
+            stop(0.7, pink),
+            stop(1.0, orange),
+        ];
+        let (from, to) = diagonal(area);
+        let half = width / 2.0;
+        let center = area.inflate(-half);
+        if let Ok(colors) = self.gradient(&stops, from, to) {
+            unsafe {
+                self.context.DrawRoundedRectangle(
+                    &rounded(center, (radius - half).max(0.0)),
+                    &colors,
+                    width,
+                    None,
+                );
+            }
+        }
+    }
+
+    /// Blue, violet, pink and orange, the same whatever the accent: luminous over
+    /// dark themes, and deeper over light ones, where light tones fade.
+    fn signature(&self) -> [u32; 4] {
+        if self.palette.light {
+            [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D]
+        } else {
+            [0x78A8FF, 0xB18CFF, 0xFF85C0, 0xFFB27A]
+        }
+    }
+
+    /// Paints `stops` evenly from `from` to `to`, and the ends' colors beyond.
+    fn gradient(
+        &self,
+        stops: &[D2D1_GRADIENT_STOP],
+        from: Vector2,
+        to: Vector2,
+    ) -> Result<ID2D1LinearGradientBrush> {
+        unsafe {
+            let stops = ID2D1RenderTarget::CreateGradientStopCollection(
                 self.context,
-                &stops,
+                stops,
                 D2D1_GAMMA_2_2,
                 D2D1_EXTEND_MODE_CLAMP,
+            )?;
+            self.context.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: from,
+                    endPoint: to,
+                },
+                None,
+                &stops,
             )
-            .and_then(|stops| {
-                self.context.CreateLinearGradientBrush(
-                    &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                        startPoint: Vector2::new(x - across, middle - down),
-                        endPoint: Vector2::new(x + across, middle + down),
-                    },
-                    None,
-                    &stops,
-                )
-            })
-        };
-        if let Ok(light) = light {
-            for &(label, left) in labels {
-                unsafe {
-                    self.context.DrawTextLayout(
-                        self.origin(label, left, middle),
-                        &label.layout,
-                        &light,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                    );
-                }
-            }
         }
     }
 
@@ -278,16 +365,22 @@ impl<'a> Painter<'a> {
     /// The soft shadow that a surface raised over `area`, with corners of `radius`,
     /// casts below it: Fluent's, 4 DIPs down and blurred over 8.
     pub fn shadow(&self, area: Area, radius: f32, color: D2D1_COLOR_F) {
-        const BLUR: f32 = 8.0;
-        const STEPS: u8 = 8;
-        // Each step a little wider and fainter, so together they fade out.
-        let step = faded(color, 1.0 / f32::from(STEPS));
+        self.cast(area, radius, 8.0, 4.0, color);
+    }
+
+    /// The shadow that a surface raised over `area`, with corners of `radius`, casts
+    /// `down` DIPs below it, blurred over `blur`.
+    pub fn cast(&self, area: Area, radius: f32, blur: f32, down: f32, color: D2D1_COLOR_F) {
+        // Each step a little wider and fainter, so together they fade out: about one
+        // a DIP, so none stands out.
+        let steps = blur.round().clamp(8.0, 48.0);
+        let step = faded(color, 1.0 / steps);
         let below = Area {
-            top: area.top + BLUR / 2.0,
+            top: area.top + down,
             ..area
         };
-        for n in 0..STEPS {
-            let by = BLUR * ((f32::from(n) + 0.5) / f32::from(STEPS) - 0.5);
+        for n in 0..steps as u8 {
+            let by = blur * ((f32::from(n) + 0.5) / steps - 0.5);
             self.fill(below.inflate(by), (radius + by).max(0.0), step);
         }
     }
@@ -461,6 +554,14 @@ fn rounded(area: Area, radius: f32) -> D2D1_ROUNDED_RECT {
         radiusX: radius,
         radiusY: radius,
     }
+}
+
+/// From `area`'s top-left corner to its bottom-right.
+fn diagonal(area: Area) -> (Vector2, Vector2) {
+    (
+        Vector2::new(area.left, area.top),
+        Vector2::new(area.right(), area.bottom()),
+    )
 }
 
 fn ellipse((x, y): Point, radius: f32) -> D2D1_ELLIPSE {

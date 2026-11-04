@@ -118,6 +118,11 @@ impl Animation {
         self.from + (self.to - self.from) * eased
     }
 
+    /// When it gets there.
+    pub fn end(&self) -> Instant {
+        self.start + self.duration
+    }
+
     pub fn is_running(&self, now: Instant) -> bool {
         self.progress(now) < 1.0
     }
