@@ -43,7 +43,9 @@ Un clic en el icono inicia un recorte. Su menú: **Nuevo recorte** · **Abrir ca
 
 ## Ventana principal
 
-El botón **Nuevo recorte**, el atajo debajo y el engranaje de Ajustes, junto a los botones de la ventana y a su misma altura. Nada más.
+El botón **Nuevo recorte**, el atajo debajo y el engranaje de Ajustes, pegado a los botones de la ventana como uno más: mismo ancho, misma altura y el mismo sombreado al pasar el cursor. Nada más.
+
+La barra de título sigue las medidas de Windows 11: 32 píxeles de alto, el título a 16 del borde y, en Ajustes, la flecha de volver a 16 del borde y del título.
 
 - Se abre al iniciar Kata. Si Kata ya está en la bandeja, abrirlo otra vez la muestra.
 - **Nuevo recorte** cierra la ventana antes de capturar, para que no salga en la captura.

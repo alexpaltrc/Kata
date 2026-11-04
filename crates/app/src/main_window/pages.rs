@@ -17,15 +17,18 @@ use windows::core::Result;
 
 use crate::{channel, hotkey::Hotkey, settings::Settings, strings::strings};
 
-/// The title bar's height.
-pub const TITLE_BAR: f32 = 48.0;
+/// The title bar's height, as Windows recommends.
+pub const TITLE_BAR: f32 = 32.0;
 /// Around the cards, and inside them.
 const PADDING: f32 = 16.0;
 const CARD: f32 = 64.0;
 /// Between cards.
 const GAP: f32 = 4.0;
-/// Between a title bar button and the window's edge or the caption buttons.
+/// Between a tip and the window's edges.
 const EDGE: f32 = 8.0;
+/// The back button's width: its glyph sits 16 from the window's edge and from the
+/// title, as Windows recommends.
+const BACK: f32 = 48.0;
 /// Between the capture button and the shortcut below it.
 const HINT_GAP: f32 = 12.0;
 /// Between a setting's label and its info glyph's square.
@@ -155,7 +158,7 @@ impl Pages {
             self.startup.width(),
         ];
         let cards = rows.into_iter().fold(0.0, f32::max) + 4.0 * PADDING;
-        let title_bar = EDGE + IconButton::WIDTH + self.settings_title.width + CAPTION_BUTTONS;
+        let title_bar = BACK + self.settings_title.width + PADDING + CAPTION_BUTTONS;
         let height = self.cards_top() + CARDS as f32 * (CARD + GAP) - GAP + PADDING;
         (MIN_WIDTH.max(cards).max(title_bar + PADDING), height)
     }
@@ -169,11 +172,15 @@ impl Pages {
         let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
         self.capture
             .place((room.0 - self.capture.width()) / 2.0, top);
-        let button_top = self.title_row - IconButton::HEIGHT / 2.0;
-        let left = caption_buttons.left - EDGE - IconButton::WIDTH;
-        self.open_settings.place(left, button_top);
-
-        self.back.place(EDGE, button_top);
+        // Edge to edge, as the caption buttons: Settings beside them, as wide as
+        // one, and Back at the window's edge. Windows' bounds for the caption
+        // buttons start a little left of the first, so Settings goes by their end.
+        let (top, height) = (caption_buttons.top, caption_buttons.height);
+        let width = CAPTION_BUTTONS / 3.0;
+        let left = caption_buttons.right() - CAPTION_BUTTONS - width;
+        self.open_settings
+            .bleed(Area::new(left, top, width, height));
+        self.back.bleed(Area::new(0.0, top, BACK, height));
         let [
             shortcut,
             screen_keys,
@@ -284,8 +291,7 @@ impl Pages {
                 painter.text(&self.hint, left, middle, palette.text_secondary);
             }
             Page::Settings => {
-                let left = EDGE + IconButton::WIDTH;
-                painter.text(&self.settings_title, left, self.title_row, palette.text);
+                painter.text(&self.settings_title, BACK, self.title_row, palette.text);
                 let cards = self.cards();
                 for card in cards {
                     let card = painter.align(card);
@@ -396,7 +402,7 @@ impl Pages {
     }
 
     fn cards_top(&self) -> f32 {
-        TITLE_BAR + EDGE
+        TITLE_BAR + PADDING
     }
 
     /// The settings' cards, from top to bottom.
