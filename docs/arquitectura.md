@@ -51,6 +51,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 - **Sin bloqueos:** se guarda en segundo plano, así la app nunca se traba.
 - **Escritura atómica:** primero un archivo temporal, luego se reemplaza. Nunca queda una imagen a medias.
 - **Portapapeles:** se copia al instante, antes de guardar.
+- **Cambiar el nombre:** el hilo que guarda también renombra, en orden con las escrituras, con `MoveFileExW`, que nunca reemplaza un archivo; si el nombre ya existe, prueba ` (2)`, ` (3)`… Lo que Windows no admite en un nombre no se escribe, y `/ \ : |` se vuelven un guion. El cuadro de texto es propio (`crates/editor/src/name.rs` y `crates/app/src/editor/name.rs`): el cursor parpadea al ritmo de Windows y se queda quieto a los 5 s; se selecciona con el ratón, Mayús o Ctrl + A, y se copia, corta y pega solo texto de una línea.
 
 ## Ajustes
 

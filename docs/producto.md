@@ -32,6 +32,7 @@ Reglas:
 - **Autoguardado** (interruptor en el editor, activado por defecto): cada cambio sobrescribe el PNG. Al apagarlo aparece el botón **Guardar**.
 - **El portapapeles siempre tiene la versión más reciente:** la captura recién tomada y, después, cada edición, aunque el Autoguardado esté apagado.
 - **La versión editada reemplaza a la original.** No quedan copias ni archivos extra.
+- **El nombre** va arriba, al centro del editor. Con un clic se escribe; la fecha se queda delante: `2026-11-03 - Pedidos.png`. El archivo cambia de nombre al terminar (Intro, un clic fuera o al cerrar el editor), con o sin Autoguardado. Esc deja el de antes, y un nombre vacío vuelve a la fecha y la hora.
 - **El botón de la carpeta** (junto al Autoguardado) abre la carpeta de las capturas, con esta seleccionada.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan fijos en el archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
 

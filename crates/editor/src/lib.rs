@@ -1,5 +1,5 @@
-//! Editing document model: tools (blur, focus, shapes, steps), undo history, rendering and PNG
-//! files.
+//! Editing document model: tools (blur, focus, shapes, steps), undo history, rendering, PNG
+//! files and their names.
 //!
 //! Platform-independent by design, so it can be built and tested anywhere.
 
@@ -10,6 +10,7 @@ mod geometry;
 mod image;
 mod ink;
 mod marker;
+pub mod name;
 mod png;
 mod render;
 

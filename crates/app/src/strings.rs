@@ -29,6 +29,10 @@ pub struct Strings {
     pub save: &'static str,
     /// What assistive technologies call the button that shows the capture's file.
     pub open_file_location: &'static str,
+    /// The capture's file name, as the hint in the empty box where it's typed.
+    pub name: &'static str,
+    /// What clicking the file name does, for assistive technologies.
+    pub rename: &'static str,
     pub shortcut: &'static str,
     pub open_editor: &'static str,
     pub tool_names: &'static str,
@@ -78,6 +82,8 @@ static SPANISH: Strings = Strings {
     autosave: "Autoguardado",
     save: "Guardar",
     open_file_location: "Abrir la ubicación del archivo",
+    name: "Nombre",
+    rename: "Cambiar el nombre",
     shortcut: "Atajo",
     open_editor: "Abrir el editor al capturar",
     tool_names: "Mostrar los nombres de las herramientas",
@@ -116,6 +122,8 @@ static ENGLISH: Strings = Strings {
     autosave: "Autosave",
     save: "Save",
     open_file_location: "Open file location",
+    name: "Name",
+    rename: "Rename",
     shortcut: "Shortcut",
     open_editor: "Open the editor after capturing",
     tool_names: "Show tool names",

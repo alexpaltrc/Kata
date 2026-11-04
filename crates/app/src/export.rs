@@ -1,6 +1,6 @@
 //! Delivers a capture: on the clipboard at once, and as a PNG file written in the
 //! background. Each new version of an edited capture does the same, replacing the
-//! last one.
+//! last one, and the file takes the name the user gives it.
 
 use std::{
     ffi::OsString,
@@ -9,7 +9,7 @@ use std::{
     mem::{self, size_of},
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
-    ptr,
+    ptr, slice,
     sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread::{self, JoinHandle},
     time::Duration,
@@ -18,13 +18,16 @@ use std::{
 use kata_editor::Image;
 use windows::{
     Win32::{
-        Foundation::{GlobalFree, HANDLE, HWND},
+        Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND},
         Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER},
+        Storage::FileSystem::{MOVE_FILE_FLAGS, MoveFileExW},
         System::{
             Com::CoTaskMemFree,
-            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
-            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
-            Ole::CF_DIB,
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+            },
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
+            Ole::{CF_DIB, CF_UNICODETEXT, CLIPBOARD_FORMAT},
             SystemInformation::GetLocalTime,
         },
         UI::{
@@ -43,14 +46,16 @@ use crate::{channel, report, settings::Settings};
 /// Savers still writing captures of closed editors.
 static FINISHING: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
-/// A capture's file. A thread of its own writes each version handed to it; when
-/// versions come faster than they're written, only the newest is.
+/// A capture's file. A thread of its own writes each version handed to it, and
+/// renames the file; when versions come faster than they're written, only the
+/// newest is.
 pub struct Output {
     saver: Option<Saver>,
 }
 
 struct Saver {
-    path: PathBuf,
+    /// When the capture was taken, as its file was first named.
+    taken: String,
     slot: Arc<Slot>,
     thread: JoinHandle<()>,
 }
@@ -65,6 +70,9 @@ struct Slot {
 #[derive(Default)]
 struct Pending {
     next: Option<Image>,
+    /// Where the file is, and where it goes when that's elsewhere.
+    at: PathBuf,
+    to: PathBuf,
     /// No more versions will come.
     closed: bool,
 }
@@ -75,18 +83,40 @@ impl Output {
         copy(owner, &image);
         // Claiming the file here, in capture order, keeps quick captures from
         // competing for the same name.
-        let Ok(path) = reserve_file().inspect_err(|error| report("save", error)) else {
+        let Ok((taken, path)) = reserve_file().inspect_err(|error| report("save", error)) else {
             return Self { saver: None };
         };
         let slot = Arc::new(Slot::default());
-        lock(&slot).next = Some(image);
+        *lock(&slot) = Pending {
+            next: Some(image),
+            at: path.clone(),
+            to: path,
+            closed: false,
+        };
         let thread = thread::spawn({
-            let (path, slot) = (path.clone(), Arc::clone(&slot));
-            move || write_versions(&path, &slot)
+            let slot = Arc::clone(&slot);
+            move || write_versions(&slot)
         });
         Self {
-            saver: Some(Saver { path, slot, thread }),
+            saver: Some(Saver {
+                taken,
+                slot,
+                thread,
+            }),
         }
+    }
+
+    /// When the capture was taken, as its file was first named, such as
+    /// "2026-11-03 14.32.05", and the file's name now, without its extension. None
+    /// without a file.
+    pub fn names(&self) -> Option<(String, String)> {
+        let saver = self.saver.as_ref()?;
+        let stem = lock(&saver.slot)
+            .to
+            .file_stem()?
+            .to_string_lossy()
+            .into_owned();
+        Some((saver.taken.clone(), stem))
     }
 
     /// Replaces the file's contents with `image`, in the background.
@@ -97,13 +127,28 @@ impl Output {
         }
     }
 
+    /// Names the file `stem`, or `stem (2)` and so on when another file has that
+    /// name, in the background. Returns the name it takes.
+    pub fn rename(&self, stem: &str) -> Option<String> {
+        let saver = self.saver.as_ref()?;
+        let mut pending = lock(&saver.slot);
+        let folder = pending.at.parent()?.to_owned();
+        let to =
+            candidates(&folder, stem).find(|path| same(path, &pending.at) || !path.exists())?;
+        let named = to.file_stem()?.to_string_lossy().into_owned();
+        pending.to = to;
+        saver.slot.changed.notify_one();
+        Some(named)
+    }
+
     /// Opens the captures folder in File Explorer, with this capture's file selected.
     pub fn show(&self) {
         let Some(saver) = &self.saver else {
             return open_folder();
         };
+        let path = lock(&saver.slot).at.clone();
         unsafe {
-            let file = ILCreateFromPathW(&HSTRING::from(saver.path.as_path()));
+            let file = ILCreateFromPathW(&HSTRING::from(path.as_path()));
             if file.is_null() {
                 return open_folder();
             }
@@ -139,40 +184,109 @@ fn lock(slot: &Slot) -> MutexGuard<'_, Pending> {
     slot.pending.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Writes each version `slot` receives to `path` until it closes.
-fn write_versions(path: &Path, slot: &Slot) {
+/// Renames the file and writes each version `slot` receives until it closes.
+fn write_versions(slot: &Slot) {
     let mut written = false;
     loop {
-        let image = {
+        let mut pending = lock(slot);
+        while pending.next.is_none() && pending.at == pending.to && !pending.closed {
+            pending = slot
+                .changed
+                .wait(pending)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        let at = pending.at.clone();
+        if pending.at != pending.to {
+            let to = pending.to.clone();
+            drop(pending);
+            let moved = move_file(&at, &to);
             let mut pending = lock(slot);
-            loop {
-                if let Some(image) = pending.next.take() {
-                    break image;
-                }
-                if pending.closed {
-                    // Never leave the empty file behind.
-                    if !written {
-                        let _ = fs::remove_file(path);
+            match moved {
+                Ok(()) => pending.at = to,
+                // The file keeps its name, unless it was given another meanwhile.
+                Err(error) => {
+                    report("rename", &error);
+                    if pending.to == to {
+                        pending.to = at;
                     }
-                    return;
                 }
-                pending = slot
-                    .changed
-                    .wait(pending)
-                    .unwrap_or_else(PoisonError::into_inner);
             }
+            continue;
+        }
+        let Some(image) = pending.next.take() else {
+            // Never leave the empty file behind.
+            if !written {
+                let _ = fs::remove_file(&at);
+            }
+            return;
         };
-        match save_png(path, &image) {
+        drop(pending);
+        match save_png(&at, &image) {
             Ok(()) => written = true,
             Err(error) => report("save", &error),
         }
     }
 }
 
+/// Moves the file at `from` to `to`, unless another file is there.
+fn move_file(from: &Path, to: &Path) -> Result<()> {
+    unsafe {
+        MoveFileExW(
+            &HSTRING::from(from),
+            &HSTRING::from(to),
+            MOVE_FILE_FLAGS::default(),
+        )
+    }
+}
+
+/// Whether `a` and `b` name the same file, as Windows compares names: ignoring case.
+fn same(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
 /// Puts `image` on the clipboard.
 pub fn copy(owner: HWND, image: &Image) {
     if let Err(error) = copy_to_clipboard(owner, image) {
         report("clipboard", &error);
+    }
+}
+
+/// Puts `text` on the clipboard.
+pub fn copy_text(owner: HWND, text: &str) {
+    let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+    let placed = place_on_clipboard(owner, CF_UNICODETEXT, 2 * wide.len(), |bytes| {
+        for (to, unit) in bytes.as_chunks_mut::<2>().0.iter_mut().zip(&wide) {
+            *to = unit.to_ne_bytes();
+        }
+    });
+    if let Err(error) = placed {
+        report("clipboard", &error);
+    }
+}
+
+/// The text on the clipboard, if there's any.
+pub fn paste_text(owner: HWND) -> Option<String> {
+    unsafe {
+        open_clipboard(owner).ok()?;
+        let text = GetClipboardData(CF_UNICODETEXT.0.into())
+            .ok()
+            .and_then(|data| {
+                let memory = HGLOBAL(data.0);
+                let units = GlobalLock(memory).cast::<u16>();
+                if units.is_null() {
+                    return None;
+                }
+                let wide = slice::from_raw_parts(units, GlobalSize(memory) / 2);
+                let end = wide
+                    .iter()
+                    .position(|&unit| unit == 0)
+                    .unwrap_or(wide.len());
+                let text = String::from_utf16_lossy(&wide[..end]);
+                let _ = GlobalUnlock(memory);
+                Some(text)
+            });
+        let _ = CloseClipboard();
+        text
     }
 }
 
@@ -205,28 +319,35 @@ pub fn folder() -> io::Result<PathBuf> {
 }
 
 /// Creates an empty file named after the current time, the date first, such as
-/// "2026-11-03 14.32.05.png".
-fn reserve_file() -> io::Result<PathBuf> {
+/// "2026-11-03 14.32.05.png". Returns that time and the file.
+fn reserve_file() -> io::Result<(String, PathBuf)> {
     let folder = folder()?;
     fs::create_dir_all(&folder)?;
     let now = unsafe { GetLocalTime() };
-    let stem = format!(
+    let taken = format!(
         "{:04}-{:02}-{:02} {:02}.{:02}.{:02}",
         now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond
     );
-    let mut copy = 1;
-    loop {
-        let name = match copy {
-            1 => format!("{stem}.png"),
-            _ => format!("{stem} ({copy}).png"),
-        };
-        let path = folder.join(name);
+    for path in candidates(&folder, &taken) {
         match File::create_new(&path) {
-            Ok(_) => return Ok(path),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => copy += 1,
+            Ok(_) => return Ok((taken, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
         }
     }
+    Err(io::ErrorKind::AlreadyExists.into())
+}
+
+/// The files in `folder` a capture called `stem` may take, in order: "stem.png",
+/// then "stem (2).png" and so on.
+fn candidates(folder: &Path, stem: &str) -> impl Iterator<Item = PathBuf> + use<> {
+    let (folder, stem) = (folder.to_owned(), stem.to_owned());
+    (1..=u32::MAX).map(move |copy| {
+        folder.join(match copy {
+            1 => format!("{stem}.png"),
+            _ => format!("{stem} ({copy}).png"),
+        })
+    })
 }
 
 /// Clipboard bitmaps are DIBs: a header, then the rows from bottom to top.
@@ -242,29 +363,39 @@ fn copy_to_clipboard(owner: HWND, image: &Image) -> Result<()> {
         biSizeImage: image.pixels().len() as u32,
         ..Default::default()
     };
+    let header = unsafe { slice::from_raw_parts(ptr::from_ref(&header).cast(), header_len) };
+    let len = header_len + image.pixels().len();
+    place_on_clipboard(owner, CF_DIB, len, |bytes| {
+        let (head, rows) = bytes.split_at_mut(header_len);
+        head.copy_from_slice(header);
+        let from = image.pixels().chunks_exact(image.stride()).rev();
+        for (row, from) in rows.chunks_exact_mut(image.stride()).zip(from) {
+            row.copy_from_slice(from);
+        }
+    })
+}
+
+/// Puts `len` bytes, which `write` fills, on the clipboard as `format`.
+fn place_on_clipboard(
+    owner: HWND,
+    format: CLIPBOARD_FORMAT,
+    len: usize,
+    write: impl FnOnce(&mut [u8]),
+) -> Result<()> {
     unsafe {
-        let memory = GlobalAlloc(GMEM_MOVEABLE, header_len + image.pixels().len())?;
+        let memory = GlobalAlloc(GMEM_MOVEABLE, len)?;
         let bytes = GlobalLock(memory).cast::<u8>();
         if bytes.is_null() {
             let error = Error::from_thread();
             let _ = GlobalFree(Some(memory));
             return Err(error);
         }
-        ptr::copy_nonoverlapping(ptr::from_ref(&header).cast(), bytes, header_len);
-        let rows = bytes.add(header_len);
-        for (i, row) in image
-            .pixels()
-            .chunks_exact(image.stride())
-            .rev()
-            .enumerate()
-        {
-            ptr::copy_nonoverlapping(row.as_ptr(), rows.add(i * row.len()), row.len());
-        }
+        write(slice::from_raw_parts_mut(bytes, len));
         let _ = GlobalUnlock(memory);
 
         let placed = open_clipboard(owner).and_then(|()| {
             let placed = EmptyClipboard()
-                .and_then(|()| SetClipboardData(CF_DIB.0.into(), Some(HANDLE(memory.0))));
+                .and_then(|()| SetClipboardData(format.0.into(), Some(HANDLE(memory.0))));
             let _ = CloseClipboard();
             placed
         });

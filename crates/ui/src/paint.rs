@@ -12,11 +12,12 @@ use windows::{
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_TEXT_METRICS, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-            DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
+            DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS, DWRITE_TRIMMING,
+            DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory,
+            IDWriteTextFormat, IDWriteTextLayout,
         },
     },
-    core::{PCWSTR, Result, w},
+    core::{BOOL, PCWSTR, Result, w},
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
@@ -355,6 +356,7 @@ fn ellipse((x, y): Point, radius: f32) -> D2D1_ELLIPSE {
 }
 
 /// The fonts Windows 11 apps use, at their standard sizes in DIPs.
+#[derive(Clone)]
 pub struct Fonts {
     dwrite: IDWriteFactory,
     body: IDWriteTextFormat,
@@ -386,14 +388,32 @@ impl Fonts {
         self.layout(text, &self.caption, width)
     }
 
+    /// A line of text in controls, at most `width` DIPs wide: what doesn't fit gives
+    /// way to an ellipsis.
+    pub fn line(&self, text: &str, width: f32) -> Result<Label> {
+        self.trimmed(text, &self.body, width, None)
+    }
+
     /// A folder's path in small text, at most `width` DIPs wide: what doesn't fit
     /// gives way to an ellipsis before the last folder.
     pub fn path(&self, path: &str, width: f32) -> Result<Label> {
-        let label = self.layout(path, &self.caption, width.max(0.0))?;
+        self.trimmed(path, &self.caption, width, Some('\\'))
+    }
+
+    /// One line at most `width` DIPs wide, ending in an ellipsis where it doesn't
+    /// fit, or putting it before what follows the last `delimiter`.
+    fn trimmed(
+        &self,
+        text: &str,
+        format: &IDWriteTextFormat,
+        width: f32,
+        delimiter: Option<char>,
+    ) -> Result<Label> {
+        let label = self.layout(text, format, width.max(0.0))?;
         let trimming = DWRITE_TRIMMING {
             granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-            delimiter: u32::from('\\'),
-            delimiterCount: 1,
+            delimiter: delimiter.map_or(0, u32::from),
+            delimiterCount: u32::from(delimiter.is_some()),
         };
         unsafe {
             let layout = &label.layout;
@@ -454,5 +474,39 @@ impl Label {
             width: metrics.width,
             height: metrics.height,
         })
+    }
+
+    /// How far from its left edge the text is before the UTF-16 unit `index`, or
+    /// after all of it, trailing spaces included.
+    pub fn offset(&self, index: usize) -> f32 {
+        let (mut x, mut y) = (0.0, 0.0);
+        let mut metrics = DWRITE_HIT_TEST_METRICS::default();
+        let index = u32::try_from(index).unwrap_or(u32::MAX);
+        let hit = unsafe {
+            self.layout
+                .HitTestTextPosition(index, false, &mut x, &mut y, &mut metrics)
+        };
+        if hit.is_ok() { x } else { self.width }
+    }
+
+    /// The UTF-16 unit nearest `x` DIPs from the text's left edge, where a caret
+    /// clicked there goes.
+    pub fn position(&self, x: f32) -> usize {
+        let (mut trailing, mut inside) = (BOOL(0), BOOL(0));
+        let mut metrics = DWRITE_HIT_TEST_METRICS::default();
+        let y = self.height / 2.0;
+        let hit = unsafe {
+            self.layout
+                .HitTestPoint(x, y, &mut trailing, &mut inside, &mut metrics)
+        };
+        if hit.is_err() {
+            return 0;
+        }
+        let after = if trailing.as_bool() {
+            metrics.length
+        } else {
+            0
+        };
+        (metrics.textPosition + after) as usize
     }
 }

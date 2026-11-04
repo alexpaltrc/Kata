@@ -1,6 +1,6 @@
-//! The editor's controls: saving and the capture's folder in the title bar, and two
-//! capsules floating at the bottom, centered: the tools' dock and, above it, the
-//! chosen tool's options.
+//! The editor's controls: the capture's name, saving and its folder in the title bar,
+//! and two capsules floating at the bottom, centered: the tools' dock and, above it,
+//! the chosen tool's options.
 
 use std::{iter, mem, time::Instant};
 
@@ -16,7 +16,10 @@ use kata_ui::{
 };
 use windows::core::Result;
 
-use super::{TITLE_BAR, icons};
+use super::{
+    TITLE_BAR, icons,
+    name::{self, Name},
+};
 use crate::{settings::EditorSettings, strings::strings};
 
 /// Between the window's edges and the controls, and between related controls.
@@ -87,6 +90,7 @@ pub enum Part {
     Around,
     StepSize,
     Form,
+    Name,
     Save,
     Autosave,
     Folder,
@@ -136,6 +140,7 @@ pub struct Toolbar {
     around: Setting,
     step_size: Setting,
     forms: Dock,
+    name: Name,
     save: Button,
     autosave: Toggle,
     folder: IconButton,
@@ -153,12 +158,14 @@ pub struct Toolbar {
 }
 
 impl Toolbar {
-    /// With the tools' names under their icons when `named`.
+    /// With the tools' names under their icons when `named`, and the capture's file
+    /// called after `names`, as `Name::new` takes them.
     pub fn new(
         graphics: &Graphics,
         fonts: &Fonts,
         settings: &EditorSettings,
         named: bool,
+        names: Option<(String, String)>,
     ) -> Result<Self> {
         let strings = strings();
         let blur_levels = strings
@@ -221,6 +228,7 @@ impl Toolbar {
                 Slider::new(strings.step_size, step_sizes, settings.step_size),
             ),
             forms: Dock::compact(forms, settings.form),
+            name: Name::new(fonts, names)?,
             save,
             autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
@@ -252,6 +260,8 @@ impl Toolbar {
     /// controls beside the caption buttons, and the widest capsule at the bottom.
     pub fn min_width(&self) -> f32 {
         let title = EDGE
+            + name::MIN
+            + EDGE
             + self.save.width()
             + EDGE
             + self.autosave.width()
@@ -283,6 +293,8 @@ impl Toolbar {
         self.autosave.place(toggle, top(HEIGHT));
         self.save
             .place(toggle - EDGE - self.save.width(), top(HEIGHT));
+        let center = (window.0 / 2.0, TITLE_BAR / 2.0);
+        self.name.place(EDGE, self.save.area().left - EDGE, center);
 
         let (width, height) = window;
         let dock = (width - self.tools.width()) / 2.0;
@@ -339,6 +351,7 @@ impl Toolbar {
             Part::Around => &mut self.around.slider,
             Part::StepSize => &mut self.step_size.slider,
             Part::Form => &mut self.forms,
+            Part::Name => &mut self.name,
             Part::Save => &mut self.save,
             Part::Autosave => &mut self.autosave,
             Part::Folder => &mut self.folder,
@@ -492,6 +505,14 @@ impl Toolbar {
         }
     }
 
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn name_mut(&mut self) -> &mut Name {
+        &mut self.name
+    }
+
     pub fn autosave(&self) -> bool {
         self.autosave.is_on()
     }
@@ -562,7 +583,7 @@ impl Toolbar {
     fn parts(&self) -> Vec<Part> {
         let mut parts = vec![Part::Tools];
         parts.extend_from_slice(self.tool().options());
-        parts.extend([Part::Save, Part::Autosave, Part::Folder]);
+        parts.extend([Part::Name, Part::Save, Part::Autosave, Part::Folder]);
         parts
     }
 
@@ -574,6 +595,7 @@ impl Toolbar {
             Part::Around => &self.around.slider,
             Part::StepSize => &self.step_size.slider,
             Part::Form => &self.forms,
+            Part::Name => &self.name,
             Part::Save => &self.save,
             Part::Autosave => &self.autosave,
             Part::Folder => &self.folder,

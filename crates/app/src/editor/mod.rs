@@ -4,6 +4,7 @@
 
 mod canvas;
 mod icons;
+mod name;
 mod toolbar;
 
 use std::{
@@ -19,7 +20,7 @@ use kata_editor::{
 use kata_ui::{
     Graphics,
     access::{self, Access},
-    controls::Action,
+    controls::{Action, Control},
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
     theme::{Palette, faded},
@@ -41,17 +42,18 @@ use windows::{
             Input::KeyboardAndMouse::{
                 ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_4, VK_BACK,
                 VK_C, VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2,
-                VK_NUMPAD3, VK_NUMPAD4, VK_S, VK_SHIFT, VK_TAB, VK_Y, VK_Z,
+                VK_NUMPAD3, VK_NUMPAD4, VK_RETURN, VK_S, VK_SHIFT, VK_TAB, VK_V, VK_X, VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
-                IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENWSE, LoadCursorW,
-                PostMessageW, SIZE_MINIMIZED, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor,
-                SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WHEEL_DELTA, WM_CAPTURECHANGED,
-                WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
-                WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETCURSOR,
-                WM_SETTINGCHANGE, WM_SIZE,
+                IDC_ARROW, IDC_CROSS, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENWSE,
+                KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW, SIZE_MINIMIZED,
+                SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor, SetForegroundWindow, SetTimer,
+                SetWindowLongPtrW, ShowWindow, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
+                WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
+                WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN,
+                WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCHITTEST,
+                WM_NCLBUTTONDOWN, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_TIMER,
             },
         },
     },
@@ -77,6 +79,8 @@ const MIN_CANVAS: f32 = 100.0;
 const MAX_SHARE: f32 = 0.85;
 /// How much each notch of the mouse wheel zooms.
 const ZOOM_STEP: f32 = 1.25;
+/// Blinks the caret while the name is typed.
+const BLINK_TIMER: usize = 1;
 const CLASS: PCWSTR = w!("Kata.Editor");
 
 /// A capture to edit.
@@ -120,7 +124,7 @@ unsafe fn create(
 ) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
     let settings = EditorSettings::load();
-    let toolbar = Toolbar::new(graphics, &fonts, &settings, tool_names)?;
+    let toolbar = Toolbar::new(graphics, &fonts, &settings, tool_names, output.names())?;
     let chip = fonts.icon('\u{E711}', 10.0)?;
     let palette = Palette::current();
     let min = min_size(&toolbar);
@@ -361,6 +365,22 @@ impl Editor {
             // Another window took the pointer.
             WM_CAPTURECHANGED => self.cancel(),
             WM_KEYDOWN => return self.key(VIRTUAL_KEY(wparam.0 as u16)).then_some(LRESULT(0)),
+            WM_CHAR if self.toolbar.name().is_editing() => {
+                if self.toolbar.name_mut().type_unit(wparam.0 as u16) {
+                    self.naming_changed();
+                }
+            }
+            WM_TIMER if wparam.0 == BLINK_TIMER => {
+                if !self.toolbar.name_mut().blink(Instant::now()) {
+                    let _ = unsafe { KillTimer(Some(self.hwnd), BLINK_TIMER) };
+                }
+                self.invalidate();
+            }
+            // Clicking the title bar, or another window, ends naming the capture.
+            WM_NCLBUTTONDOWN | WM_KILLFOCUS => {
+                self.finish_naming();
+                return None;
+            }
             WM_SIZE if wparam.0 != SIZE_MINIMIZED as usize => self.resized(),
             WM_DPICHANGED => self.dpi_changed(wparam, lparam),
             // Keeps the window from getting too small for the toolbar.
@@ -385,8 +405,9 @@ impl Editor {
                     self.invalidate();
                 }
             }
-            // The last changes still reach the clipboard.
+            // The last changes still reach the clipboard, and the name the file.
             WM_DESTROY => {
+                self.finish_naming();
                 if self.unpublished {
                     self.publish();
                 }
@@ -428,7 +449,10 @@ impl Editor {
     /// Shows what pressing would do.
     fn set_cursor(&self) {
         let point = self.pointer();
-        let cursor = if self.toolbar.covers(point) || self.chip_at(point) {
+        let name = self.toolbar.name();
+        let cursor = if name.is_editing() && name.contains(point) {
+            IDC_IBEAM
+        } else if self.toolbar.covers(point) || self.chip_at(point) {
             IDC_ARROW
         } else if let Some(handle) = self.handle_at(point) {
             // An arrow's ends go anywhere, and the top-left and bottom-right corners
@@ -504,11 +528,18 @@ impl Editor {
     }
 
     fn press(&mut self, point: Point) {
+        // Pressing away from the name's box ends naming, and does what it does.
+        if !self.toolbar.name().contains(point) {
+            self.finish_naming();
+        }
         self.toolbar.unfocus();
         let bounds = self.bounds();
         let gesture = if let Some(part) = self.toolbar.part_at(point) {
             if self.toolbar.control(part).press(point) {
                 self.option_changed(part);
+            }
+            if part == Part::Name && self.toolbar.name().is_editing() {
+                self.naming_changed();
             }
             Gesture::Control(part)
         } else if self.toolbar.covers(point) {
@@ -579,6 +610,9 @@ impl Editor {
             Gesture::Control(part) => {
                 let changed = self.toolbar.control(part).drag(point);
                 if changed {
+                    if part == Part::Name {
+                        self.naming_changed();
+                    }
                     self.option_changed(part);
                 }
                 changed
@@ -731,6 +765,10 @@ impl Editor {
             return true;
         }
         let (ctrl, shift) = (window::held(VK_CONTROL), window::held(VK_SHIFT));
+        if self.toolbar.name().is_editing() {
+            self.naming_key(key, ctrl, shift);
+            return true;
+        }
         match key {
             VK_TAB => self.toolbar.tab(shift),
             VK_1 | VK_NUMPAD1 if !ctrl => self.choose_tool(Tool::Blur),
@@ -928,8 +966,82 @@ impl Editor {
             Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form => {
                 self.option_changed(part)
             }
+            Part::Name => self.start_naming(),
             Part::Folder => self.output.show(),
         }
+    }
+
+    /// Opens the name's box to type the capture's name in.
+    fn start_naming(&mut self) {
+        self.toolbar.name_mut().edit();
+        // The key that opened it, if one did, mustn't type in it.
+        let mut typed = MSG::default();
+        let _ = unsafe { PeekMessageW(&mut typed, Some(self.hwnd), WM_CHAR, WM_CHAR, PM_REMOVE) };
+        self.naming_changed();
+    }
+
+    /// Follows `key`, held with Ctrl or Shift, while the name is typed. Every key
+    /// stays with the name, so none reaches the tools.
+    fn naming_key(&mut self, key: VIRTUAL_KEY, ctrl: bool, shift: bool) {
+        let name = self.toolbar.name_mut();
+        match key {
+            VK_RETURN => return self.finish_naming(),
+            VK_TAB => {
+                self.finish_naming();
+                return self.toolbar.tab(shift);
+            }
+            VK_ESCAPE => {
+                name.discard();
+                return self.stop_blinking();
+            }
+            VK_C if ctrl => {
+                if let Some(text) = name.selected() {
+                    export::copy_text(self.hwnd, &text);
+                }
+            }
+            VK_X if ctrl => {
+                if let Some(text) = name.cut() {
+                    export::copy_text(self.hwnd, &text);
+                }
+            }
+            VK_V if ctrl => {
+                // A name is one line.
+                if let Some(text) = export::paste_text(self.hwnd) {
+                    let line = text.lines().next().unwrap_or_default();
+                    self.toolbar.name_mut().insert(line);
+                }
+            }
+            _ => {
+                name.key(key, ctrl, shift);
+            }
+        }
+        self.naming_changed();
+    }
+
+    /// The name's text or caret changed: the caret shows, then blinks anew.
+    fn naming_changed(&mut self) {
+        if let Some(time) = name::blink_time() {
+            unsafe { SetTimer(Some(self.hwnd), BLINK_TIMER, time, None) };
+        }
+        self.invalidate();
+    }
+
+    /// Closes the name's box, giving the file the name typed in it.
+    fn finish_naming(&mut self) {
+        if !self.toolbar.name().is_editing() {
+            return;
+        }
+        if let Some(stem) = self.toolbar.name_mut().finish()
+            && let Some(named) = self.output.rename(&stem)
+        {
+            self.toolbar.name_mut().set(named);
+        }
+        self.stop_blinking();
+    }
+
+    fn stop_blinking(&mut self) {
+        let _ = unsafe { KillTimer(Some(self.hwnd), BLINK_TIMER) };
+        self.invalidate();
     }
 
     /// Makes the edits on show the document's, when they changed.

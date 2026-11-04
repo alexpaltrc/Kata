@@ -73,6 +73,9 @@ mostrar siempre.
 - **El portapapeles siempre tiene la última versión:** la captura recién tomada y, después, cada
   edición, aunque el Autoguardado esté apagado.
 - **Un solo archivo por captura.** La versión editada reemplaza a la original, sin copias extra.
+- **Ponerle nombre:** haz clic en el nombre, arriba al centro, y escribe. La fecha se queda
+  delante (`2026-11-03 - Pedidos.png`). Intro o un clic fuera lo guarda, aunque el Autoguardado
+  esté apagado; Esc lo deja como estaba. Si ya hay un archivo con ese nombre, se le añade «(2)».
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan en el
   archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
 - **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta

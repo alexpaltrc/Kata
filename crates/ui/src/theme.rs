@@ -112,6 +112,8 @@ pub struct Palette {
     pub strong: D2D1_COLOR_F,
     /// The inside of switches that are off.
     pub alt: D2D1_COLOR_F,
+    /// Text boxes while typing in them.
+    pub input: D2D1_COLOR_F,
     /// Cards grouping related content, such as a setting.
     pub card: D2D1_COLOR_F,
     /// Standard buttons and keycaps.
@@ -150,6 +152,7 @@ impl Palette {
                 card_stroke: color(0x000000, 0.1622),
                 strong: color(0x000000, 0.4458),
                 alt: color(0x000000, 0.0241),
+                input: color(0xFFFFFF, 1.0),
                 card: color(0xFFFFFF, 0.7),
                 button: color(0xFFFFFF, 0.7),
                 accent,
@@ -174,6 +177,7 @@ impl Palette {
                 card_stroke: color(0xFFFFFF, 0.093),
                 strong: color(0xFFFFFF, 0.5442),
                 alt: color(0x000000, 0.1),
+                input: color(0x1E1E1E, 0.7),
                 card: color(0xFFFFFF, 0.0512),
                 button: color(0xFFFFFF, 0.0605),
                 accent,
@@ -209,6 +213,7 @@ impl Palette {
             card_stroke: text,
             strong: text,
             alt: window,
+            input: window,
             card: window,
             button: window,
             accent: system(COLOR_HIGHLIGHT),
