@@ -1,6 +1,6 @@
 # Kata
 
-App de Windows 11, escrita en Rust, para tomar capturas de pantalla destinadas a manuales, guías e instructivos, y editarlas con dos herramientas: **Desenfocar** y **Foco**. Se distribuye como MSIX en la Microsoft Store.
+App de Windows 11, escrita en Rust, para tomar capturas de pantalla destinadas a manuales, guías e instructivos, y editarlas con tres herramientas: **Desenfocar**, **Foco** y **Pasos**. Se distribuye como MSIX en la Microsoft Store.
 
 Detalle del producto: [docs/producto.md](docs/producto.md). Decisiones técnicas: [docs/arquitectura.md](docs/arquitectura.md). Guía para quien la usa: [docs/guia.md](docs/guia.md). La compresión PNG propia: [docs/compresion.md](docs/compresion.md).
 

@@ -7,7 +7,8 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 **Por qué:**
 
 - **No hay una opción oficial:** WinUI 3, la interfaz nativa de Microsoft, no tiene soporte real para Rust.
-- **Son pocos controles:** botón (de acento, estándar y de icono), slider por niveles, interruptor, selector de herramienta, campo de atajo, icono de información con su globo y lienzo. Hacerlos es abarcable.
+- **Son pocos controles:** botón (de acento, estándar y de icono), slider por niveles, interruptor, barra de herramientas con iconos, campo de atajo, icono de información con su globo y lienzo. Los iconos de las herramientas son figuras propias, dibujadas como geometría de Direct2D, así que se ven nítidos a cualquier escala. Hacerlos es abarcable.
+- **La barra de herramientas** flota centrada abajo. Al elegir una herramienta, un resalte se desliza hasta ella, estirándose en el camino, y su icono se rellena; la cápsula de sus niveles se desliza a su nuevo ancho, o se hunde y se desvanece si la herramienta no tiene. Con el ajuste de los nombres, cada uno va debajo de su icono; sin él, aparece en un globo al dejar el cursor quieto, igual que el de «i».
 - **El globo de información** aparece cuando el cursor se queda quieto sobre el icono «i», tras el tiempo que Windows fija para eso (`TrackMouseEvent` con `TME_HOVER`), como los globos nativos. Así no parpadea al cruzar el icono, y esperar no cuesta ni un cuadro.
 - **Rendimiento:** no carga ningún framework, por lo que arranca al instante y gasta muy poca memoria.
 - **Control total del diseño:** cada animación, sombra y transición se ajusta al detalle. Las animaciones las ejecuta el compositor de Windows, así que siguen fluidas aunque la app esté ocupada.
@@ -33,9 +34,11 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 ## Editor
 
-- **Efectos en el procesador:** el desenfoque y el foco se calculan con Rust puro (`crates/editor`). Lo que se ve en pantalla es exactamente lo que se guarda y se copia, y se puede probar sin Windows.
+- **Efectos en el procesador:** el desenfoque, el foco y los pasos se calculan con Rust puro (`crates/editor`). Lo que se ve en pantalla es exactamente lo que se guarda y se copia, y se puede probar sin Windows.
 - **Solo lo que cambia:** tras cada edición se recalcula y se envía a la tarjeta gráfica únicamente la zona afectada.
-- **En todos los núcleos:** el Foco se dibuja por franjas de filas, una por núcleo, a la vez. Un Foco sobre toda una captura 4K pasó de 55 a 11 ms por cuadro de su animación.
+- **En todos los núcleos:** el Foco se dibuja por franjas de filas, una por núcleo, a la vez. Un Foco sobre toda una captura 4K pasó de 55 a 11 ms por cuadro de su animación. El desenfoque también se reparte entre los núcleos.
+- **Desenfocar alrededor:** cuando el Foco desenfoca lo de alrededor, se guarda una copia de toda la captura desenfocada al nivel elegido, y el Foco la muestra fuera de su área. Al editar debajo, solo se vuelven a desenfocar las celdas que el cambio alcanza. Crearla en una captura 4K tarda 20 ms, una sola vez; mover un desenfoque debajo, 6 ms por cuadro.
+- **Pasos:** cada número es un disco naranja con borde blanco y cifras redondeadas propias, dibujadas sin fuentes, con bordes suavizados. Mide 28 píxeles por cada 100 % de escala de la pantalla capturada, así que se ve igual de grande que en ella. Su número es su orden: al borrar uno, los siguientes se renumeran y se redibujan.
 - **Zoom:** cada paso de la rueda acerca un 25 %, hasta que cada píxel de la captura ocupa 8 de la pantalla. Solo cambia cómo la tarjeta gráfica dibuja la captura, así que no se recalcula ningún píxel. Va y viene en 167 ms; el píxel bajo el cursor no se mueve en todo el camino, porque la posición y la escala avanzan a la par.
 - **Entrega:** la captura se copia y se guarda en cuanto se abre el editor. Cada cambio, al terminar, se copia de nuevo (y, con Autoguardado, se guarda). Al cerrar, se entrega lo último.
 - **Deshacer:** el historial vive solo en memoria, mientras el editor está abierto.
@@ -79,5 +82,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 | Atajo → selección visible | < 100 ms | 30–40 ms |
 | Aplicar un desenfoque | < 16 ms | 7.8 ms |
 | Cuadro de la animación del Foco (captura 4K) | < 16 ms | 11 ms (peor caso: sobre toda la captura, 12 núcleos) |
+| Activar «Desenfocar alrededor» (captura 4K) | < 50 ms | 20 ms (una vez; luego solo lo que cambia) |
+| Mover un desenfoque bajo «Desenfocar alrededor» (captura 4K) | < 16 ms | 6,3 ms por cuadro |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
 | PNG frente al de Windows | Nunca mayor | 18 % menor de media en las pruebas; con fotos, hasta 0,5 % mayor |

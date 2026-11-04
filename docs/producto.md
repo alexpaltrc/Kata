@@ -11,18 +11,19 @@
 
 ## Editar
 
-Solo hay dos herramientas. Se arrastra sobre la captura para usarlas.
+Tres herramientas, como iconos en una barra centrada abajo. Encima, en otra cápsula, los niveles de la herramienta activa; Pasos no tiene. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
 
-1. **Desenfocar.** Uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
-2. **Foco.** Un área queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 %, 200 %.
+1. **Desenfocar.** Se arrastra para cubrir uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
+2. **Foco.** Se arrastra sobre un área: queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 %, 200 %. **Desenfocar alrededor:** Ninguno, Suave, Medio o Fuerte, los mismos niveles de Desenfocar, aplicados a todo lo que queda fuera del foco.
+3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco, del tamaño que tenía en la pantalla capturada. Borrar un paso renumera los que siguen.
 
 Reglas:
 
-- Se ve un solo slider, el de la herramienta activa. Tiene pocos niveles y recuerda el último valor usado.
-- Un clic selecciona un rectángulo: se mueve arrastrándolo, se redimensiona desde sus esquinas y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover el slider cambia el rectángulo seleccionado.
+- Cada nivel es un slider con pocos pasos, que recuerda el último valor usado.
+- Un clic selecciona un rectángulo o un paso: se mueve arrastrándolo, un rectángulo se redimensiona desde sus esquinas, y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover un slider cambia lo seleccionado.
 - Un rectángulo que cubre toda la captura no tiene adónde moverse: arrastrar sobre él dibuja uno nuevo con la herramienta activa.
 - **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
-- `1` y `2` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
+- `1`, `2` y `3` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
 - La herramienta, los niveles y el Autoguardado se recuerdan para la siguiente captura.
 
 ## Guardado y portapapeles, sin pensar
@@ -53,6 +54,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Atajo | `Ctrl + Mayús + S` | Un clic y se pulsa el nuevo. Lleva `Ctrl` o `Alt`, salvo `Impr Pant`, que puede ir solo. Si otra app lo usa, lo avisa. `Esc` cancela. |
 | Kata es tu app de capturas | Desactivado | `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`) y `Win + Mayús + S` abren el recorte de Kata en vez de Recortes. Apagado, vuelven a Windows al instante. Lo explica el icono «i» de al lado, al dejar el cursor quieto encima. |
 | Abrir el editor al capturar | Activado | Apagado, la captura solo se copia y se guarda. |
+| Mostrar los nombres de las herramientas | Desactivado | El nombre de cada herramienta, siempre a la vista debajo de su icono. |
 | Sonido | Activado | Al encenderlo suena, para oírlo. |
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |
 | Iniciar con Windows | Desactivado | Kata arranca en la bandeja, sin abrir ventanas. |
