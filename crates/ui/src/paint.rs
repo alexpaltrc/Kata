@@ -199,18 +199,20 @@ impl<'a> Painter<'a> {
 
     /// Draws `labels`, each from its left edge and centered on `middle`, only where
     /// a band of colored light `width` DIPs wide crosses them: centered on `x`,
-    /// leaning as a reflection does, and in the same colors whatever the theme.
+    /// leaning as a reflection does, and in the same colors whatever the accent.
     pub fn glint(&self, labels: &[(&Label, f32)], middle: f32, x: f32, width: f32) {
         /// How far the band leans from upright, in radians.
         const LEAN: f32 = 0.35;
-        /// Blue, violet, pink and orange, from its trailing edge to its leading one.
-        const COLORS: [u32; 4] = [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D];
+        /// Blue, violet, pink and orange, from its trailing edge to its leading one:
+        /// luminous over dark themes, and deeper over light ones, where light tones fade.
+        const DARK: [u32; 4] = [0x78A8FF, 0xB18CFF, 0xFF85C0, 0xFFB27A];
+        const LIGHT: [u32; 4] = [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D];
         let (across, down) = (LEAN.cos() * width / 2.0, LEAN.sin() * width / 2.0);
         let stop = |position, rgb, alpha| D2D1_GRADIENT_STOP {
             position,
             color: color(rgb, alpha),
         };
-        let [blue, violet, pink, orange] = COLORS;
+        let [blue, violet, pink, orange] = if self.palette.light { LIGHT } else { DARK };
         // It fades in and out at its edges.
         let stops = [
             stop(0.0, blue, 0.0),

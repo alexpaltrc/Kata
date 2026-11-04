@@ -17,6 +17,13 @@ Sigue siempre el estándar personal de Alex (skill `alex-vibecode`), en cada con
 
 Ante cualquier duda, gana la opción más simple.
 
+**El sello de Alex: que todo se sienta mágico.** Usar Kata debe ser satisfactorio, casi adictivo, con atención al detalle al milímetro.
+
+- **Cero curva de aprendizaje.** Nadie lee un manual: la interfaz se explica sola, con señales sutiles justo cuando hacen falta.
+- **Respuesta inmediata.** Cada acción se siente desde el primer instante, y lo que termina se confirma con un gesto discreto.
+- **Colores de firma.** Los efectos especiales usan colores elegidos a mano, afinados para cada tema, no el color de acento.
+- **Cada elemento pasa por el sello.** Se evalúa con Alex buscando qué lo haría más mágico, y se itera hasta lograrlo. Claude propone mejoras más allá de lo pedido.
+
 ## Cómo comunicarse con Alex
 
 - Resume y sé conciso.
