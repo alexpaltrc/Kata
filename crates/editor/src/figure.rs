@@ -12,10 +12,14 @@ pub(crate) const LINE: f32 = 6.0;
 const EDGE: f32 = 1.0;
 /// A rectangle's corner radius, along the middle of a usual line.
 const CORNER: f32 = 5.0;
-/// An arrow's wings: the longest they get, in lines, and how far they open from the
-/// shaft, in degrees.
-const WING: f32 = 3.5;
-const OPENING: f32 = 35.0;
+/// An arrow's head: how long and wide it gets, and how round its corners are, in
+/// lines.
+const HEAD: (f32, f32) = (4.0, 3.5);
+const HEAD_ROUND: f32 = 0.2;
+/// The share of a short arrow its head takes, and the smallest it gets, as a share of
+/// its usual size.
+const HEAD_SHARE: f32 = 0.4;
+const SMALLEST_HEAD: f32 = 0.6;
 /// The rows an arrow is inked in at once.
 const BAND: i32 = 64;
 
@@ -63,8 +67,14 @@ enum Path {
     Rectangle(RoundedRect),
     /// Along the middle of the line: the ellipse's center and radii.
     Ellipse((f32, f32), (f32, f32)),
-    /// Along the middle of the line: the shaft and the two wings.
-    Arrow([((f32, f32), (f32, f32)); 3]),
+    /// Along the middle of the shaft, and around the inside of the head: the shaft's
+    /// ends and half its width, the head's corners and how round they are.
+    Arrow {
+        shaft: ((f32, f32), (f32, f32)),
+        half: f32,
+        head: [(f32, f32); 3],
+        round: f32,
+    },
 }
 
 impl Trace {
@@ -81,7 +91,7 @@ impl Trace {
                     (rect.height() as f32 / 2.0 - half).max(0.5),
                 ),
             ),
-            Form::Arrow => Path::Arrow(arrow(figure, half)),
+            Form::Arrow => arrow(figure, half),
         };
         Self {
             ink: Ink::new(size, EDGE),
@@ -93,15 +103,19 @@ impl Trace {
 
     /// How far `point` lies outside the line; negative on it.
     pub fn outside(&self, point: (f32, f32)) -> f32 {
-        let middle = match &self.path {
-            Path::Rectangle(outer) => (outer.distance(point) + self.half).abs(),
-            Path::Ellipse(center, radii) => ellipse(point, *center, *radii).abs(),
-            Path::Arrow(lines) => lines
-                .iter()
-                .map(|&(a, b)| segment(point, a, b))
-                .fold(f32::INFINITY, f32::min),
-        };
-        middle - self.half
+        match &self.path {
+            Path::Rectangle(outer) => (outer.distance(point) + self.half).abs() - self.half,
+            Path::Ellipse(center, radii) => ellipse(point, *center, *radii).abs() - self.half,
+            Path::Arrow {
+                shaft,
+                half,
+                head,
+                round,
+            } => {
+                let shaft = segment(point, shaft.0, shaft.1) - half;
+                shaft.min(triangle(point, *head) - round)
+            }
+        }
     }
 
     /// Where the ink falls, in parts that don't overlap, so no pixel is inked twice: a
@@ -130,7 +144,10 @@ impl Trace {
                 );
                 frame(outer, hollow)
             }
-            Path::Arrow(lines) => {
+            Path::Arrow { shaft, head, .. } => {
+                // The head is convex, so its edges span all of it.
+                let [a, b, c] = *head;
+                let lines = [*shaft, (a, b), (b, c), (c, a)];
                 let reach = self.half + margin as f32;
                 let rows = lines.iter().flat_map(|&(a, b)| [a.1, b.1]);
                 let top = (rows.clone().fold(f32::INFINITY, f32::min) - reach).floor() as i32;
@@ -162,28 +179,56 @@ pub(crate) fn outer(figure: &Figure) -> RoundedRect {
     RoundedRect::new(figure.rect(), (CORNER / LINE + 0.5) * line)
 }
 
-/// An arrow's shaft and wings, along the middle of its line. The ends sit half a line
-/// in, so the ink stops where the drag did.
-fn arrow(figure: &Figure, half: f32) -> [((f32, f32), (f32, f32)); 3] {
+/// An arrow: a filled head, its corners rounded, on a shaft. The head's tip and the
+/// shaft's tail sit in from the drag's ends, so the ink stops where the drag did.
+fn arrow(figure: &Figure, half: f32) -> Path {
     let pixel = |(x, y): (i32, i32)| (x as f32 + 0.5, y as f32 + 0.5);
-    let (tail, head) = (pixel(figure.from), pixel(figure.to));
-    let (dx, dy) = (head.0 - tail.0, head.1 - tail.1);
+    let (tail, tip) = (pixel(figure.from), pixel(figure.to));
+    let (dx, dy) = (tip.0 - tail.0, tip.1 - tail.1);
     let length = dx.hypot(dy);
     if length < 1.0 {
-        return [(tail, tail); 3];
+        return Path::Arrow {
+            shaft: (tail, tail),
+            half,
+            head: [tail; 3],
+            round: 0.0,
+        };
     }
     let (along, down) = (dx / length, dy / length);
-    let inset = half.min(length / 2.0);
-    let end = (tail.0 + along * inset, tail.1 + down * inset);
-    let tip = (head.0 - along * inset, head.1 - down * inset);
-    let wing = (WING * 2.0 * half).min(0.4 * length);
-    let (sin, cos) = OPENING.to_radians().sin_cos();
-    // The shaft turned back, and opened either way.
-    let back = |sin: f32| {
-        let (x, y) = (-along * cos + down * sin, -down * cos - along * sin);
-        (tip.0 + x * wing, tip.1 + y * wing)
+    let line = 2.0 * half;
+    let size = (HEAD_SHARE * length / (HEAD.0 * line)).clamp(SMALLEST_HEAD, 1.0);
+    let [long, wide, round] = [HEAD.0, HEAD.1, HEAD_ROUND].map(|lines| lines * line * size);
+    // A point `back` from the tip toward the tail, and `aside` from the middle.
+    let at = |back: f32, aside: f32| {
+        (
+            tip.0 - along * back - down * aside,
+            tip.1 - down * back + along * aside,
+        )
     };
-    [(end, tip), (tip, back(sin)), (tip, back(-sin))]
+    let (base, side) = (long - round, wide / 2.0 - round);
+    // The shaft runs into the head. Behind it, the shaft takes a line to reach its
+    // width, so a short arrow never shows a stub.
+    let half = half * ((length - long) / line).clamp(0.0, 1.0);
+    Path::Arrow {
+        shaft: (at(length - half, 0.0), at(base, 0.0)),
+        half,
+        head: [at(round, 0.0), at(base, side), at(base, -side)],
+        round,
+    }
+}
+
+/// How far `point` lies outside the triangle with `corners`; negative inside.
+fn triangle(point: (f32, f32), corners: [(f32, f32); 3]) -> f32 {
+    let [a, b, c] = corners;
+    let edges = [(a, b), (b, c), (c, a)];
+    let distance = edges
+        .iter()
+        .map(|&(a, b)| segment(point, a, b))
+        .fold(f32::INFINITY, f32::min);
+    // Inside, the point lies on the same side of every edge.
+    let sides = edges.map(|(a, b)| (b.0 - a.0) * (point.1 - a.1) - (b.1 - a.1) * (point.0 - a.0));
+    let inside = sides.iter().all(|&side| side > 0.0) || sides.iter().all(|&side| side < 0.0);
+    if inside { -distance } else { distance }
 }
 
 /// How far `point` lies outside the ellipse around `center` with `radii`; negative

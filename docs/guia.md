@@ -51,9 +51,9 @@ mostrar siempre.
 3. **Pasos:** cada clic pone el número siguiente, en un círculo naranja. Si se borra uno, los
    demás se renumeran. Su tamaño se ajusta solo a la captura; al lado está el **tamaño**
    (Pequeño, Mediano, Grande o Muy grande), que cambia todos los pasos a la vez.
-4. **Formas:** se arrastra para dibujar un **rectángulo**, una **elipse** o una **flecha**, solo
-   el contorno, en naranja. Encima se elige cuál, con su icono. El grosor se ajusta solo a la
-   captura.
+4. **Formas:** se arrastra para dibujar un **rectángulo**, una **elipse** o una **flecha**, en
+   naranja: el rectángulo y la elipse, solo el contorno; la flecha, con la punta rellena. Encima se
+   elige cuál, con su icono. El grosor se ajusta solo a la captura.
 
 - Cada nivel es un control deslizante que recuerda el último valor.
 - Un clic selecciona un rectángulo, un paso o una forma (una forma, sobre su línea): se mueve

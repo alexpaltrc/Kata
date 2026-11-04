@@ -847,12 +847,19 @@ mod tests {
         assert_eq!(pixel(output, 13, 32), [255, 255, 255, 255]);
         assert_eq!(pixel(output, 32, 32), [0, 0, 0, 255]);
         assert_eq!(pixel(output, 2, 32), [0, 0, 0, 255]);
-        // An arrow's ink stops where the drag did: its edge runs through that pixel.
+        // An arrow's ink stops where the drag did: its edges run through those pixels,
+        // half white.
         let arrow = figure(Form::Arrow, (8, 32), (50, 32));
         renderer.update(&image, &[], None, &[arrow], &[]);
         let output = renderer.output();
+        let half_white = |x| {
+            pixel(output, x, 32)[..3]
+                .iter()
+                .all(|v| v.abs_diff(128) <= 1)
+        };
+        assert!(half_white(8) && half_white(50));
         assert_eq!(pixel(output, 30, 32), [34, 90, 236, 255]);
-        assert_eq!(pixel(output, 50, 32), [128, 128, 128, 255]);
+        assert_eq!(pixel(output, 7, 32), [0, 0, 0, 255]);
         assert_eq!(pixel(output, 51, 32), [0, 0, 0, 255]);
     }
 
