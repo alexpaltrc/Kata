@@ -1,7 +1,7 @@
 //! The capture's file name, centered in the title bar. Clicking it opens a box to
 //! type the name in, after the time it keeps; dragging it carries the file away.
 //! On hover, a grip and a pencil say so; unnamed, it invites a name; and a glint
-//! of light crosses it as the editor opens.
+//! of colored light crosses it as the editor opens, and again once it's renamed.
 
 use std::time::{Duration, Instant};
 
@@ -36,10 +36,12 @@ const PENCIL: f32 = 12.0;
 const DOT: f32 = 1.0;
 const DOTS: f32 = 4.0;
 /// How long the glint takes, of which the first part is a pause, and how wide its
-/// band of light is.
+/// band of light is. The pause is longer as the editor opens, and after a rename
+/// just lets the box close.
 const GLINT: Duration = Duration::from_millis(1400);
 const PAUSE: f32 = 0.35;
-const BAND: f32 = 48.0;
+const SETTLE: f32 = 0.1;
+const BAND: f32 = 96.0;
 /// The glint sweeps across evenly, easing in and out.
 const SWEEP: Easing = Easing::new(0.4, 0.0, 0.6, 1.0);
 /// How wide the box opens, room allowing.
@@ -112,7 +114,7 @@ impl Name {
             moved: Instant::now(),
             hovered: false,
             icons: Animation::idle(0.0),
-            glint: Animation::new(-PAUSE, 1.0, GLINT, SWEEP),
+            glint: glint(PAUSE),
             pressed: None,
             room: (0.0, 0.0),
             center: (0.0, 0.0),
@@ -156,6 +158,7 @@ impl Name {
     pub fn set(&mut self, stem: String) {
         self.stem = stem;
         self.fit();
+        self.glint = glint(SETTLE);
     }
 
     /// Follows `key`, held with Ctrl or Shift. Returns whether that changed anything.
@@ -340,17 +343,15 @@ impl Name {
         let palette = painter.palette;
         let (left, middle) = (area.left + SIDE, area.middle());
         let invites = self.invites();
-        let draw = |color, hint| {
-            painter.text(&self.shown, left, middle, color);
-            if invites {
-                painter.text(&self.hint, left + self.lead, middle, hint);
-            }
-        };
-        draw(palette.text, palette.text_secondary);
+        painter.text(&self.shown, left, middle, palette.text);
+        if invites {
+            painter.text(&self.hint, left + self.lead, middle, palette.text_secondary);
+        }
         let glint = self.glint.value(now);
         if glint > 0.0 && self.glint.is_running(now) {
             let x = left - BAND / 2.0 + (self.width() + BAND) * glint;
-            painter.glint((x, middle), BAND, || draw(palette.accent, palette.accent));
+            let labels = [(&self.shown, left), (&self.hint, left + self.lead)];
+            painter.glint(&labels[..if invites { 2 } else { 1 }], middle, x, BAND);
         }
         let icons = faded(palette.text_secondary, self.icons.value(now));
         if icons.a <= 0.0 {
@@ -524,6 +525,11 @@ impl Control for Name {
     fn is_animating(&self, now: Instant) -> bool {
         self.open.is_running(now) || self.icons.is_running(now) || self.glint.is_running(now)
     }
+}
+
+/// A glint that crosses the name after a pause, `pause` long in the band's travel.
+fn glint(pause: f32) -> Animation {
+    Animation::new(-pause, 1.0, GLINT, SWEEP)
 }
 
 /// How often the caret blinks, in milliseconds, if it does.

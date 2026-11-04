@@ -6,7 +6,7 @@ use std::{
     ffi::OsString,
     fs::{self, File},
     io,
-    mem::{self, size_of},
+    mem::{self, ManuallyDrop, size_of},
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
     ptr, slice,
@@ -18,31 +18,41 @@ use std::{
 use kata_editor::Image;
 use windows::{
     Win32::{
-        Foundation::{COLORREF, GlobalFree, HANDLE, HGLOBAL, HWND, POINT, SIZE},
+        Foundation::{COLORREF, GlobalFree, HANDLE, HGLOBAL, HWND, POINT, POINTL, SIZE},
         Graphics::Gdi::{
             BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject,
         },
         Storage::FileSystem::{MOVE_FILE_FLAGS, MoveFileExW},
         System::{
-            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree, IDataObject},
+            Com::{
+                CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree, DVASPECT_CONTENT, FORMATETC,
+                IDataObject, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+            },
             DataExchange::{
-                CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+                CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard,
+                RegisterClipboardFormatW, SetClipboardData,
             },
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
-            Ole::{CF_DIB, CF_UNICODETEXT, CLIPBOARD_FORMAT, DROPEFFECT_COPY, IDropSource},
+            Ole::{
+                CF_DIB, CF_UNICODETEXT, CLIPBOARD_FORMAT, DROPEFFECT, DROPEFFECT_COPY,
+                DROPEFFECT_NONE, IDropSource, IDropTarget, IDropTarget_Impl, RegisterDragDrop,
+                RevokeDragDrop,
+            },
             SystemInformation::GetLocalTime,
+            SystemServices::MODIFIERKEYS_FLAGS,
         },
         UI::{
             Shell::{
-                BHID_DataObject, CLSID_DragDropHelper, DSH_ALLOWDROPDESCRIPTIONTEXT,
-                FOLDERID_Pictures, IDragSourceHelper2, ILCreateFromPathW, ILFree, IShellItem,
-                KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHDRAGIMAGE, SHDoDragDrop,
-                SHGetKnownFolderPath, SHOpenFolderAndSelectItems, ShellExecuteW,
+                BHID_DataObject, CFSTR_DROPDESCRIPTION, CLSID_DragDropHelper, DROPDESCRIPTION,
+                DROPIMAGE_INVALID, DROPIMAGE_NOIMAGE, DROPIMAGETYPE, DSH_ALLOWDROPDESCRIPTIONTEXT,
+                FOLDERID_Pictures, IDragSourceHelper2, IDropTargetHelper, ILCreateFromPathW,
+                ILFree, IShellItem, KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHDRAGIMAGE,
+                SHDoDragDrop, SHGetKnownFolderPath, SHOpenFolderAndSelectItems, ShellExecuteW,
             },
             WindowsAndMessaging::SW_SHOWNORMAL,
         },
     },
-    core::{Error, HSTRING, PCWSTR, Result, w},
+    core::{Error, HSTRING, PCWSTR, Ref, Result, implement, w},
 };
 
 use crate::{channel, report, settings::Settings};
@@ -283,7 +293,16 @@ pub fn drag(owner: HWND, path: &Path, picture: Option<Picture>) {
                 {
                     report("drag", &error);
                 }
-                SHDoDragDrop(Some(owner), &data, None::<&IDropSource>, DROPEFFECT_COPY)
+                // Windows shows what's dragged only over windows that take drops.
+                let shown = show_over(owner, &data)
+                    .inspect_err(|error| report("drag", error))
+                    .is_ok();
+                let dragged =
+                    SHDoDragDrop(Some(owner), &data, None::<&IDropSource>, DROPEFFECT_COPY);
+                if shown {
+                    let _ = RevokeDragDrop(owner);
+                }
+                dragged
             })
     };
     if let Err(error) = dragged {
@@ -335,6 +354,119 @@ fn carry(data: &IDataObject, picture: &Picture) -> Result<()> {
         // Once it takes the bitmap, it frees it.
         helper.InitializeFromBitmap(&image, data).inspect_err(|_| {
             let _ = DeleteObject(bitmap.into());
+        })
+    }
+}
+
+/// Shows `data` over `owner` too, the window it's dragged out of, as it shows
+/// everywhere else, though it can't be dropped there.
+fn show_over(owner: HWND, data: &IDataObject) -> Result<()> {
+    unsafe {
+        let helper = CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)?;
+        let origin: IDropTarget = Origin {
+            owner,
+            data: data.clone(),
+            helper,
+        }
+        .into();
+        RegisterDragDrop(owner, &origin)
+    }
+}
+
+/// The window a drag comes from, which only shows what's dragged.
+#[implement(IDropTarget)]
+struct Origin {
+    owner: HWND,
+    data: IDataObject,
+    helper: IDropTargetHelper,
+}
+
+impl IDropTarget_Impl for Origin_Impl {
+    fn DragEnter(
+        &self,
+        _: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        point: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> Result<()> {
+        // Just the picture, without the sign that says it can't go here.
+        let _ = describe(&self.data, DROPIMAGE_NOIMAGE);
+        unsafe {
+            *effect = DROPEFFECT_NONE;
+            self.helper
+                .DragEnter(self.owner, &self.data, &on_screen(point), DROPEFFECT_NONE)
+        }
+    }
+
+    fn DragOver(
+        &self,
+        _: MODIFIERKEYS_FLAGS,
+        point: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> Result<()> {
+        unsafe {
+            *effect = DROPEFFECT_NONE;
+            self.helper.DragOver(&on_screen(point), DROPEFFECT_NONE)
+        }
+    }
+
+    fn DragLeave(&self) -> Result<()> {
+        // Elsewhere, Windows says again where it goes.
+        let _ = describe(&self.data, DROPIMAGE_INVALID);
+        unsafe { self.helper.DragLeave() }
+    }
+
+    fn Drop(
+        &self,
+        _: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        point: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> Result<()> {
+        unsafe {
+            *effect = DROPEFFECT_NONE;
+            self.helper
+                .Drop(&self.data, &on_screen(point), DROPEFFECT_NONE)
+        }
+    }
+}
+
+fn on_screen(point: &POINTL) -> POINT {
+    POINT {
+        x: point.x,
+        y: point.y,
+    }
+}
+
+/// Asks Windows to show `image` beside what `data` drags, as drop targets do.
+fn describe(data: &IDataObject, image: DROPIMAGETYPE) -> Result<()> {
+    let description = DROPDESCRIPTION {
+        r#type: image,
+        ..Default::default()
+    };
+    let len = size_of::<DROPDESCRIPTION>();
+    let memory = global(len, |bytes| unsafe {
+        bytes.copy_from_slice(slice::from_raw_parts(
+            ptr::from_ref(&description).cast(),
+            len,
+        ));
+    })?;
+    let format = FORMATETC {
+        cfFormat: unsafe { RegisterClipboardFormatW(CFSTR_DROPDESCRIPTION) } as u16,
+        ptd: ptr::null_mut(),
+        dwAspect: DVASPECT_CONTENT.0,
+        lindex: -1,
+        tymed: TYMED_HGLOBAL.0 as u32,
+    };
+    let medium = STGMEDIUM {
+        tymed: TYMED_HGLOBAL.0 as u32,
+        u: STGMEDIUM_0 { hGlobal: memory },
+        pUnkForRelease: ManuallyDrop::new(None),
+    };
+    // Once it takes the memory, it frees it.
+    unsafe {
+        data.SetData(&format, &medium, true).inspect_err(|_| {
+            let _ = GlobalFree(Some(memory));
         })
     }
 }
@@ -477,17 +609,8 @@ fn place_on_clipboard(
     len: usize,
     write: impl FnOnce(&mut [u8]),
 ) -> Result<()> {
+    let memory = global(len, write)?;
     unsafe {
-        let memory = GlobalAlloc(GMEM_MOVEABLE, len)?;
-        let bytes = GlobalLock(memory).cast::<u8>();
-        if bytes.is_null() {
-            let error = Error::from_thread();
-            let _ = GlobalFree(Some(memory));
-            return Err(error);
-        }
-        write(slice::from_raw_parts_mut(bytes, len));
-        let _ = GlobalUnlock(memory);
-
         let placed = open_clipboard(owner).and_then(|()| {
             let placed = EmptyClipboard()
                 .and_then(|()| SetClipboardData(format.0.into(), Some(HANDLE(memory.0))));
@@ -499,6 +622,22 @@ fn place_on_clipboard(
             let _ = GlobalFree(Some(memory));
         }
         placed.map(drop)
+    }
+}
+
+/// Memory `len` bytes long, which `write` fills, for Windows to take.
+fn global(len: usize, write: impl FnOnce(&mut [u8])) -> Result<HGLOBAL> {
+    unsafe {
+        let memory = GlobalAlloc(GMEM_MOVEABLE, len)?;
+        let bytes = GlobalLock(memory).cast::<u8>();
+        if bytes.is_null() {
+            let error = Error::from_thread();
+            let _ = GlobalFree(Some(memory));
+            return Err(error);
+        }
+        write(slice::from_raw_parts_mut(bytes, len));
+        let _ = GlobalUnlock(memory);
+        Ok(memory)
     }
 }
 

@@ -10,6 +10,7 @@ dependencies = [
  "kata-editor",
  "kata-ui",
  "windows",
+ "windows-core",
  "windows-numerics",
 ]
 

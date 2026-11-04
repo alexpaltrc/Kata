@@ -28,7 +28,7 @@ use windows_numerics::{Matrix3x2, Vector2};
 use crate::{
     Graphics,
     figure::Figure,
-    theme::{Palette, faded},
+    theme::{Palette, color, faded},
 };
 
 /// A position in DIPs.
@@ -197,22 +197,29 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Draws what `draw` paints only under a soft band of light `width` DIPs wide,
-    /// centered on `at` and leaning as a reflection does.
-    pub fn glint(&self, (x, y): Point, width: f32, draw: impl FnOnce()) {
+    /// Draws `labels`, each from its left edge and centered on `middle`, only where
+    /// a band of colored light `width` DIPs wide crosses them: centered on `x`,
+    /// leaning as a reflection does, and in the same colors whatever the theme.
+    pub fn glint(&self, labels: &[(&Label, f32)], middle: f32, x: f32, width: f32) {
         /// How far the band leans from upright, in radians.
         const LEAN: f32 = 0.35;
+        /// Blue, violet, pink and orange, from its trailing edge to its leading one.
+        const COLORS: [u32; 4] = [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D];
         let (across, down) = (LEAN.cos() * width / 2.0, LEAN.sin() * width / 2.0);
-        let stop = |position, a| D2D1_GRADIENT_STOP {
+        let stop = |position, rgb, alpha| D2D1_GRADIENT_STOP {
             position,
-            color: D2D1_COLOR_F {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a,
-            },
+            color: color(rgb, alpha),
         };
-        let stops = [stop(0.0, 0.0), stop(0.5, 1.0), stop(1.0, 0.0)];
+        let [blue, violet, pink, orange] = COLORS;
+        // It fades in and out at its edges.
+        let stops = [
+            stop(0.0, blue, 0.0),
+            stop(0.2, blue, 1.0),
+            stop(0.4, violet, 1.0),
+            stop(0.6, pink, 1.0),
+            stop(0.8, orange, 1.0),
+            stop(1.0, orange, 0.0),
+        ];
         let light = unsafe {
             ID2D1RenderTarget::CreateGradientStopCollection(
                 self.context,
@@ -223,8 +230,8 @@ impl<'a> Painter<'a> {
             .and_then(|stops| {
                 self.context.CreateLinearGradientBrush(
                     &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                        startPoint: Vector2::new(x - across, y - down),
-                        endPoint: Vector2::new(x + across, y + down),
+                        startPoint: Vector2::new(x - across, middle - down),
+                        endPoint: Vector2::new(x + across, middle + down),
                     },
                     None,
                     &stops,
@@ -232,13 +239,16 @@ impl<'a> Painter<'a> {
             })
         };
         if let Ok(light) = light {
-            self.through(
-                D2D1_LAYER_PARAMETERS1 {
-                    opacityBrush: ManuallyDrop::new(Some(light.into())),
-                    ..layer()
-                },
-                draw,
-            );
+            for &(label, left) in labels {
+                unsafe {
+                    self.context.DrawTextLayout(
+                        self.origin(label, left, middle),
+                        &label.layout,
+                        &light,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    );
+                }
+            }
         }
     }
 
@@ -409,16 +419,21 @@ impl<'a> Painter<'a> {
 
     /// Draws `label` starting at `left`, centered vertically on `middle`.
     pub fn text(&self, label: &Label, left: f32, middle: f32, color: D2D1_COLOR_F) {
-        let origin = Vector2::new(self.snap(left), self.snap(middle - label.height / 2.0));
         unsafe {
             self.brush.SetColor(&color);
             self.context.DrawTextLayout(
-                origin,
+                self.origin(label, left, middle),
                 &label.layout,
                 self.brush,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
         }
+    }
+
+    /// Where `label` starts, from its left edge and centered on `middle`, on whole
+    /// pixels.
+    fn origin(&self, label: &Label, left: f32, middle: f32) -> Vector2 {
+        Vector2::new(self.snap(left), self.snap(middle - label.height / 2.0))
     }
 }
 

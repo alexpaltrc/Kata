@@ -77,12 +77,13 @@ mostrar siempre.
 - **Ponerle nombre:** haz clic en el nombre, arriba al centro, y escribe. Mientras no tiene,
   dice «Ponle nombre» tras la fecha, y al pasar el cursor aparece un lápiz a su derecha. La fecha
   y la hora se quedan delante (`2026-11-03 14.32.05 - Pedidos.png`), así todas se ordenan solas.
-  Intro o un clic fuera lo guarda, aunque el Autoguardado esté apagado; Esc lo deja como estaba.
+  Intro o un clic fuera lo guarda, aunque el Autoguardado esté apagado, y lo cruza un destello de
+  colores; Esc lo deja como estaba.
   Si ya hay un archivo con ese nombre, se le añade «(2)».
 - **Arrastrar la captura:** el asa de puntos que aparece a la izquierda del nombre lo recuerda.
   Arrastra el nombre hasta una carpeta, un documento, un chat o un correo, y suéltalo ahí: la
-  captura viaja con el cursor como una pequeña tarjeta inclinada. Se deja una copia; el archivo de
-  la captura no se mueve.
+  captura viaja con el cursor como una pequeña tarjeta inclinada, desde el primer movimiento. Se
+  deja una copia; el archivo de la captura no se mueve.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan en el
   archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
 - **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta
