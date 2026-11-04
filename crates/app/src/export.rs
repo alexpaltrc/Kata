@@ -22,18 +22,19 @@ use windows::{
         Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER},
         Storage::FileSystem::{MOVE_FILE_FLAGS, MoveFileExW},
         System::{
-            Com::CoTaskMemFree,
+            Com::{CoTaskMemFree, IDataObject},
             DataExchange::{
                 CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
             },
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
-            Ole::{CF_DIB, CF_UNICODETEXT, CLIPBOARD_FORMAT},
+            Ole::{CF_DIB, CF_UNICODETEXT, CLIPBOARD_FORMAT, DROPEFFECT_COPY, IDropSource},
             SystemInformation::GetLocalTime,
         },
         UI::{
             Shell::{
-                FOLDERID_Pictures, ILCreateFromPathW, ILFree, KF_FLAG_DEFAULT,
-                SHGetKnownFolderPath, SHOpenFolderAndSelectItems, ShellExecuteW,
+                BHID_DataObject, FOLDERID_Pictures, ILCreateFromPathW, ILFree, IShellItem,
+                KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHDoDragDrop, SHGetKnownFolderPath,
+                SHOpenFolderAndSelectItems, ShellExecuteW,
             },
             WindowsAndMessaging::SW_SHOWNORMAL,
         },
@@ -73,6 +74,8 @@ struct Pending {
     /// Where the file is, and where it goes when that's elsewhere.
     at: PathBuf,
     to: PathBuf,
+    /// A version is on its way to disk.
+    writing: bool,
     /// No more versions will come.
     closed: bool,
 }
@@ -91,7 +94,7 @@ impl Output {
             next: Some(image),
             at: path.clone(),
             to: path,
-            closed: false,
+            ..Pending::default()
         };
         let thread = thread::spawn({
             let slot = Arc::clone(&slot);
@@ -139,6 +142,13 @@ impl Output {
         pending.to = to;
         saver.slot.changed.notify_one();
         Some(named)
+    }
+
+    /// The file, once every version and name handed to it is on disk.
+    pub fn file(&self) -> Option<PathBuf> {
+        let pending = lock(&self.saver.as_ref()?.slot);
+        let settled = pending.next.is_none() && !pending.writing && pending.at == pending.to;
+        settled.then(|| pending.at.clone())
     }
 
     /// Opens the captures folder in File Explorer, with this capture's file selected.
@@ -220,8 +230,11 @@ fn write_versions(slot: &Slot) {
             }
             return;
         };
+        pending.writing = true;
         drop(pending);
-        match save_png(&at, &image) {
+        let saved = save_png(&at, &image);
+        lock(slot).writing = false;
+        match saved {
             Ok(()) => written = true,
             Err(error) => report("save", &error),
         }
@@ -242,6 +255,22 @@ fn move_file(from: &Path, to: &Path) -> Result<()> {
 /// Whether `a` and `b` name the same file, as Windows compares names: ignoring case.
 fn same(a: &Path, b: &Path) -> bool {
     a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
+/// Drags the file at `path` out of `owner`, as File Explorer would, until it's
+/// dropped: into a folder, a document or a message. It's copied wherever it goes,
+/// so the capture keeps its file.
+pub fn drag(owner: HWND, path: &Path) {
+    let dragged = unsafe {
+        SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(path), None)
+            .and_then(|item| item.BindToHandler::<_, IDataObject>(None, &BHID_DataObject))
+            .and_then(|data| {
+                SHDoDragDrop(Some(owner), &data, None::<&IDropSource>, DROPEFFECT_COPY)
+            })
+    };
+    if let Err(error) = dragged {
+        report("drag", &error);
+    }
 }
 
 /// Puts `image` on the clipboard.

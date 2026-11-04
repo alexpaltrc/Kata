@@ -27,11 +27,7 @@ use windows::{
     ApplicationModel::Package,
     Win32::{
         Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM},
-        System::{
-            Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
-            LibraryLoader::GetModuleHandleW,
-            Threading::CreateMutexW,
-        },
+        System::{LibraryLoader::GetModuleHandleW, Ole::OleInitialize, Threading::CreateMutexW},
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
             WindowsAndMessaging::{
@@ -62,7 +58,8 @@ const CAPTURE_DELAY_MS: u32 = 200;
 fn main() -> Result<()> {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)?;
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+        // OLE, beyond COM, drags files out.
+        OleInitialize(None)?;
     }
     // Started at sign-in, Kata waits in the tray.
     let quiet = startup::at_sign_in();

@@ -1,5 +1,5 @@
 //! The capture's file name, centered in the title bar. Clicking it opens a box to
-//! type the name in, after the date it keeps.
+//! type the name in, after the date it keeps; dragging it carries the file away.
 
 use std::time::{Duration, Instant};
 
@@ -61,7 +61,8 @@ pub struct Name {
     /// When the caret last moved, which shows it at once.
     moved: Instant,
     hovered: bool,
-    pressed: bool,
+    /// Where the pointer went down on it.
+    pressed: Option<Point>,
     /// The room in the title bar, from left to right, and the point it centers on.
     room: (f32, f32),
     center: Point,
@@ -87,7 +88,7 @@ impl Name {
             caret: true,
             moved: Instant::now(),
             hovered: false,
-            pressed: false,
+            pressed: None,
             room: (0.0, 0.0),
             center: (0.0, 0.0),
             taken,
@@ -194,6 +195,11 @@ impl Name {
         self.field.as_mut()?.erase(true, false);
         self.edited();
         Some(text)
+    }
+
+    /// Where the pointer went down on the name at rest, to drag the file away from.
+    pub fn grabbed(&self) -> Option<Point> {
+        self.pressed.filter(|_| !self.is_editing())
     }
 
     /// The caret blinks: it hides if it showed, or shows if it hid. Returns whether it
@@ -334,9 +340,9 @@ impl Control for Name {
 
     /// With the box open, puts the caret where the pointer is, selecting up to it
     /// with Shift.
-    fn press(&mut self, (x, _): Point) -> bool {
-        self.pressed = true;
-        let index = self.index_at(x);
+    fn press(&mut self, point: Point) -> bool {
+        self.pressed = Some(point);
+        let index = self.index_at(point.0);
         if let Some(field) = &mut self.field {
             field.go(index, window::held(VK_SHIFT));
             self.moved();
@@ -358,14 +364,13 @@ impl Control for Name {
     }
 
     fn release(&mut self, point: Point) -> bool {
-        let activated = self.pressed && !self.is_editing() && self.contains(point);
-        self.pressed = false;
+        let activated = self.pressed.take().is_some() && !self.is_editing() && self.contains(point);
         self.hovered = self.contains(point);
         activated
     }
 
     fn cancel(&mut self) {
-        self.pressed = false;
+        self.pressed = None;
     }
 
     fn is_focusable(&self) -> bool {
@@ -407,7 +412,7 @@ impl Control for Name {
             HEIGHT,
         ));
         // At rest, a subtle button.
-        let shade = if self.pressed && self.hovered {
+        let shade = if self.pressed.is_some() && self.hovered {
             palette.subtle_pressed
         } else if self.hovered {
             palette.subtle_hover

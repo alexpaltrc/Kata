@@ -608,6 +608,13 @@ impl Editor {
         };
         match gesture {
             Gesture::Control(part) => {
+                // The name, dragged far enough, carries the file away.
+                if part == Part::Name
+                    && let Some(from) = self.toolbar.name().grabbed()
+                    && self.dragged(from, point)
+                {
+                    return self.drag_file();
+                }
                 let changed = self.toolbar.control(part).drag(point);
                 if changed {
                     if part == Part::Name {
@@ -1042,6 +1049,21 @@ impl Editor {
     fn stop_blinking(&mut self) {
         let _ = unsafe { KillTimer(Some(self.hwnd), BLINK_TIMER) };
         self.invalidate();
+    }
+
+    /// Drags the capture's file out of the window, once it's on disk. Returns
+    /// whether the look changes.
+    fn drag_file(&mut self) -> bool {
+        let Some(file) = self.output.file() else {
+            return false;
+        };
+        // Windows follows the pointer from here until the file is dropped.
+        self.gesture = None;
+        self.toolbar.control(Part::Name).cancel();
+        let _ = unsafe { ReleaseCapture() };
+        export::drag(self.hwnd, &file);
+        self.hover(Some(self.pointer()));
+        true
     }
 
     /// Makes the edits on show the document's, when they changed.
