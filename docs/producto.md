@@ -16,7 +16,7 @@ Cuatro herramientas, como iconos en una barra centrada abajo. Encima, en otra c�
 1. **Desenfocar.** Se arrastra para cubrir uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
 2. **Foco.** Se arrastra sobre un área: queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 %, 200 %. **Desenfocar alrededor:** Ninguno, Suave, Medio o Fuerte, los mismos niveles de Desenfocar, aplicados a todo lo que queda fuera del foco.
 3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco. Borrar un paso renumera los que siguen. Su tamaño se ajusta solo a la captura, para que se lea aunque la captura se achique en un documento. **Tamaño:** Pequeño, Mediano, Grande o Muy grande, el mismo para todos los pasos: cambiarlo cambia los que ya están.
-4. **Formas.** Se arrastra para dibujar un rectángulo, una elipse o una flecha: solo el contorno, en el naranja de los pasos, con el grosor ajustado a la captura. **Forma:** Rectángulo, Elipse o Flecha, elegida con su icono en la cápsula de encima.
+4. **Formas.** Se arrastra para dibujar un rectángulo, una elipse o una flecha, en el naranja de los pasos y con el grosor ajustado a la captura. El rectángulo y la elipse son solo el contorno; la flecha lleva una punta rellena, de esquinas suavizadas. **Forma:** Rectángulo, Elipse o Flecha, elegida con su icono en la cápsula de encima.
 
 Reglas:
 
@@ -70,7 +70,17 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 
 ## Pendiente
 
-**Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
+- **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
+- **Bienvenida (onboarding)**, a la altura del resto de Kata. Enseñará lo que hoy no se ve a simple vista, como arrastrar la captura desde su nombre, y permitirá quitar el interruptor de Autoguardado: Kata guardará siempre.
+- **Más idiomas**, y atajos que funcionen con cualquier distribución de teclado.
+- **Llegar a Ajustes sin la bandeja.** Hay quien nunca la usa. Alex y Claude evalúan juntos la forma más natural.
+
+## Antes de vender
+
+Kata no se vende hasta tener la bienvenida y los idiomas de arriba. La idea, aún por decidir:
+
+- **Premium, barato y en la Microsoft Store**, que desbloquea todo de una vez. Suscripción anual o pago único, con el pago único como la opción que conviene.
+- **Lo gratis queda completo para el día a día**, sin sentirse obligado a pagar. Lo premium es lo que personaliza o va más allá: Kata como app de capturas de Windows, un atajo a medida (gratis, 3 o 4 a elegir), colores a medida en formas y pasos (gratis, de 3 a 5) y el dibujo a mano alzada.
 
 ## Fuera de alcance por ahora
 

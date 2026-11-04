@@ -1,6 +1,6 @@
 # Kata
 
-App de Windows 11, escrita en Rust, para tomar capturas de pantalla destinadas a manuales, guías e instructivos, y editarlas con tres herramientas: **Desenfocar**, **Foco** y **Pasos**. Se distribuye como MSIX en la Microsoft Store.
+App de Windows 11, escrita en Rust, para tomar capturas de pantalla destinadas a manuales, guías e instructivos, y editarlas con cuatro herramientas: **Desenfocar**, **Foco**, **Pasos** y **Formas**. Se distribuye como MSIX en la Microsoft Store.
 
 Detalle del producto: [docs/producto.md](docs/producto.md). Decisiones técnicas: [docs/arquitectura.md](docs/arquitectura.md). Guía para quien la usa: [docs/guia.md](docs/guia.md). La compresión PNG propia: [docs/compresion.md](docs/compresion.md).
 
@@ -38,6 +38,7 @@ Alex usa a diario **Kata**, la versión estable que instala la Microsoft Store, 
 - **Autoría:** Alex Palacios. Nunca se pone un correo en los archivos del proyecto.
 - **Política de privacidad:** el texto de `docs/privacidad.md` va pegado en Partner Center. Si cambia, dile a Alex que lo vuelva a pegar.
 - **Licencia:** aún sin definir. No agregar ninguna hasta que Alex lo decida.
+- **Vender:** Kata no se vende hasta tener una bienvenida a la altura y más idiomas. La idea y las reglas, en [docs/producto.md](docs/producto.md#antes-de-vender).
 - **Documentación al día:** cada cambio actualiza los documentos de `docs/` que toca. Cada experimento de compresión, funcione o no, se anota en `docs/compresion.md`.
 - **Repositorio limpio:** sin archivos sobrantes, carpetas vacías ni código muerto. Cada archivo tiene una razón de existir.
 - **Todo es nuestro:** nada de librerías ni código de terceros. Todo se escribe desde cero, a partir de las especificaciones públicas. La API de Windows, mediante las crates oficiales `windows` de Microsoft, sí se usa.
