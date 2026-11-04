@@ -72,15 +72,19 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 - **Bienvenida (onboarding)**, a la altura del resto de Kata. Enseñará lo que hoy no se ve a simple vista, como arrastrar la captura desde su nombre, y permitirá quitar el interruptor de Autoguardado: Kata guardará siempre.
-- **Más idiomas**, y atajos que funcionen con cualquier distribución de teclado.
+- **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
 - **Llegar a Ajustes sin la bandeja.** Hay quien nunca la usa. Alex y Claude evalúan juntos la forma más natural.
 
 ## Antes de vender
 
-Kata no se vende hasta tener la bienvenida y los idiomas de arriba. La idea, aún por decidir:
+Kata no se vende hasta tener la bienvenida y al menos cinco idiomas: español, inglés y tres más. Lo decidido:
 
-- **Premium, barato y en la Microsoft Store**, que desbloquea todo de una vez. Suscripción anual o pago único, con el pago único como la opción que conviene.
-- **Lo gratis queda completo para el día a día**, sin sentirse obligado a pagar. Lo premium es lo que personaliza o va más allá: Kata como app de capturas de Windows, un atajo a medida (gratis, 3 o 4 a elegir), colores a medida en formas y pasos (gratis, de 3 a 5) y el dibujo a mano alzada.
+- **Un solo Premium, en la Microsoft Store**, que desbloquea todo de una vez: unos 10 USD en un pago único, o unos 5 USD al año. El pago único es la opción que conviene.
+- **Lo gratis queda completo para el día a día**, sin sentirse obligado a pagar, incluido Kata como app de capturas de Windows (`Impr Pant`). Lo premium es lo que personaliza o va más allá:
+  - **Atajo a medida.** Gratis, 3 o 4 a elegir.
+  - **Colores a medida** en formas y pasos. Gratis, de 3 a 5.
+  - **Dibujo a mano alzada.**
+- **Precio justo en cada país.** El precio de referencia se ajusta al poder adquisitivo de cada país con una sola cifra pública para todos: el nivel de precios del Banco Mundial (indicador `PA.NUS.PPPC.RF`, cuánto cuestan las cosas allí comparado con Estados Unidos). Partner Center permite fijar un precio distinto en cada mercado; se redondea a un precio que se lea bien en la moneda local.
 
 ## Fuera de alcance por ahora
 
