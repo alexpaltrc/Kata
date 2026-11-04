@@ -1,6 +1,7 @@
 //! A floating row of icons with one chosen, such as an editor's tools. A highlight
 //! glides to the chosen one, stretching as it goes, and its icon fills in. Their
-//! names show under the icons, or in a tooltip once the pointer rests on one.
+//! names show under the icons, or in a tooltip once the pointer rests on one. A
+//! compact dock sits inside another capsule, such as a tool's options.
 
 use std::time::Instant;
 
@@ -17,6 +18,8 @@ use crate::{
 const PADDING: f32 = 4.0;
 /// An item's size while the names are hidden.
 const ITEM: (f32, f32) = (48.0, 40.0);
+/// An item's size in a compact dock.
+const COMPACT: (f32, f32) = (40.0, 32.0);
 /// An item's height while the names show.
 const NAMED: f32 = 52.0;
 /// Between a name and its item's edges, and between the icon and its name.
@@ -39,6 +42,8 @@ pub struct Dock {
     items: Vec<Item>,
     /// Whether the names show under the icons.
     named: bool,
+    /// Whether it's compact: smaller, unnamed and without a capsule of its own.
+    compact: bool,
     left: f32,
     top: f32,
     selected: usize,
@@ -61,12 +66,21 @@ impl Dock {
     pub const ICON: f32 = 20.0;
 
     pub fn new(items: Vec<Item>, selected: usize, named: bool) -> Self {
+        Self::build(items, selected, named, false)
+    }
+
+    pub fn compact(items: Vec<Item>, selected: usize) -> Self {
+        Self::build(items, selected, false, true)
+    }
+
+    fn build(items: Vec<Item>, selected: usize, named: bool, compact: bool) -> Self {
         let lit = (0..items.len())
             .map(|index| Animation::idle(if index == selected { 1.0 } else { 0.0 }))
             .collect();
         let mut dock = Self {
             items,
             named,
+            compact,
             left: 0.0,
             top: 0.0,
             selected,
@@ -170,6 +184,9 @@ impl Dock {
     }
 
     fn item_size(&self) -> (f32, f32) {
+        if self.compact {
+            return COMPACT;
+        }
         if !self.named {
             return ITEM;
         }
@@ -274,7 +291,9 @@ impl Control for Dock {
     fn draw(&self, painter: &Painter, now: Instant) {
         let palette = painter.palette;
         let dock = self.area();
-        painter.flyout(dock, dock.height / 2.0);
+        if !self.compact {
+            painter.flyout(dock, dock.height / 2.0);
+        }
         let radius = self.item_size().1 / 2.0;
         if let Some(index) = self.hovered {
             let color = if self.pressed == Some(index) {

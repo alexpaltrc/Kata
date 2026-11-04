@@ -100,6 +100,59 @@ impl Rect {
     }
 }
 
+/// A rectangle with rounded corners, measured from pixel edges.
+pub(crate) struct RoundedRect {
+    center: (f32, f32),
+    half: (f32, f32),
+    pub radius: f32,
+}
+
+impl RoundedRect {
+    pub fn new(rect: Rect, radius: f32) -> Self {
+        let half = (rect.width() as f32 / 2.0, rect.height() as f32 / 2.0);
+        Self {
+            center: center(rect),
+            half,
+            radius: radius.min(half.0).min(half.1),
+        }
+    }
+
+    /// How far `point` lies outside the shape; negative inside.
+    pub fn distance(&self, point: (f32, f32)) -> f32 {
+        let qx = (point.0 - self.center.0).abs() - (self.half.0 - self.radius);
+        let qy = (point.1 - self.center.1).abs() - (self.half.1 - self.radius);
+        let (ox, oy) = (qx.max(0.0), qy.max(0.0));
+        (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - self.radius
+    }
+}
+
+pub(crate) fn center(rect: Rect) -> (f32, f32) {
+    (
+        (rect.left + rect.right) as f32 / 2.0,
+        (rect.top + rect.bottom) as f32 / 2.0,
+    )
+}
+
+/// How far apart two points are. Points fall between pixels: a pixel's center is half
+/// a pixel in.
+pub(crate) fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (a.0 - b.0, a.1 - b.1);
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// How far `point` lies from the line from `a` to `b`.
+pub(crate) fn segment(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let length = dx * dx + dy * dy;
+    let along = if length > 0.0 {
+        ((point.0 - a.0) * dx + (point.1 - a.1) * dy) / length
+    } else {
+        0.0
+    };
+    let t = along.clamp(0.0, 1.0);
+    distance(point, (a.0 + t * dx, a.1 + t * dy))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

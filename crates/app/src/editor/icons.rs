@@ -90,3 +90,61 @@ pub fn zoom(graphics: &Graphics, size: f32) -> Result<Figure> {
     })?
     .traced(LINE * unit)
 }
+
+/// Formas's icon: a circle behind a square, `size` DIPs square. Filled in, both are,
+/// a little apart.
+pub fn shapes(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
+    let unit = size / GRID;
+    let disc = Figure::new(graphics, |pen| {
+        pen.circle((7.5 * unit, 7.5 * unit), 5.0 * unit)
+    })?;
+    let square = Figure::new(graphics, |pen| {
+        let side = 10.0 * unit;
+        pen.rounded(Area::new(7.5 * unit, 7.5 * unit, side, side), 2.0 * unit);
+    })?;
+    let ring = disc.traced(LINE * unit)?;
+    let frame = square.traced(LINE * unit)?;
+    let outlined = frame.and(&ring.without(&square)?)?;
+    // A line's width clear of the square's outline.
+    let clear = square.and(&square.traced(3.0 * LINE * unit)?)?;
+    let filled = square
+        .and(&frame)?
+        .and(&disc.and(&ring)?.without(&clear)?)?;
+    Ok((outlined, filled))
+}
+
+/// A rectangle figure's icon, `size` DIPs square.
+pub fn rectangle(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
+    let unit = size / GRID;
+    let area = Area::new(2.5 * unit, 4.5 * unit, 15.0 * unit, 11.0 * unit);
+    let rectangle = Figure::new(graphics, |pen| pen.rounded(area, 2.0 * unit))?;
+    let outline = rectangle.traced(LINE * unit)?;
+    let filled = rectangle.and(&outline)?;
+    Ok((outline, filled))
+}
+
+/// An ellipse figure's icon, `size` DIPs square.
+pub fn ellipse(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
+    let unit = size / GRID;
+    let ellipse = Figure::new(graphics, |pen| {
+        pen.ellipse((10.0 * unit, 10.0 * unit), (7.5 * unit, 5.5 * unit))
+    })?;
+    let outline = ellipse.traced(LINE * unit)?;
+    let filled = ellipse.and(&outline)?;
+    Ok((outline, filled))
+}
+
+/// An arrow figure's icon, pointing up and right, `size` DIPs square. It has no
+/// inside, so filled in, its line is bolder.
+pub fn arrow(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
+    let unit = size / GRID;
+    let at = |x: f32, y: f32| (x * unit, y * unit);
+    let arrow = Figure::new(graphics, |pen| {
+        pen.start(at(4.5, 15.5));
+        pen.line(at(15.5, 4.5));
+        pen.start(at(8.5, 4.5));
+        pen.line(at(15.5, 4.5));
+        pen.line(at(15.5, 11.5));
+    })?;
+    Ok((arrow.traced(LINE * unit)?, arrow.traced(1.6 * LINE * unit)?))
+}

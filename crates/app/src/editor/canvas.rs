@@ -210,6 +210,14 @@ impl View {
         )
     }
 
+    /// Where the middle of capture pixel `x`, `y` shows.
+    pub fn center(&self, (x, y): (i32, i32)) -> Point {
+        (
+            self.left + (x as f32 + 0.5) * self.zoom,
+            self.top + (y as f32 + 0.5) * self.zoom,
+        )
+    }
+
     /// The capture pixel under `point`.
     pub fn pixel(&self, (x, y): Point) -> (i32, i32) {
         (
@@ -316,8 +324,8 @@ pub fn draw_outline(painter: &Painter, area: Area, radius: f32, width: f32, colo
     painter.stroke(area.inflate(width), radius + width, width, color);
 }
 
-pub fn draw_handles(painter: &Painter, shape: Area) {
-    for center in handles(shape) {
+pub fn draw_handles(painter: &Painter, handles: &[Point]) {
+    for &center in handles {
         painter.circle(center, HANDLE, WHITE);
         painter.ring(center, HANDLE, SELECTED, painter.palette.accent);
     }

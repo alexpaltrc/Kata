@@ -56,7 +56,7 @@ impl Settings {
 /// The editor's settings, which it remembers as they change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EditorSettings {
-    /// The tool's place in the dock: blur, focus, steps.
+    /// The tool's place in the dock: blur, focus, steps, shapes.
     pub tool: usize,
     pub blur_level: usize,
     /// An index into `ZOOMS`.
@@ -65,6 +65,8 @@ pub struct EditorSettings {
     pub around: usize,
     /// An index into `STEP_SIZES`.
     pub step_size: usize,
+    /// The shapes' form: rectangle, ellipse, arrow.
+    pub form: usize,
     /// Whether every change to a capture overwrites its file.
     pub autosave: bool,
 }
@@ -72,11 +74,12 @@ pub struct EditorSettings {
 impl EditorSettings {
     pub fn load() -> Self {
         Self {
-            tool: read(w!("Tool"), 0).min(2),
+            tool: read(w!("Tool"), 0).min(3),
             blur_level: read(w!("BlurLevel"), 1).min(BLUR_LEVELS - 1),
             zoom_level: read(w!("ZoomLevel"), 0).min(ZOOMS.len() - 1),
             around: read(w!("Around"), 0).min(BLUR_LEVELS),
             step_size: read(w!("StepSize"), 1).min(STEP_SIZES.len() - 1),
+            form: read(w!("Form"), 0).min(2),
             autosave: read(w!("Autosave"), 1) != 0,
         }
     }
@@ -87,6 +90,7 @@ impl EditorSettings {
         write(w!("ZoomLevel"), self.zoom_level);
         write(w!("Around"), self.around);
         write(w!("StepSize"), self.step_size);
+        write(w!("Form"), self.form);
         write(w!("Autosave"), usize::from(self.autosave));
     }
 }

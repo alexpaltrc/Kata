@@ -4,7 +4,7 @@
 
 use std::{iter, mem, time::Instant};
 
-use kata_editor::{Shape, ZOOMS};
+use kata_editor::{Form, Shape, ZOOMS};
 use kata_ui::{
     Graphics,
     access::Element,
@@ -44,10 +44,11 @@ pub enum Tool {
     Blur,
     Focus,
     Steps,
+    Shapes,
 }
 
 impl Tool {
-    const ALL: [Self; 3] = [Self::Blur, Self::Focus, Self::Steps];
+    const ALL: [Self; 4] = [Self::Blur, Self::Focus, Self::Steps, Self::Shapes];
 
     /// The tool that adds `shape`.
     pub fn of(shape: Shape) -> Self {
@@ -55,6 +56,7 @@ impl Tool {
             Shape::Blur(_) => Self::Blur,
             Shape::Focus => Self::Focus,
             Shape::Step(_) => Self::Steps,
+            Shape::Figure(_) => Self::Shapes,
         }
     }
 
@@ -69,9 +71,13 @@ impl Tool {
             Self::Blur => &[Part::Blur],
             Self::Focus => &[Part::Zoom, Part::Around],
             Self::Steps => &[Part::StepSize],
+            Self::Shapes => &[Part::Form],
         }
     }
 }
+
+/// The shapes' forms, in their picker's order.
+const FORMS: [Form; 3] = [Form::Rectangle, Form::Ellipse, Form::Arrow];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
@@ -80,6 +86,7 @@ pub enum Part {
     Zoom,
     Around,
     StepSize,
+    Form,
     Save,
     Autosave,
     Folder,
@@ -128,6 +135,7 @@ pub struct Toolbar {
     zoom: Setting,
     around: Setting,
     step_size: Setting,
+    forms: Dock,
     save: Button,
     autosave: Toggle,
     folder: IconButton,
@@ -182,6 +190,12 @@ impl Toolbar {
             item(icons::blur(graphics, Dock::ICON)?, strings.blur)?,
             item(icons::focus(graphics, Dock::ICON)?, strings.focus)?,
             item(icons::steps(graphics, Dock::ICON)?, strings.steps)?,
+            item(icons::shapes(graphics, Dock::ICON)?, strings.shapes)?,
+        ];
+        let forms = vec![
+            item(icons::rectangle(graphics, Dock::ICON)?, strings.forms[0])?,
+            item(icons::ellipse(graphics, Dock::ICON)?, strings.forms[1])?,
+            item(icons::arrow(graphics, Dock::ICON)?, strings.forms[2])?,
         ];
         let droplet = || icons::blur(graphics, SETTING_ICON).map(|(outlined, _)| outlined);
         // Shown only while autosave is off, and only useful once there's a change.
@@ -206,6 +220,7 @@ impl Toolbar {
                 icons::steps(graphics, SETTING_ICON)?.0,
                 Slider::new(strings.step_size, step_sizes, settings.step_size),
             ),
+            forms: Dock::compact(forms, settings.form),
             save,
             autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
@@ -228,6 +243,7 @@ impl Toolbar {
             zoom_level: self.zoom.slider.value(),
             around: self.around.slider.value(),
             step_size: self.step_size.slider.value(),
+            form: self.forms.selected(),
             autosave: self.autosave.is_on(),
         }
     }
@@ -283,6 +299,8 @@ impl Toolbar {
                 }
             }
         }
+        let forms = self.options_area(Tool::Shapes);
+        self.forms.place(forms.left, forms.top, bounds);
     }
 
     pub fn part_at(&self, point: Point) -> Option<Part> {
@@ -320,6 +338,7 @@ impl Toolbar {
             Part::Zoom => &mut self.zoom.slider,
             Part::Around => &mut self.around.slider,
             Part::StepSize => &mut self.step_size.slider,
+            Part::Form => &mut self.forms,
             Part::Save => &mut self.save,
             Part::Autosave => &mut self.autosave,
             Part::Folder => &mut self.folder,
@@ -345,14 +364,15 @@ impl Toolbar {
         changed
     }
 
-    /// Whether resting the pointer where it is would show a tool's name.
+    /// Whether resting the pointer where it is would show a tool's or a form's name.
     pub fn awaits_rest(&self) -> bool {
-        self.tools.awaits_rest()
+        self.tools.awaits_rest() || self.forms.awaits_rest()
     }
 
-    /// The pointer rested at `point`. Returns whether that shows a tool's name.
+    /// The pointer rested at `point`. Returns whether that shows a tool's or a form's
+    /// name.
     pub fn rest(&mut self, point: Point) -> bool {
-        self.tools.rest(point)
+        self.tools.rest(point) || (self.tool() == Tool::Shapes && self.forms.rest(point))
     }
 
     /// Moves the keyboard focus to the next control, or the previous one if `back`.
@@ -377,8 +397,9 @@ impl Toolbar {
 
     pub fn draw(&self, painter: &Painter, now: Instant) {
         self.draw_options(painter, now);
+        let options = self.tool().options();
         for part in self.parts() {
-            if self.setting(part).is_none() {
+            if !options.contains(&part) {
                 self.get(part).draw(painter, now);
             }
         }
@@ -387,6 +408,7 @@ impl Toolbar {
             painter.focus(area, radius);
         }
         self.tools.draw_tip(painter, self.options_top(), now);
+        self.forms.draw_tip(painter, self.options_top(), now);
     }
 
     pub fn is_animating(&self, now: Instant) -> bool {
@@ -459,6 +481,17 @@ impl Toolbar {
         self.step_size.slider.set_value(size);
     }
 
+    /// The form new shapes take.
+    pub fn form(&self) -> Form {
+        FORMS[self.forms.selected()]
+    }
+
+    pub fn set_form(&mut self, form: Form) {
+        if let Some(index) = FORMS.iter().position(|&each| each == form) {
+            self.forms.select(index);
+        }
+    }
+
     pub fn autosave(&self) -> bool {
         self.autosave.is_on()
     }
@@ -489,8 +522,9 @@ impl Toolbar {
 
     fn draw_settings(&self, painter: &Painter, tool: Tool, now: Instant) {
         for &part in tool.options() {
-            if let Some(setting) = self.setting(part) {
-                setting.draw(painter, now);
+            match self.setting(part) {
+                Some(setting) => setting.draw(painter, now),
+                None => self.get(part).draw(painter, now),
             }
         }
     }
@@ -504,6 +538,10 @@ impl Toolbar {
     }
 
     fn options_width(&self, tool: Tool) -> f32 {
+        // The forms fill the capsule, with their own room around them.
+        if tool == Tool::Shapes {
+            return self.forms.width();
+        }
         let options = tool.options();
         let settings: f32 = options
             .iter()
@@ -535,6 +573,7 @@ impl Toolbar {
             Part::Zoom => &self.zoom.slider,
             Part::Around => &self.around.slider,
             Part::StepSize => &self.step_size.slider,
+            Part::Form => &self.forms,
             Part::Save => &self.save,
             Part::Autosave => &self.autosave,
             Part::Folder => &self.folder,

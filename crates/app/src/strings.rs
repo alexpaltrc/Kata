@@ -14,6 +14,9 @@ pub struct Strings {
     pub blur: &'static str,
     pub focus: &'static str,
     pub steps: &'static str,
+    pub shapes: &'static str,
+    /// What each form of the shapes is called: rectangle, ellipse and arrow.
+    pub forms: [&'static str; 3],
     pub blur_levels: [&'static str; BLUR_LEVELS],
     /// What assistive technologies call the setting that blurs around the focus, and
     /// its first step.
@@ -65,6 +68,8 @@ static SPANISH: Strings = Strings {
     blur: "Desenfocar",
     focus: "Foco",
     steps: "Pasos",
+    shapes: "Formas",
+    forms: ["Rectángulo", "Elipse", "Flecha"],
     blur_levels: ["Suave", "Medio", "Fuerte"],
     blur_around: "Desenfocar alrededor",
     no_blur: "Ninguno",
@@ -101,6 +106,8 @@ static ENGLISH: Strings = Strings {
     blur: "Blur",
     focus: "Focus",
     steps: "Steps",
+    shapes: "Shapes",
+    forms: ["Rectangle", "Ellipse", "Arrow"],
     blur_levels: ["Soft", "Medium", "Strong"],
     blur_around: "Blur around",
     no_blur: "None",

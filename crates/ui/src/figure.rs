@@ -118,12 +118,17 @@ impl Pen<'_> {
     /// Along a circle of `radius` to `to`: clockwise or not, and the long way round
     /// or the short one.
     pub fn arc(&mut self, to: Point, radius: f32, clockwise: bool, long: bool) {
+        self.oval_arc(to, (radius, radius), clockwise, long);
+    }
+
+    /// Along an ellipse of `radii`, across and down, to `to`, as `arc` goes.
+    fn oval_arc(&mut self, to: Point, (across, down): (f32, f32), clockwise: bool, long: bool) {
         unsafe {
             self.sink.AddArc(&D2D1_ARC_SEGMENT {
                 point: vector(to),
                 size: D2D_SIZE_F {
-                    width: radius,
-                    height: radius,
+                    width: across,
+                    height: down,
                 },
                 rotationAngle: 0.0,
                 sweepDirection: if clockwise {
@@ -159,10 +164,15 @@ impl Pen<'_> {
         }
     }
 
-    pub fn circle(&mut self, (x, y): Point, radius: f32) {
-        self.start((x - radius, y));
-        self.arc((x + radius, y), radius, true, false);
-        self.arc((x - radius, y), radius, true, false);
+    pub fn circle(&mut self, center: Point, radius: f32) {
+        self.ellipse(center, (radius, radius));
+    }
+
+    /// An ellipse with `radii` across and down.
+    pub fn ellipse(&mut self, (x, y): Point, radii: (f32, f32)) {
+        self.start((x - radii.0, y));
+        self.oval_arc((x + radii.0, y), radii, true, false);
+        self.oval_arc((x - radii.0, y), radii, true, false);
         self.close();
     }
 

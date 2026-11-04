@@ -3,20 +3,15 @@
 
 use Stroke::{Arc, Line};
 
+use crate::geometry::{distance, segment};
+use crate::ink::Ink;
 use crate::{Image, Rect};
 
 /// The diameter the edge, the shadow and the digits are laid out for: a usual marker
 /// at 100 %.
 pub(crate) const STEP_SIZE: f32 = 28.0;
-/// Kata's persimmon orange, as the image stores it: blue, green, red.
-const ORANGE: [f32; 3] = [34.0, 90.0, 236.0];
 /// The white edge around the disc, on a marker `STEP_SIZE` wide.
 const EDGE: f32 = 2.0;
-/// The shadow under the marker: its reach and drop on a marker `STEP_SIZE` wide, and
-/// its darkness.
-const SHADOW_REACH: f32 = 4.0;
-const SHADOW_DROP: f32 = 1.0;
-const SHADOW_DARKNESS: f32 = 0.3;
 /// The digits' height and the width of their lines, as parts of the diameter.
 const DIGIT_HEIGHT: f32 = 0.5;
 const DIGIT_LINE: f32 = 0.1;
@@ -26,7 +21,7 @@ const NUMBER_WIDTH: f32 = 0.66;
 
 /// Everything a marker in `rect` changes: its disc and shadow.
 pub fn footprint(rect: Rect) -> Rect {
-    rect.inflate(((SHADOW_REACH + SHADOW_DROP) * scale(rect)).ceil() as i32 + 1)
+    rect.inflate(ink(rect).margin())
 }
 
 /// Draws the marker of step `number` in `rect`, over what `image` shows, only inside
@@ -40,32 +35,18 @@ pub fn draw(image: &mut Image, rect: Rect, number: usize, area: Rect) {
         (rect.top + rect.bottom) as f32 / 2.0,
     );
     let radius = rect.width().min(rect.height()) as f32 / 2.0;
-    let scale = scale(rect);
-    let edge = EDGE * scale;
-    let (reach, drop) = (SHADOW_REACH * scale, SHADOW_DROP * scale);
     let number = Number::new(number, center, 2.0 * radius);
-    for y in area.top..area.bottom {
-        for x in area.left..area.right {
-            let point = (x as f32 + 0.5, y as f32 + 0.5);
-            let outside = distance(point, center) - radius;
-            let shadow = (distance(point, (center.0, center.1 + drop)) - radius).max(0.0);
-            let fade = (1.0 - shadow / reach).max(0.0);
-            let keep = 1.0 - SHADOW_DARKNESS * fade * fade;
-            let white = (0.5 - outside).clamp(0.0, 1.0);
-            let orange = (0.5 - outside - edge).clamp(0.0, 1.0);
-            let ink = if orange > 0.0 { number.ink(point) } else { 0.0 };
+    ink(rect).paint(
+        image,
+        area,
+        |point| distance(point, center) - radius,
+        |point| number.ink(point),
+    );
+}
 
-            let at = image.offset(x, y);
-            let pixel = &mut image.pixels_mut()[at..at + 3];
-            for (channel, value) in pixel.iter_mut().enumerate() {
-                let mut color = f32::from(*value) * keep;
-                color += (255.0 - color) * white;
-                color += (ORANGE[channel] - color) * orange;
-                color += (255.0 - color) * ink;
-                *value = (color + 0.5) as u8;
-            }
-        }
-    }
+/// The ink of the marker in `rect`.
+fn ink(rect: Rect) -> Ink {
+    Ink::new(scale(rect), EDGE)
 }
 
 /// A number laid out in a marker.
@@ -151,12 +132,7 @@ impl Stroke {
     /// How far `point` lies from the stroke's middle.
     fn distance(&self, point: (f32, f32)) -> f32 {
         match *self {
-            Line(a, b) => {
-                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let along = ((point.0 - a.0) * dx + (point.1 - a.1) * dy) / (dx * dx + dy * dy);
-                let t = along.clamp(0.0, 1.0);
-                distance(point, (a.0 + t * dx, a.1 + t * dy))
-            }
+            Line(a, b) => segment(point, a, b),
             Arc {
                 center,
                 radius,
@@ -166,7 +142,7 @@ impl Stroke {
                 let (dx, dy) = (point.0 - center.0, point.1 - center.1);
                 let angle = dy.atan2(dx).to_degrees();
                 if (angle - from).rem_euclid(360.0) <= to - from {
-                    (dx.hypot(dy) - radius).abs()
+                    (distance(point, center) - radius).abs()
                 } else {
                     let end = |degrees: f32| {
                         let (sin, cos) = degrees.to_radians().sin_cos();
@@ -309,8 +285,4 @@ const DIGITS: [Digit; 10] = [
 /// How much bigger than a usual marker at 100 % the one in `rect` is.
 fn scale(rect: Rect) -> f32 {
     rect.width().min(rect.height()) as f32 / STEP_SIZE
-}
-
-fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
-    (a.0 - b.0).hypot(a.1 - b.1)
 }

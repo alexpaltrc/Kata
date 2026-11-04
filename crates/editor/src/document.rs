@@ -1,3 +1,4 @@
+use crate::figure::{self, LINE, Trace};
 use crate::{Image, Rect, marker::STEP_SIZE};
 
 /// How strongly each blur level hides what's under it: Soft, Medium, Strong.
@@ -108,19 +109,83 @@ impl Step {
     }
 }
 
+/// What a figure draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Form {
+    Rectangle,
+    Ellipse,
+    Arrow,
+}
+
+/// A rectangle, an ellipse or an arrow, drawn as a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Figure {
+    pub form: Form,
+    /// The pixels the drag went from and to: an arrow's tail and head, or a
+    /// rectangle's or an ellipse's opposite corners.
+    pub from: (i32, i32),
+    pub to: (i32, i32),
+    /// How wide its line is, in pixels.
+    pub line: i32,
+}
+
+impl Figure {
+    /// How wide a figure's line is on a capture of `bounds` taken at display `scale`:
+    /// in step with the usual marker.
+    pub fn line(bounds: Rect, scale: f32) -> i32 {
+        let usual = Step::side(bounds, scale, 1) as f32;
+        (usual * LINE / STEP_SIZE).round().max(2.0) as i32
+    }
+
+    /// The pixels from one end to the other.
+    pub fn rect(&self) -> Rect {
+        let (left, top) = (self.from.0.min(self.to.0), self.from.1.min(self.to.1));
+        let (right, bottom) = (self.from.0.max(self.to.0), self.from.1.max(self.to.1));
+        Rect::new(left, top, right + 1, bottom + 1)
+    }
+
+    /// Moves the ends onto the corners of `rect` they were at, so an arrow keeps
+    /// pointing the same way.
+    pub fn fit(&mut self, rect: Rect) {
+        let ends = |from: i32, to: i32, low: i32, high: i32| {
+            if from <= to { (low, high) } else { (high, low) }
+        };
+        let (from_x, to_x) = ends(self.from.0, self.to.0, rect.left, rect.right - 1);
+        let (from_y, to_y) = ends(self.from.1, self.to.1, rect.top, rect.bottom - 1);
+        self.from = (from_x, from_y);
+        self.to = (to_x, to_y);
+    }
+
+    /// The radius of its outer corners, in pixels: only a rectangle's are round.
+    pub fn corner(&self) -> f32 {
+        match self.form {
+            Form::Rectangle => figure::outer(self).radius,
+            Form::Ellipse | Form::Arrow => 0.0,
+        }
+    }
+
+    /// Whether pixel `x`, `y` lies on the line, or up to `reach` pixels from it.
+    pub fn touches(&self, x: i32, y: i32, reach: f32) -> bool {
+        Trace::new(self).outside((x as f32 + 0.5, y as f32 + 0.5)) <= reach
+    }
+}
+
 /// Everything the user added to the image.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Edits {
     pub blurs: Vec<Blur>,
     pub focus: Option<Focus>,
+    pub figures: Vec<Figure>,
     pub steps: Vec<Step>,
 }
 
-/// One thing the user drew: a blur or a step, by its place in `Edits`, or the focus.
+/// One thing the user drew: a blur, a figure or a step, by its place in `Edits`, or
+/// the focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     Blur(usize),
     Focus,
+    Figure(usize),
     Step(usize),
 }
 
@@ -130,31 +195,28 @@ impl Edits {
         match shape {
             Shape::Blur(index) => self.blurs.get(index).map(|blur| blur.rect),
             Shape::Focus => self.focus.map(|focus| focus.spot().lit(bounds)),
+            Shape::Figure(index) => self.figures.get(index).map(Figure::rect),
             Shape::Step(index) => self.steps.get(index).map(|step| step.rect),
         }
     }
 
-    /// The topmost shape under a pixel. The steps are drawn over the focus, and the
-    /// focus over the blurs; newer steps and blurs over older ones.
-    pub fn shape_at(&self, x: i32, y: i32, bounds: Rect) -> Option<Shape> {
-        let under = |shape| {
-            self.outline(shape, bounds)
+    /// The topmost shape under a pixel. The steps are drawn over the figures, the
+    /// figures over the focus and the focus over the blurs; newer ones over older
+    /// ones. A figure is under the pixel only along its line, up to `reach` pixels
+    /// away, so what it surrounds stays reachable.
+    pub fn shape_at(&self, x: i32, y: i32, reach: f32, bounds: Rect) -> Option<Shape> {
+        let under = |shape: &Shape| {
+            self.outline(*shape, bounds)
                 .is_some_and(|rect| rect.contains(x, y))
         };
-        if let Some(step) = (0..self.steps.len())
+        let steps = (0..self.steps.len()).rev().map(Shape::Step).filter(under);
+        let figures = (0..self.figures.len())
             .rev()
-            .map(Shape::Step)
-            .find(|&shape| under(shape))
-        {
-            return Some(step);
-        }
-        if under(Shape::Focus) {
-            return Some(Shape::Focus);
-        }
-        (0..self.blurs.len())
-            .rev()
-            .map(Shape::Blur)
-            .find(|&shape| under(shape))
+            .filter(|&index| self.figures[index].touches(x, y, reach))
+            .map(Shape::Figure);
+        let focus = Some(Shape::Focus).filter(under);
+        let blurs = (0..self.blurs.len()).rev().map(Shape::Blur).filter(under);
+        steps.chain(figures).chain(focus).chain(blurs).next()
     }
 
     /// Makes `shape` cover `outline`, clipped to `bounds`.
@@ -173,6 +235,11 @@ impl Edits {
                     focus.rect = Spot::source(outline, ZOOMS[focus.level]);
                 }
             }
+            Shape::Figure(index) => {
+                if let Some(figure) = self.figures.get_mut(index) {
+                    figure.fit(outline);
+                }
+            }
             Shape::Step(index) => {
                 if let Some(step) = self.steps.get_mut(index) {
                     step.rect = outline;
@@ -187,10 +254,13 @@ impl Edits {
                 self.blurs.remove(index);
             }
             Shape::Focus => self.focus = None,
+            Shape::Figure(index) if index < self.figures.len() => {
+                self.figures.remove(index);
+            }
             Shape::Step(index) if index < self.steps.len() => {
                 self.steps.remove(index);
             }
-            Shape::Blur(_) | Shape::Step(_) => {}
+            Shape::Blur(_) | Shape::Figure(_) | Shape::Step(_) => {}
         }
     }
 
@@ -273,6 +343,7 @@ mod tests {
                 level: 1,
             }],
             focus: None,
+            figures: Vec::new(),
             steps: Vec::new(),
         }
     }
@@ -347,16 +418,17 @@ mod tests {
                 level: 3,
                 blur: None,
             }),
+            figures: Vec::new(),
             steps: vec![Step {
                 rect: Rect::new(44, 44, 60, 60),
             }],
         };
-        assert_eq!(edits.shape_at(10, 10, bounds), Some(Shape::Blur(0)));
-        assert_eq!(edits.shape_at(30, 30, bounds), Some(Shape::Blur(1)));
+        assert_eq!(edits.shape_at(10, 10, 0.0, bounds), Some(Shape::Blur(0)));
+        assert_eq!(edits.shape_at(30, 30, 0.0, bounds), Some(Shape::Blur(1)));
         // Doubled, the focus lights 35..55.
-        assert_eq!(edits.shape_at(36, 36, bounds), Some(Shape::Focus));
-        assert_eq!(edits.shape_at(50, 50, bounds), Some(Shape::Step(0)));
-        assert_eq!(edits.shape_at(90, 90, bounds), None);
+        assert_eq!(edits.shape_at(36, 36, 0.0, bounds), Some(Shape::Focus));
+        assert_eq!(edits.shape_at(50, 50, 0.0, bounds), Some(Shape::Step(0)));
+        assert_eq!(edits.shape_at(90, 90, 0.0, bounds), None);
     }
 
     #[test]
@@ -369,6 +441,7 @@ mod tests {
                 level: 2,
                 blur: Some(1),
             }),
+            figures: Vec::new(),
             steps: Vec::new(),
         };
         let outline = Rect::new(100, 60, 160, 120);
@@ -415,9 +488,52 @@ mod tests {
         edits.remove(Shape::Step(1));
         assert_eq!(edits.steps, [step(0), step(40)]);
         assert_eq!(
-            edits.shape_at(45, 5, Rect::new(0, 0, 100, 100)),
+            edits.shape_at(45, 5, 0.0, Rect::new(0, 0, 100, 100)),
             Some(Shape::Step(1))
         );
+    }
+
+    #[test]
+    fn a_figure_is_under_its_line_but_not_what_it_surrounds() {
+        let bounds = Rect::new(0, 0, 100, 100);
+        let edits = Edits {
+            blurs: vec![Blur {
+                rect: bounds,
+                level: 0,
+            }],
+            figures: vec![Figure {
+                form: Form::Rectangle,
+                from: (10, 10),
+                to: (89, 89),
+                line: 6,
+            }],
+            ..Edits::default()
+        };
+        assert_eq!(edits.shape_at(12, 50, 0.0, bounds), Some(Shape::Figure(0)));
+        assert_eq!(edits.shape_at(50, 50, 0.0, bounds), Some(Shape::Blur(0)));
+        assert_eq!(edits.shape_at(20, 50, 0.0, bounds), Some(Shape::Blur(0)));
+        assert_eq!(edits.shape_at(20, 50, 5.0, bounds), Some(Shape::Figure(0)));
+    }
+
+    #[test]
+    fn a_moved_arrow_keeps_pointing_the_same_way() {
+        let mut arrow = Figure {
+            form: Form::Arrow,
+            from: (50, 10),
+            to: (10, 40),
+            line: 6,
+        };
+        assert_eq!(arrow.rect(), Rect::new(10, 10, 51, 41));
+        arrow.fit(arrow.rect().offset(5, 20));
+        assert_eq!((arrow.from, arrow.to), ((55, 30), (15, 60)));
+    }
+
+    #[test]
+    fn figure_lines_grow_like_the_steps() {
+        let window = Rect::new(0, 0, 640, 480);
+        assert_eq!(Figure::line(window, 1.0), 6);
+        assert_eq!(Figure::line(window, 1.5), 9);
+        assert_eq!(Figure::line(Rect::new(0, 0, 3840, 2160), 1.5), 17);
     }
 
     #[test]

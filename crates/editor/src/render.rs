@@ -5,7 +5,8 @@ use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::thread;
 
-use crate::{BLUR_LEVELS, Blur, Image, Rect, Spot, Step, marker};
+use crate::geometry::{RoundedRect, center};
+use crate::{BLUR_LEVELS, Blur, Figure, Image, Rect, Spot, Step, figure, marker};
 
 /// The side of the cells each blur level averages, in pixels at 100 % scale.
 const BLUR_CELLS: [f32; BLUR_LEVELS] = [8.0, 14.0, 24.0];
@@ -39,6 +40,7 @@ pub struct Renderer {
     focus: Option<Spot>,
     /// `base` blurred all over, while the focus blurs what's around it.
     haze: Option<Haze>,
+    figures: Vec<Figure>,
     steps: Vec<Step>,
 }
 
@@ -67,6 +69,7 @@ impl Renderer {
             blurs: Vec::new(),
             focus: None,
             haze: None,
+            figures: Vec::new(),
             steps: Vec::new(),
         }
     }
@@ -75,13 +78,14 @@ impl Renderer {
         &self.output
     }
 
-    /// Redraws `image` with `blurs`, `focus` and `steps`, returning the areas that
-    /// changed.
+    /// Redraws `image` with `blurs`, `focus`, `figures` and `steps`, returning the
+    /// areas that changed.
     pub fn update(
         &mut self,
         image: &Image,
         blurs: &[Blur],
         focus: Option<Spot>,
+        figures: &[Figure],
         steps: &[Step],
     ) -> Vec<Rect> {
         let bounds = image.bounds();
@@ -145,6 +149,14 @@ impl Renderer {
         {
             dirty.push(self.footprint(spot));
         }
+        // A figure moved, came or went.
+        for at in 0..self.figures.len().max(figures.len()) {
+            let (old, new) = (self.figures.get(at), figures.get(at));
+            if old != new {
+                let parts = figure::change(old, new).into_iter();
+                dirty.extend(parts.filter_map(|part| part.intersect(&bounds)));
+            }
+        }
         // A step moved, came, went or took another number.
         for at in 0..self.steps.len().max(steps.len()) {
             let (old, new) = (self.steps.get(at), steps.get(at));
@@ -155,6 +167,7 @@ impl Renderer {
                 );
             }
         }
+        self.figures = figures.to_vec();
         self.steps = steps.to_vec();
         self.focus = focus;
         for area in &dirty {
@@ -217,13 +230,16 @@ impl Renderer {
         lit.intersect(&bounds).unwrap_or_default()
     }
 
-    /// Redraws `area` of the output: `base` in the focus's light, with the steps on
-    /// top.
+    /// Redraws `area` of the output: `base` in the focus's light, with the figures and
+    /// then the steps on top.
     fn compose(&mut self, area: Rect) {
         let Some(area) = area.intersect(&self.base.bounds()) else {
             return;
         };
         self.light(area);
+        for figure in &self.figures {
+            figure::draw(&mut self.output, figure, area);
+        }
         for (at, step) in self.steps.iter().enumerate() {
             marker::draw(&mut self.output, step.rect, at + 1, area);
         }
@@ -434,39 +450,6 @@ fn dim(from: &[[u8; 4]], to: &mut [[u8; 4]]) {
     }
 }
 
-fn center(rect: Rect) -> (f32, f32) {
-    (
-        (rect.left + rect.right) as f32 / 2.0,
-        (rect.top + rect.bottom) as f32 / 2.0,
-    )
-}
-
-/// A rectangle with rounded corners, measured from pixel edges.
-struct RoundedRect {
-    center: (f32, f32),
-    half: (f32, f32),
-    radius: f32,
-}
-
-impl RoundedRect {
-    fn new(rect: Rect, radius: f32) -> Self {
-        let half = (rect.width() as f32 / 2.0, rect.height() as f32 / 2.0);
-        Self {
-            center: center(rect),
-            half,
-            radius: radius.min(half.0).min(half.1),
-        }
-    }
-
-    /// How far `point` lies outside the shape; negative inside.
-    fn distance(&self, point: (f32, f32)) -> f32 {
-        let qx = (point.0 - self.center.0).abs() - (self.half.0 - self.radius);
-        let qy = (point.1 - self.center.1).abs() - (self.half.1 - self.radius);
-        let (ox, oy) = (qx.max(0.0), qy.max(0.0));
-        (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - self.radius
-    }
-}
-
 /// `area` of `image`, blurred beyond recovery: every `cell` × `cell` square is
 /// averaged into one color, and those colors are blended smoothly into each other.
 fn blurred(image: &Image, area: Rect, cell: usize, seed: u64, cores: usize) -> Image {
@@ -582,7 +565,7 @@ fn noise(seed: u64, (column, row): (usize, usize), channel: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ZOOMS;
+    use crate::{Form, ZOOMS};
 
     /// A 64x48 image of 1-pixel black and white stripes: the hardest thing to hide.
     fn stripes() -> Image {
@@ -608,7 +591,7 @@ mod tests {
     fn nothing_to_draw_shows_the_capture() {
         let image = stripes();
         let mut renderer = Renderer::new(&image, 1.0);
-        assert!(renderer.update(&image, &[], None, &[]).is_empty());
+        assert!(renderer.update(&image, &[], None, &[], &[]).is_empty());
         assert_eq!(renderer.output(), &image);
     }
 
@@ -617,7 +600,7 @@ mod tests {
         let image = stripes();
         let mut renderer = Renderer::new(&image, 1.0);
         let rect = Rect::new(8, 8, 40, 40);
-        renderer.update(&image, &[blur(rect)], None, &[]);
+        renderer.update(&image, &[blur(rect)], None, &[], &[]);
         let output = renderer.output();
         for y in 0..48 {
             for x in 0..64 {
@@ -640,7 +623,7 @@ mod tests {
             zoom: 1.0,
             blur: None,
         };
-        renderer.update(&image, &[], Some(focus), &[]);
+        renderer.update(&image, &[], Some(focus), &[], &[]);
         let output = renderer.output();
         assert_eq!(pixel(output, 1, 1), [128, 128, 128, 255]);
         assert_eq!(pixel(output, 30, 20), pixel(&image, 30, 20));
@@ -656,7 +639,7 @@ mod tests {
             zoom: 1.0,
             blur: Some(0),
         };
-        renderer.update(&image, &[], Some(focus), &[]);
+        renderer.update(&image, &[], Some(focus), &[], &[]);
         let output = renderer.output();
         // Away from the focus, the stripes blend into a dimmed gray.
         for x in 0..4 {
@@ -678,7 +661,7 @@ mod tests {
             zoom: ZOOMS[3],
             blur: None,
         };
-        renderer.update(&image, &[], Some(focus), &[]);
+        renderer.update(&image, &[], Some(focus), &[], &[]);
         // The lit area spans columns 16..48 around the same center, and each column
         // shows half a column of the capture: 2 levels instead of 4.
         let output = renderer.output();
@@ -699,8 +682,26 @@ mod tests {
             zoom,
             blur: Some(level),
         };
-        let frames: [(&[Blur], Option<Spot>, &[Step]); 10] = [
-            (&[blur(Rect::new(0, 0, 20, 20))], None, &[mark(30, 4)]),
+        let figure = |form, from, to| Figure {
+            form,
+            from,
+            to,
+            line: 4,
+        };
+        let (square, ring, arrow) = (
+            figure(Form::Rectangle, (4, 4), (40, 30)),
+            figure(Form::Ellipse, (20, 8), (60, 44)),
+            figure(Form::Arrow, (60, 40), (24, 12)),
+        );
+        // Each frame's blurs, focus, figures and steps.
+        type Frame<'a> = (&'a [Blur], Option<Spot>, &'a [Figure], &'a [Step]);
+        let frames: [Frame; 10] = [
+            (
+                &[blur(Rect::new(0, 0, 20, 20))],
+                None,
+                &[square],
+                &[mark(30, 4)],
+            ),
             (
                 &[
                     blur(Rect::new(0, 0, 20, 20)),
@@ -711,6 +712,7 @@ mod tests {
                     zoom: 1.5,
                     blur: None,
                 }),
+                &[square, arrow],
                 &[mark(30, 4), mark(2, 30)],
             ),
             (
@@ -720,6 +722,7 @@ mod tests {
                     zoom: 2.0,
                     blur: None,
                 }),
+                &[ring, arrow],
                 &[mark(2, 30)],
             ),
             (
@@ -732,22 +735,43 @@ mod tests {
                     zoom: 1.0,
                     blur: None,
                 }),
+                &[figure(Form::Arrow, (8, 40), (8, 40)), ring],
                 &[mark(2, 30), mark(40, 30)],
             ),
             // A blur moving away from the image's corner, under a haze.
-            (&[blur(Rect::new(0, 0, 20, 20))], Some(hazy(1.0, 0)), &[]),
-            (&[blur(Rect::new(40, 30, 52, 42))], Some(hazy(1.0, 0)), &[]),
-            (&[blur(Rect::new(44, 30, 56, 42))], Some(hazy(1.5, 0)), &[]),
-            (&[blur(Rect::new(44, 30, 56, 42))], Some(hazy(1.5, 2)), &[]),
-            (&[], None, &[mark(40, 30)]),
-            (&[], None, &[]),
+            (
+                &[blur(Rect::new(0, 0, 20, 20))],
+                Some(hazy(1.0, 0)),
+                &[ring],
+                &[],
+            ),
+            (
+                &[blur(Rect::new(40, 30, 52, 42))],
+                Some(hazy(1.0, 0)),
+                &[ring],
+                &[],
+            ),
+            (
+                &[blur(Rect::new(44, 30, 56, 42))],
+                Some(hazy(1.5, 0)),
+                &[],
+                &[],
+            ),
+            (
+                &[blur(Rect::new(44, 30, 56, 42))],
+                Some(hazy(1.5, 2)),
+                &[arrow],
+                &[],
+            ),
+            (&[], None, &[arrow], &[mark(40, 30)]),
+            (&[], None, &[], &[]),
         ];
         let mut renderer = Renderer::new(&image, 1.0);
-        for (blurs, focus, steps) in frames {
-            renderer.update(&image, blurs, focus, steps);
+        for (blurs, focus, figures, steps) in frames {
+            renderer.update(&image, blurs, focus, figures, steps);
             let mut fresh = Renderer::new(&image, 1.0);
             fresh.seed = renderer.seed;
-            fresh.update(&image, blurs, focus, steps);
+            fresh.update(&image, blurs, focus, figures, steps);
             assert_eq!(renderer.output(), fresh.output());
         }
         assert_eq!(renderer.output(), &image);
@@ -759,13 +783,42 @@ mod tests {
         let image = Image::new(64, 64, black);
         let mut renderer = Renderer::new(&image, 1.0);
         let rect = Rect::new(18, 18, 46, 46);
-        renderer.update(&image, &[], None, &[Step { rect }]);
+        renderer.update(&image, &[], None, &[], &[Step { rect }]);
         let output = renderer.output();
         // The edge, the disc beside the number, and the 1's stem.
         assert_eq!(pixel(output, 32, 19), [255, 255, 255, 255]);
         assert_eq!(pixel(output, 22, 32), [34, 90, 236, 255]);
         assert_eq!(pixel(output, 33, 32), [255, 255, 255, 255]);
         assert_eq!(pixel(output, 2, 2), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_figure_is_an_orange_line_edged_in_white() {
+        let black = [0, 0, 0, 255].repeat(64 * 64);
+        let image = Image::new(64, 64, black);
+        let mut renderer = Renderer::new(&image, 1.0);
+        let figure = |form, from, to| Figure {
+            form,
+            from,
+            to,
+            line: 6,
+        };
+        let square = figure(Form::Rectangle, (8, 8), (55, 55));
+        renderer.update(&image, &[], None, &[square], &[]);
+        let output = renderer.output();
+        // Across the left side: the edge, the orange, the edge, and the hollow.
+        assert_eq!(pixel(output, 8, 32), [255, 255, 255, 255]);
+        assert_eq!(pixel(output, 10, 32), [34, 90, 236, 255]);
+        assert_eq!(pixel(output, 13, 32), [255, 255, 255, 255]);
+        assert_eq!(pixel(output, 32, 32), [0, 0, 0, 255]);
+        assert_eq!(pixel(output, 2, 32), [0, 0, 0, 255]);
+        // An arrow's ink stops where the drag did: its edge runs through that pixel.
+        let arrow = figure(Form::Arrow, (8, 32), (50, 32));
+        renderer.update(&image, &[], None, &[arrow], &[]);
+        let output = renderer.output();
+        assert_eq!(pixel(output, 30, 32), [34, 90, 236, 255]);
+        assert_eq!(pixel(output, 50, 32), [128, 128, 128, 255]);
+        assert_eq!(pixel(output, 51, 32), [0, 0, 0, 255]);
     }
 
     #[test]

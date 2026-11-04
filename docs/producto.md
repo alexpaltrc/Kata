@@ -11,19 +11,20 @@
 
 ## Editar
 
-Tres herramientas, como iconos en una barra centrada abajo. Encima, en otra cápsula, los niveles de la herramienta activa. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
+Cuatro herramientas, como iconos en una barra centrada abajo. Encima, en otra cápsula, los niveles de la herramienta activa. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
 
 1. **Desenfocar.** Se arrastra para cubrir uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
 2. **Foco.** Se arrastra sobre un área: queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 %, 200 %. **Desenfocar alrededor:** Ninguno, Suave, Medio o Fuerte, los mismos niveles de Desenfocar, aplicados a todo lo que queda fuera del foco.
 3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco. Borrar un paso renumera los que siguen. Su tamaño se ajusta solo a la captura, para que se lea aunque la captura se achique en un documento. **Tamaño:** Pequeño, Mediano o Grande, el mismo para todos los pasos: cambiarlo cambia los que ya están.
+4. **Formas.** Se arrastra para dibujar un rectángulo, una elipse o una flecha: solo el contorno, en el naranja de los pasos, con el grosor ajustado a la captura. **Forma:** Rectángulo, Elipse o Flecha, elegida con su icono en la cápsula de encima.
 
 Reglas:
 
 - Cada nivel es un slider con pocos pasos, que recuerda el último valor usado.
-- Un clic selecciona un rectángulo o un paso: se mueve arrastrándolo, un rectángulo se redimensiona desde sus esquinas, y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover un slider cambia lo seleccionado.
+- Un clic selecciona un rectángulo, un paso o una forma (una forma, sobre su línea, para no tapar lo que rodea): se mueve arrastrándolo, un rectángulo o una forma se redimensiona desde sus esquinas, una flecha desde sus dos puntas, y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover un slider o elegir otra forma cambia lo seleccionado.
 - Un rectángulo que cubre toda la captura no tiene adónde moverse: arrastrar sobre él dibuja uno nuevo con la herramienta activa.
 - **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
-- `1`, `2` y `3` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
+- `1`, `2`, `3` y `4` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
 - La herramienta, los niveles y el Autoguardado se recuerdan para la siguiente captura.
 
 ## Guardado y portapapeles, sin pensar

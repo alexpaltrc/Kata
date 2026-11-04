@@ -1,6 +1,6 @@
 //! The editor: a window showing a capture, where the user blurs parts of it, puts one
-//! in focus and numbers the steps to follow. Each change reaches the clipboard and,
-//! with autosave on, the capture's file.
+//! in focus, numbers the steps to follow and points things out with shapes. Each
+//! change reaches the clipboard and, with autosave on, the capture's file.
 
 mod canvas;
 mod icons;
@@ -13,8 +13,8 @@ use std::{
 };
 
 use kata_editor::{
-    Blur, Document, Edits, FOCUS_CORNER, Focus, Image, Rect, Renderer, STEP_SIZES, Shape, Spot,
-    Step, ZOOMS,
+    Blur, Document, Edits, FOCUS_CORNER, Figure, Focus, Form, Image, Rect, Renderer, STEP_SIZES,
+    Shape, Spot, Step, ZOOMS,
 };
 use kata_ui::{
     Graphics,
@@ -39,9 +39,9 @@ use windows::{
             Controls::{WM_MOUSEHOVER, WM_MOUSELEAVE},
             HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
-                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_BACK, VK_C,
-                VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
-                VK_S, VK_SHIFT, VK_TAB, VK_Y, VK_Z,
+                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_4, VK_BACK,
+                VK_C, VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2,
+                VK_NUMPAD3, VK_NUMPAD4, VK_S, VK_SHIFT, VK_TAB, VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
@@ -238,12 +238,12 @@ fn min_size(toolbar: &Toolbar) -> (f32, f32) {
     )
 }
 
-/// `rect`, at least a pixel wide and high.
 /// Whether `shape` has handles to resize it: steps keep their size.
 fn resizable(shape: Shape) -> bool {
     !matches!(shape, Shape::Step(_))
 }
 
+/// `rect`, at least a pixel wide and high.
 fn solid(rect: Rect) -> Rect {
     Rect::new(
         rect.left,
@@ -275,6 +275,13 @@ enum Gesture {
     },
     /// Resizing a shape, whose `anchor` corner stays in place.
     Resize { shape: Shape, anchor: (i32, i32) },
+    /// Moving an arrow's head, or its tail, from `end`, grabbed at `grab`.
+    Aim {
+        index: usize,
+        head: bool,
+        end: (i32, i32),
+        grab: (i32, i32),
+    },
     /// Pressing the selected shape's remove chip.
     Remove,
 }
@@ -423,9 +430,12 @@ impl Editor {
         let point = self.pointer();
         let cursor = if self.toolbar.covers(point) || self.chip_at(point) {
             IDC_ARROW
-        } else if let Some(corner) = self.handle_at(point) {
-            // The top-left and bottom-right corners pull along one diagonal.
-            if corner % 2 == 0 {
+        } else if let Some(handle) = self.handle_at(point) {
+            // An arrow's ends go anywhere, and the top-left and bottom-right corners
+            // pull along one diagonal.
+            if self.selected.and_then(|shape| self.arrow(shape)).is_some() {
+                IDC_SIZEALL
+            } else if handle % 2 == 0 {
                 IDC_SIZENWSE
             } else {
                 IDC_SIZENESW
@@ -498,7 +508,7 @@ impl Editor {
         let bounds = self.bounds();
         let gesture = if let Some(part) = self.toolbar.part_at(point) {
             if self.toolbar.control(part).press(point) {
-                self.slider_changed(part);
+                self.option_changed(part);
             }
             Gesture::Control(part)
         } else if self.toolbar.covers(point) {
@@ -506,18 +516,32 @@ impl Editor {
         } else if self.chip_at(point) {
             Gesture::Remove
         } else if let Some(shape) = self.selected
-            && let Some(corner) = self.handle_at(point)
-            && let Some(outline) = self.edits.outline(shape, bounds)
+            && let Some(handle) = self.handle_at(point)
         {
-            let corners = canvas::corners(outline.left, outline.top, outline.right, outline.bottom);
-            Gesture::Resize {
-                shape,
-                anchor: corners[(corner + 2) % 4],
+            if let Some((index, arrow)) = self.arrow(shape) {
+                // The first handle is on the tail, the second on the head.
+                let head = handle == 1;
+                Gesture::Aim {
+                    index,
+                    head,
+                    end: if head { arrow.to } else { arrow.from },
+                    grab: self.view.pixel(point),
+                }
+            } else {
+                let Some(outline) = self.edits.outline(shape, bounds) else {
+                    return;
+                };
+                let corners =
+                    canvas::corners(outline.left, outline.top, outline.right, outline.bottom);
+                Gesture::Resize {
+                    shape,
+                    anchor: corners[(handle + 2) % 4],
+                }
             }
         } else if self.places_step(point) {
             // A click places the next step there, and dragging carries it along.
             let grab = self.view.edge(point, bounds);
-            let shape = self.add(grab);
+            let shape = self.add(point);
             let Some(outline) = self.edits.outline(shape, bounds) else {
                 return;
             };
@@ -555,7 +579,7 @@ impl Editor {
             Gesture::Control(part) => {
                 let changed = self.toolbar.control(part).drag(point);
                 if changed {
-                    self.slider_changed(part);
+                    self.option_changed(part);
                 }
                 changed
             }
@@ -575,7 +599,7 @@ impl Editor {
                     // Steps are placed with a click, not drawn.
                     None if self.toolbar.tool() == Tool::Steps => return false,
                     None => Gesture::Draw {
-                        shape: self.add(start),
+                        shape: self.add(at),
                         start,
                     },
                 });
@@ -588,6 +612,13 @@ impl Editor {
                     Shape::Focus => {
                         if let Some(focus) = &mut self.edits.focus {
                             focus.rect = rect;
+                        }
+                    }
+                    // A figure runs from pixel to pixel.
+                    Shape::Figure(index) => {
+                        let to = self.pixel(point);
+                        if let Some(figure) = self.edits.figures.get_mut(index) {
+                            figure.to = to;
                         }
                     }
                     Shape::Blur(_) | Shape::Step(_) => self.edits.reshape(shape, rect, bounds),
@@ -608,6 +639,22 @@ impl Editor {
             Gesture::Resize { shape, anchor } => {
                 let rect = solid(Rect::from_corners(anchor, edge)).moved_inside(&bounds);
                 self.edits.reshape(shape, rect, bounds);
+                true
+            }
+            Gesture::Aim {
+                index,
+                head,
+                end,
+                grab,
+            } => {
+                let (x, y) = self.view.pixel(point);
+                let moved = (
+                    (end.0 + x - grab.0).clamp(bounds.left, bounds.right - 1),
+                    (end.1 + y - grab.1).clamp(bounds.top, bounds.bottom - 1),
+                );
+                if let Some(arrow) = self.edits.figures.get_mut(index) {
+                    *if head { &mut arrow.to } else { &mut arrow.from } = moved;
+                }
                 true
             }
             Gesture::Remove => {
@@ -639,6 +686,18 @@ impl Editor {
                     let zoom = ZOOMS[focus.level];
                     self.zoom = Animation::new(1.0, zoom, motion::NORMAL, Easing::DECELERATE);
                 }
+            }
+            // A figure needs its ends apart.
+            Gesture::Draw {
+                shape: Shape::Figure(index),
+                ..
+            } if self
+                .edits
+                .figures
+                .get(index)
+                .is_some_and(|figure| figure.from == figure.to) =>
+            {
+                self.remove_selected();
             }
             Gesture::Remove if self.chip_at(point) => self.remove_selected(),
             _ => {}
@@ -677,6 +736,7 @@ impl Editor {
             VK_1 | VK_NUMPAD1 if !ctrl => self.choose_tool(Tool::Blur),
             VK_2 | VK_NUMPAD2 if !ctrl => self.choose_tool(Tool::Focus),
             VK_3 | VK_NUMPAD3 if !ctrl => self.choose_tool(Tool::Steps),
+            VK_4 | VK_NUMPAD4 if !ctrl => self.choose_tool(Tool::Shapes),
             VK_Z if ctrl && shift => self.step(Document::redo),
             VK_Y if ctrl => self.step(Document::redo),
             VK_Z if ctrl => self.step(Document::undo),
@@ -714,9 +774,10 @@ impl Editor {
             || ((to.1 - from.1) * self.scale).abs() > y as f32
     }
 
-    /// Starts a shape of the current tool at `start`, selected: a step centered on it.
-    fn add(&mut self, start: (i32, i32)) -> Shape {
+    /// Starts a shape of the current tool at `at`, selected: a step centered on it.
+    fn add(&mut self, at: Point) -> Shape {
         let bounds = self.bounds();
+        let start = self.view.edge(at, bounds);
         let rect = solid(Rect::new(start.0, start.1, start.0, start.1)).moved_inside(&bounds);
         let shape = match self.toolbar.tool() {
             Tool::Blur => {
@@ -739,6 +800,16 @@ impl Editor {
                 let side = self.step_side(self.toolbar.step_size());
                 self.edits.steps.push(Step::new(start, side, bounds));
                 Shape::Step(self.edits.steps.len() - 1)
+            }
+            Tool::Shapes => {
+                let end = self.pixel(at);
+                self.edits.figures.push(Figure {
+                    form: self.toolbar.form(),
+                    from: end,
+                    to: end,
+                    line: Figure::line(bounds, self.capture_scale),
+                });
+                Shape::Figure(self.edits.figures.len() - 1)
             }
         };
         self.selected = Some(shape);
@@ -771,6 +842,12 @@ impl Editor {
                 }
             }
             Some(Shape::Step(_)) => self.toolbar.select_tool(Tool::Steps),
+            Some(Shape::Figure(index)) => {
+                self.toolbar.select_tool(Tool::Shapes);
+                if let Some(figure) = self.edits.figures.get(index) {
+                    self.toolbar.set_form(figure.form);
+                }
+            }
             None => {}
         }
     }
@@ -792,8 +869,8 @@ impl Editor {
         Step::side(self.bounds(), self.capture_scale, size)
     }
 
-    /// Gives the selected shape a slider's new level. The steps all take the new size.
-    fn slider_changed(&mut self, part: Part) {
+    /// Gives the selected shape an option's new value. The steps all take the new size.
+    fn option_changed(&mut self, part: Part) {
         match (part, self.selected) {
             (Part::StepSize, _) => {
                 let side = self.step_side(self.toolbar.step_size());
@@ -816,6 +893,11 @@ impl Editor {
             (Part::Around, Some(Shape::Focus)) => {
                 if let Some(focus) = &mut self.edits.focus {
                     focus.blur = self.toolbar.around();
+                }
+            }
+            (Part::Form, Some(Shape::Figure(index))) => {
+                if let Some(figure) = self.edits.figures.get_mut(index) {
+                    figure.form = self.toolbar.form();
                 }
             }
             _ => {}
@@ -843,7 +925,9 @@ impl Editor {
                     self.save();
                 }
             }
-            Part::Blur | Part::Zoom | Part::Around | Part::StepSize => self.slider_changed(part),
+            Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form => {
+                self.option_changed(part)
+            }
             Part::Folder => self.output.show(),
         }
     }
@@ -928,9 +1012,13 @@ impl Editor {
     fn render_document(&mut self) {
         let edits = self.document.edits();
         let spot = edits.focus.map(|focus| focus.spot());
-        let changed = self
-            .renderer
-            .update(self.document.image(), &edits.blurs, spot, &edits.steps);
+        let changed = self.renderer.update(
+            self.document.image(),
+            &edits.blurs,
+            spot,
+            &edits.figures,
+            &edits.steps,
+        );
         if !changed.is_empty() {
             // The window was showing something else, such as a zoom halfway.
             self.stale.extend(changed);
@@ -959,6 +1047,7 @@ impl Editor {
             self.document.image(),
             &self.edits.blurs,
             spot,
+            &self.edits.figures,
             &self.edits.steps,
         );
         self.stale.extend(changed);
@@ -1019,8 +1108,11 @@ impl Editor {
             border,
             self.palette.card_stroke,
         );
+        // An arrow shows no outline: its ends' handles say enough.
+        let ringed = |shape: Shape| self.arrow(shape).is_none();
         if self.gesture.is_none()
             && let Some(shape) = self.hovered.filter(|&shape| Some(shape) != self.selected)
+            && ringed(shape)
             && let Some(area) = self.shape_area(shape, now)
         {
             let color = faded(WHITE, 0.9);
@@ -1029,11 +1121,11 @@ impl Editor {
         if let Some(shape) = self.selected
             && let Some(area) = self.shape_area(shape, now)
         {
-            let accent = self.palette.accent;
-            canvas::draw_outline(painter, area, self.radius(shape), canvas::SELECTED, accent);
-            if resizable(shape) {
-                canvas::draw_handles(painter, area);
+            if ringed(shape) {
+                let accent = self.palette.accent;
+                canvas::draw_outline(painter, area, self.radius(shape), canvas::SELECTED, accent);
             }
+            canvas::draw_handles(painter, &self.handles(shape, area));
             if matches!(self.gesture, None | Some(Gesture::Remove))
                 && let Some(center) = canvas::chip(area, self.window())
             {
@@ -1105,6 +1197,11 @@ impl Editor {
         match shape {
             Shape::Blur(_) => 0.0,
             Shape::Focus => FOCUS_CORNER * self.capture_scale * self.view.zoom,
+            Shape::Figure(index) => self
+                .edits
+                .figures
+                .get(index)
+                .map_or(0.0, |figure| figure.corner() * self.view.zoom),
             Shape::Step(index) => self
                 .edits
                 .steps
@@ -1113,17 +1210,49 @@ impl Editor {
         }
     }
 
-    /// The topmost shape under `point`. The steps' tool reaches only steps, so new ones
-    /// go over the other shapes.
+    /// The topmost shape under `point`, or with a figure's line within reach. The
+    /// steps' tool reaches only steps, so new ones go over the other shapes.
     fn shape_at(&self, point: Point) -> Option<Shape> {
         if point.1 < TITLE_BAR || self.toolbar.covers(point) {
             return None;
         }
         let (x, y) = self.view.pixel(point);
         let tool = self.toolbar.tool();
+        let reach = HANDLE_REACH / self.view.zoom;
         self.edits
-            .shape_at(x, y, self.bounds())
+            .shape_at(x, y, reach, self.bounds())
             .filter(|&shape| tool != Tool::Steps || Tool::of(shape) == tool)
+    }
+
+    /// The arrow `shape` is, if it's one, and its place among the figures.
+    fn arrow(&self, shape: Shape) -> Option<(usize, Figure)> {
+        let Shape::Figure(index) = shape else {
+            return None;
+        };
+        let figure = *self.edits.figures.get(index)?;
+        (figure.form == Form::Arrow).then_some((index, figure))
+    }
+
+    /// Where the handles of `shape`, showing in `area`, are: on an arrow's tail and
+    /// head, or on the corners of the other shapes that resize.
+    fn handles(&self, shape: Shape, area: Area) -> Vec<Point> {
+        if let Some((_, arrow)) = self.arrow(shape) {
+            vec![self.view.center(arrow.from), self.view.center(arrow.to)]
+        } else if resizable(shape) {
+            canvas::handles(area).to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The capture pixel under `point`, or the nearest one off the capture.
+    fn pixel(&self, point: Point) -> (i32, i32) {
+        let bounds = self.bounds();
+        let (x, y) = self.view.pixel(point);
+        (
+            x.clamp(bounds.left, bounds.right - 1),
+            y.clamp(bounds.top, bounds.bottom - 1),
+        )
     }
 
     /// Whether pressing at `point` places a step: with the steps' tool, on the capture,
@@ -1135,12 +1264,11 @@ impl Editor {
             && self.shape_at(point).is_none()
     }
 
-    /// The selected shape's resize handle under `point`, numbered clockwise from the
-    /// top-left.
+    /// The selected shape's handle under `point`, numbered as `handles` lists them.
     fn handle_at(&self, point: Point) -> Option<usize> {
-        let shape = self.selected.filter(|&shape| resizable(shape))?;
+        let shape = self.selected?;
         let area = self.shape_area(shape, Instant::now())?;
-        canvas::handles(area)
+        self.handles(shape, area)
             .iter()
             .position(|&handle| canvas::distance(handle, point) <= HANDLE_REACH)
     }
