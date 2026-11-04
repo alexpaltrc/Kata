@@ -1,9 +1,14 @@
-use crate::{Image, Rect};
+use crate::{Image, Rect, marker::STEP_SIZE};
 
 /// How strongly each blur level hides what's under it: Soft, Medium, Strong.
 pub const BLUR_LEVELS: usize = 3;
 /// How much each focus level magnifies.
 pub const ZOOMS: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
+/// How big each step size draws the markers, against the usual: Small, Medium, Large.
+pub const STEP_SIZES: [f32; 3] = [0.75, 1.0, 1.35];
+/// The least a usual marker spans of the capture's shorter side, so it still reads once
+/// a big capture shrinks to fit a page.
+const STEP_SHARE: f32 = 0.036;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Blur {
@@ -75,6 +80,32 @@ impl Spot {
 pub struct Step {
     /// The square its disc fills.
     pub rect: Rect,
+}
+
+impl Step {
+    /// A step `side` pixels wide, centered on `center` and moved inside `bounds`.
+    pub fn new(center: (i32, i32), side: i32, bounds: Rect) -> Self {
+        let (left, top) = (center.0 - side / 2, center.1 - side / 2);
+        Self {
+            rect: Rect::new(left, top, left + side, top + side).moved_inside(&bounds),
+        }
+    }
+
+    /// How wide a step at `size`, an index into `STEP_SIZES`, is on a capture of
+    /// `bounds` taken at display `scale`: as big as it'd look on that display, or
+    /// bigger on a big capture.
+    pub fn side(bounds: Rect, scale: f32, size: usize) -> i32 {
+        let short = bounds.width().min(bounds.height());
+        let usual = (STEP_SIZE * scale).max(short as f32 * STEP_SHARE);
+        ((usual * STEP_SIZES[size]).round() as i32).clamp(1, short.max(1))
+    }
+
+    fn center(&self) -> (i32, i32) {
+        (
+            (self.rect.left + self.rect.right) / 2,
+            (self.rect.top + self.rect.bottom) / 2,
+        )
+    }
 }
 
 /// Everything the user added to the image.
@@ -160,6 +191,13 @@ impl Edits {
                 self.steps.remove(index);
             }
             Shape::Blur(_) | Shape::Step(_) => {}
+        }
+    }
+
+    /// Makes every step `side` pixels wide, about its center, inside `bounds`.
+    pub fn resize_steps(&mut self, side: i32, bounds: Rect) {
+        for step in &mut self.steps {
+            *step = Step::new(step.center(), side, bounds);
         }
     }
 }
@@ -379,6 +417,40 @@ mod tests {
         assert_eq!(
             edits.shape_at(45, 5, Rect::new(0, 0, 100, 100)),
             Some(Shape::Step(1))
+        );
+    }
+
+    #[test]
+    fn steps_grow_with_the_display_and_with_big_captures() {
+        let window = Rect::new(0, 0, 640, 480);
+        assert_eq!(Step::side(window, 1.0, 1), 28);
+        assert_eq!(Step::side(window, 1.5, 1), 42);
+        assert_eq!(Step::side(window, 1.0, 0), 21);
+        let screen = Rect::new(0, 0, 3840, 2160);
+        assert_eq!(Step::side(screen, 1.5, 1), 78);
+        assert_eq!(Step::side(screen, 1.5, 2), 105);
+        assert_eq!(Step::side(Rect::new(0, 0, 400, 12), 1.0, 2), 12);
+    }
+
+    #[test]
+    fn resizing_the_steps_keeps_their_centers_inside() {
+        let bounds = Rect::new(0, 0, 100, 100);
+        let mut edits = Edits {
+            steps: vec![
+                Step::new((50, 50), 20, bounds),
+                Step::new((5, 5), 10, bounds),
+            ],
+            ..Edits::default()
+        };
+        edits.resize_steps(30, bounds);
+        assert_eq!(
+            edits.steps,
+            [
+                Step::new((50, 50), 30, bounds),
+                Step {
+                    rect: Rect::new(0, 0, 30, 30)
+                },
+            ]
         );
     }
 

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use kata_editor::{BLUR_LEVELS, ZOOMS};
+use kata_editor::{BLUR_LEVELS, STEP_SIZES, ZOOMS};
 use windows::core::{PCWSTR, w};
 
 use crate::{hotkey::Hotkey, registry};
@@ -63,6 +63,8 @@ pub struct EditorSettings {
     pub zoom_level: usize,
     /// How the focus blurs around it: 0 for not at all, or the blur level plus 1.
     pub around: usize,
+    /// An index into `STEP_SIZES`.
+    pub step_size: usize,
     /// Whether every change to a capture overwrites its file.
     pub autosave: bool,
 }
@@ -74,6 +76,7 @@ impl EditorSettings {
             blur_level: read(w!("BlurLevel"), 1).min(BLUR_LEVELS - 1),
             zoom_level: read(w!("ZoomLevel"), 0).min(ZOOMS.len() - 1),
             around: read(w!("Around"), 0).min(BLUR_LEVELS),
+            step_size: read(w!("StepSize"), 1).min(STEP_SIZES.len() - 1),
             autosave: read(w!("Autosave"), 1) != 0,
         }
     }
@@ -83,6 +86,7 @@ impl EditorSettings {
         write(w!("BlurLevel"), self.blur_level);
         write(w!("ZoomLevel"), self.zoom_level);
         write(w!("Around"), self.around);
+        write(w!("StepSize"), self.step_size);
         write(w!("Autosave"), usize::from(self.autosave));
     }
 }

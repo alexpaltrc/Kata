@@ -13,7 +13,7 @@ use std::{
 };
 
 use kata_editor::{
-    Blur, Document, Edits, FOCUS_CORNER, Focus, Image, Rect, Renderer, STEP_SIZE, Shape, Spot,
+    Blur, Document, Edits, FOCUS_CORNER, Focus, Image, Rect, Renderer, STEP_SIZES, Shape, Spot,
     Step, ZOOMS,
 };
 use kata_ui::{
@@ -736,11 +736,8 @@ impl Editor {
                 Shape::Focus
             }
             Tool::Steps => {
-                // As big as on the display it was taken on.
-                let side = (STEP_SIZE * self.capture_scale).round() as i32;
-                let (left, top) = (start.0 - side / 2, start.1 - side / 2);
-                let rect = Rect::new(left, top, left + side, top + side).moved_inside(&bounds);
-                self.edits.steps.push(Step { rect });
+                let side = self.step_side(self.toolbar.step_size());
+                self.edits.steps.push(Step::new(start, side, bounds));
                 Shape::Step(self.edits.steps.len() - 1)
             }
         };
@@ -790,9 +787,18 @@ impl Editor {
         self.selected = self.selected.filter(|&shape| Tool::of(shape) == tool);
     }
 
-    /// Gives the selected shape a slider's new level.
+    /// How wide the steps are at `size`, an index into `STEP_SIZES`.
+    fn step_side(&self, size: usize) -> i32 {
+        Step::side(self.bounds(), self.capture_scale, size)
+    }
+
+    /// Gives the selected shape a slider's new level. The steps all take the new size.
     fn slider_changed(&mut self, part: Part) {
         match (part, self.selected) {
+            (Part::StepSize, _) => {
+                let side = self.step_side(self.toolbar.step_size());
+                self.edits.resize_steps(side, self.bounds());
+            }
             (Part::Blur, Some(Shape::Blur(index))) => {
                 if let Some(blur) = self.edits.blurs.get_mut(index) {
                     blur.level = self.toolbar.blur_level();
@@ -837,7 +843,7 @@ impl Editor {
                     self.save();
                 }
             }
-            Part::Blur | Part::Zoom | Part::Around => self.slider_changed(part),
+            Part::Blur | Part::Zoom | Part::Around | Part::StepSize => self.slider_changed(part),
             Part::Folder => self.output.show(),
         }
     }
@@ -866,6 +872,14 @@ impl Editor {
             .selected
             .filter(|&shape| self.edits.outline(shape, bounds).is_some());
         self.select(selected);
+        // The steps all share a size, which the slider shows.
+        if let Some(step) = self.edits.steps.first() {
+            let side = step.rect.width();
+            let size = (0..STEP_SIZES.len())
+                .min_by_key(|&size| (self.step_side(size) - side).abs())
+                .unwrap_or_default();
+            self.toolbar.set_step_size(size);
+        }
         let zoom = self.edits.focus.map_or(1.0, |focus| ZOOMS[focus.level]);
         self.zoom = Animation::idle(zoom);
         self.hovered = None;
@@ -1091,7 +1105,11 @@ impl Editor {
         match shape {
             Shape::Blur(_) => 0.0,
             Shape::Focus => FOCUS_CORNER * self.capture_scale * self.view.zoom,
-            Shape::Step(_) => STEP_SIZE * self.capture_scale * self.view.zoom / 2.0,
+            Shape::Step(index) => self
+                .edits
+                .steps
+                .get(index)
+                .map_or(0.0, |step| step.rect.width() as f32 * self.view.zoom / 2.0),
         }
     }
 

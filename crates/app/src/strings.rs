@@ -2,7 +2,7 @@
 
 use std::sync::OnceLock;
 
-use kata_editor::BLUR_LEVELS;
+use kata_editor::{BLUR_LEVELS, STEP_SIZES};
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
 
 pub struct Strings {
@@ -19,6 +19,9 @@ pub struct Strings {
     /// its first step.
     pub blur_around: &'static str,
     pub no_blur: &'static str,
+    /// What assistive technologies call the setting that sizes the steps.
+    pub step_size: &'static str,
+    pub step_sizes: [&'static str; STEP_SIZES.len()],
     pub autosave: &'static str,
     pub save: &'static str,
     /// What assistive technologies call the button that shows the capture's file.
@@ -65,6 +68,8 @@ static SPANISH: Strings = Strings {
     blur_levels: ["Suave", "Medio", "Fuerte"],
     blur_around: "Desenfocar alrededor",
     no_blur: "Ninguno",
+    step_size: "Tamaño de los pasos",
+    step_sizes: ["Pequeño", "Mediano", "Grande"],
     autosave: "Autoguardado",
     save: "Guardar",
     open_file_location: "Abrir la ubicación del archivo",
@@ -99,6 +104,8 @@ static ENGLISH: Strings = Strings {
     blur_levels: ["Soft", "Medium", "Strong"],
     blur_around: "Blur around",
     no_blur: "None",
+    step_size: "Step size",
+    step_sizes: ["Small", "Medium", "Large"],
     autosave: "Autosave",
     save: "Save",
     open_file_location: "Open file location",

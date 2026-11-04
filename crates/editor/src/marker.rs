@@ -5,13 +5,15 @@ use Stroke::{Arc, Line};
 
 use crate::{Image, Rect};
 
-/// A marker's diameter at 100 %.
-pub const STEP_SIZE: f32 = 28.0;
+/// The diameter the edge, the shadow and the digits are laid out for: a usual marker
+/// at 100 %.
+pub(crate) const STEP_SIZE: f32 = 28.0;
 /// Kata's persimmon orange, as the image stores it: blue, green, red.
 const ORANGE: [f32; 3] = [34.0, 90.0, 236.0];
-/// The white edge around the disc, at 100 %.
+/// The white edge around the disc, on a marker `STEP_SIZE` wide.
 const EDGE: f32 = 2.0;
-/// The shadow under the marker: its reach and drop at 100 %, and its darkness.
+/// The shadow under the marker: its reach and drop on a marker `STEP_SIZE` wide, and
+/// its darkness.
 const SHADOW_REACH: f32 = 4.0;
 const SHADOW_DROP: f32 = 1.0;
 const SHADOW_DARKNESS: f32 = 0.3;
@@ -22,15 +24,15 @@ const DIGIT_LINE: f32 = 0.1;
 const DIGIT_GAP: f32 = 0.06;
 const NUMBER_WIDTH: f32 = 0.66;
 
-/// Everything a marker in `rect` changes, at `scale`: its disc and shadow.
-pub fn footprint(rect: Rect, scale: f32) -> Rect {
-    rect.inflate(((SHADOW_REACH + SHADOW_DROP) * scale).ceil() as i32 + 1)
+/// Everything a marker in `rect` changes: its disc and shadow.
+pub fn footprint(rect: Rect) -> Rect {
+    rect.inflate(((SHADOW_REACH + SHADOW_DROP) * scale(rect)).ceil() as i32 + 1)
 }
 
-/// Draws the marker of step `number` in `rect`, at `scale`, over what `image` shows,
-/// only inside `area`.
-pub fn draw(image: &mut Image, rect: Rect, number: usize, scale: f32, area: Rect) {
-    let Some(area) = footprint(rect, scale).intersect(&area) else {
+/// Draws the marker of step `number` in `rect`, over what `image` shows, only inside
+/// `area`.
+pub fn draw(image: &mut Image, rect: Rect, number: usize, area: Rect) {
+    let Some(area) = footprint(rect).intersect(&area) else {
         return;
     };
     let center = (
@@ -38,6 +40,7 @@ pub fn draw(image: &mut Image, rect: Rect, number: usize, scale: f32, area: Rect
         (rect.top + rect.bottom) as f32 / 2.0,
     );
     let radius = rect.width().min(rect.height()) as f32 / 2.0;
+    let scale = scale(rect);
     let edge = EDGE * scale;
     let (reach, drop) = (SHADOW_REACH * scale, SHADOW_DROP * scale);
     let number = Number::new(number, center, 2.0 * radius);
@@ -302,6 +305,11 @@ const DIGITS: [Digit; 10] = [
         ],
     },
 ];
+
+/// How much bigger than a usual marker at 100 % the one in `rect` is.
+fn scale(rect: Rect) -> f32 {
+    rect.width().min(rect.height()) as f32 / STEP_SIZE
+}
 
 fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
     (a.0 - b.0).hypot(a.1 - b.1)

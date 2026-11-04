@@ -49,7 +49,8 @@ mostrar siempre.
    nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 % o 200 %. Con la gota de al lado,
    **desenfoca también lo de alrededor**, con los mismos niveles de Desenfocar.
 3. **Pasos:** cada clic pone el número siguiente, en un círculo naranja. Si se borra uno, los
-   demás se renumeran.
+   demás se renumeran. Su tamaño se ajusta solo a la captura; al lado está el **tamaño**
+   (Pequeño, Mediano o Grande), que cambia todos los pasos a la vez.
 
 - Cada nivel es un control deslizante que recuerda el último valor.
 - Un clic selecciona un rectángulo o un paso: se mueve arrastrándolo, un rectángulo cambia de

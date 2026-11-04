@@ -150,9 +150,9 @@ impl Renderer {
             let (old, new) = (self.steps.get(at), steps.get(at));
             if old != new {
                 let marks = old.into_iter().chain(new);
-                dirty.extend(marks.filter_map(|step| {
-                    marker::footprint(step.rect, self.scale).intersect(&bounds)
-                }));
+                dirty.extend(
+                    marks.filter_map(|step| marker::footprint(step.rect).intersect(&bounds)),
+                );
             }
         }
         self.steps = steps.to_vec();
@@ -225,7 +225,7 @@ impl Renderer {
         };
         self.light(area);
         for (at, step) in self.steps.iter().enumerate() {
-            marker::draw(&mut self.output, step.rect, at + 1, self.scale, area);
+            marker::draw(&mut self.output, step.rect, at + 1, area);
         }
     }
 

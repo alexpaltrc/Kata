@@ -11,8 +11,9 @@ mod marker;
 mod png;
 mod render;
 
-pub use document::{BLUR_LEVELS, Blur, Document, Edits, Focus, Shape, Spot, Step, ZOOMS};
+pub use document::{
+    BLUR_LEVELS, Blur, Document, Edits, Focus, STEP_SIZES, Shape, Spot, Step, ZOOMS,
+};
 pub use geometry::Rect;
 pub use image::Image;
-pub use marker::STEP_SIZE;
 pub use render::{FOCUS_CORNER, Renderer};

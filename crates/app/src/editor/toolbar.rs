@@ -1,6 +1,6 @@
 //! The editor's controls: saving and the capture's folder in the title bar, and two
 //! capsules floating at the bottom, centered: the tools' dock and, above it, the
-//! chosen tool's options, when it has any.
+//! chosen tool's options.
 
 use std::{iter, mem, time::Instant};
 
@@ -37,8 +37,6 @@ const SETTING_ICON: f32 = 16.0;
 const ICON_GAP: f32 = 8.0;
 /// Between two settings.
 const GAP: f32 = 20.0;
-/// How far the options sink toward the dock as they hide.
-const SINK: f32 = 8.0;
 
 /// What dragging or clicking on the capture adds, in the dock's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +68,7 @@ impl Tool {
         match self {
             Self::Blur => &[Part::Blur],
             Self::Focus => &[Part::Zoom, Part::Around],
-            Self::Steps => &[],
+            Self::Steps => &[Part::StepSize],
         }
     }
 }
@@ -81,6 +79,7 @@ pub enum Part {
     Blur,
     Zoom,
     Around,
+    StepSize,
     Save,
     Autosave,
     Folder,
@@ -128,6 +127,7 @@ pub struct Toolbar {
     blur: Setting,
     zoom: Setting,
     around: Setting,
+    step_size: Setting,
     save: Button,
     autosave: Toggle,
     folder: IconButton,
@@ -142,8 +142,6 @@ pub struct Toolbar {
     fade: Animation,
     /// The options' width, which glides from one tool's to the next.
     width: Animation,
-    /// From 0 to 1 as the options show: they hide for a tool without any.
-    shown: Animation,
 }
 
 impl Toolbar {
@@ -166,6 +164,11 @@ impl Toolbar {
             .collect::<Result<_>>()?;
         let around = iter::once(strings.no_blur)
             .chain(strings.blur_levels)
+            .map(|name| fonts.label(name))
+            .collect::<Result<_>>()?;
+        let step_sizes = strings
+            .step_sizes
+            .iter()
             .map(|name| fonts.label(name))
             .collect::<Result<_>>()?;
         let item = |(outlined, filled), name| -> Result<Item> {
@@ -199,6 +202,10 @@ impl Toolbar {
                 droplet()?,
                 Slider::new(strings.blur_around, around, settings.around),
             ),
+            step_size: Setting::new(
+                icons::steps(graphics, SETTING_ICON)?.0,
+                Slider::new(strings.step_size, step_sizes, settings.step_size),
+            ),
             save,
             autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
@@ -208,7 +215,6 @@ impl Toolbar {
             leaving: tool,
             fade: Animation::idle(1.0),
             width: Animation::idle(0.0),
-            shown: Animation::idle(if tool.options().is_empty() { 0.0 } else { 1.0 }),
         };
         toolbar.width = Animation::idle(toolbar.options_width(tool));
         Ok(toolbar)
@@ -221,6 +227,7 @@ impl Toolbar {
             blur_level: self.blur.slider.value(),
             zoom_level: self.zoom.slider.value(),
             around: self.around.slider.value(),
+            step_size: self.step_size.slider.value(),
             autosave: self.autosave.is_on(),
         }
     }
@@ -286,9 +293,7 @@ impl Toolbar {
 
     /// Whether `point` is on the toolbar: on a control, or between the options.
     pub fn covers(&self, point: Point) -> bool {
-        let tool = self.tool();
-        self.part_at(point).is_some()
-            || !tool.options().is_empty() && self.options_area(tool).contains(point)
+        self.part_at(point).is_some() || self.options_area(self.tool()).contains(point)
     }
 
     /// The controls on show, as assistive technologies know them, each numbered as
@@ -314,6 +319,7 @@ impl Toolbar {
             Part::Blur => &mut self.blur.slider,
             Part::Zoom => &mut self.zoom.slider,
             Part::Around => &mut self.around.slider,
+            Part::StepSize => &mut self.step_size.slider,
             Part::Save => &mut self.save,
             Part::Autosave => &mut self.autosave,
             Part::Folder => &mut self.folder,
@@ -380,19 +386,12 @@ impl Toolbar {
             let (area, radius) = self.get(part).focus_area();
             painter.focus(area, radius);
         }
-        // Above the options, or just above the dock without them.
-        let top = if self.tool().options().is_empty() {
-            self.dock_top()
-        } else {
-            self.options_top()
-        };
-        self.tools.draw_tip(painter, top, now);
+        self.tools.draw_tip(painter, self.options_top(), now);
     }
 
     pub fn is_animating(&self, now: Instant) -> bool {
         self.fade.is_running(now)
             || self.width.is_running(now)
-            || self.shown.is_running(now)
             || self
                 .parts()
                 .into_iter()
@@ -416,21 +415,11 @@ impl Toolbar {
         }
         self.leaving = mem::replace(&mut self.showing, tool);
         self.fade = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
-        let now = Instant::now();
-        if tool.options().is_empty() {
-            // The options sink into the dock as they fade, keeping their width.
-            self.shown = self.shown.retarget(0.0, motion::FAST, Easing::ACCELERATE);
-            return;
-        }
-        let width = self.options_width(tool);
-        // Out of sight, they take the new width at once.
-        self.width = if self.shown.value(now) == 0.0 {
-            Animation::idle(width)
-        } else {
-            self.width
-                .retarget(width, motion::NORMAL, Easing::POINT_TO_POINT)
-        };
-        self.shown = self.shown.retarget(1.0, motion::NORMAL, Easing::DECELERATE);
+        self.width = self.width.retarget(
+            self.options_width(tool),
+            motion::NORMAL,
+            Easing::POINT_TO_POINT,
+        );
     }
 
     pub fn blur_level(&self) -> usize {
@@ -461,6 +450,15 @@ impl Toolbar {
             .set_value(level.map_or(0, |level| level + 1));
     }
 
+    /// An index into `STEP_SIZES`.
+    pub fn step_size(&self) -> usize {
+        self.step_size.slider.value()
+    }
+
+    pub fn set_step_size(&mut self, size: usize) {
+        self.step_size.slider.set_value(size);
+    }
+
     pub fn autosave(&self) -> bool {
         self.autosave.is_on()
     }
@@ -474,24 +472,18 @@ impl Toolbar {
     }
 
     /// The options' capsule, as wide as it glides to, with the settings crossfading
-    /// inside it as the tool changes. It rises out of the dock as it shows.
+    /// inside it as the tool changes.
     fn draw_options(&self, painter: &Painter, now: Instant) {
-        let shown = self.shown.value(now);
-        if shown == 0.0 {
-            return;
-        }
         let width = self.width.value(now);
         let left = (self.window.0 - width) / 2.0;
         let area = painter.align(Area::new(left, self.options_top(), width, OPTIONS));
         let fade = self.fade.value(now);
-        painter.layer(shown, SINK * (1.0 - shown), || {
-            painter.flyout(area, OPTIONS / 2.0);
-            painter.clip(area, || {
-                painter.layer(1.0 - fade, 0.0, || {
-                    self.draw_settings(painter, self.leaving, now)
-                });
-                painter.layer(fade, 0.0, || self.draw_settings(painter, self.showing, now));
+        painter.flyout(area, OPTIONS / 2.0);
+        painter.clip(area, || {
+            painter.layer(1.0 - fade, 0.0, || {
+                self.draw_settings(painter, self.leaving, now)
             });
+            painter.layer(fade, 0.0, || self.draw_settings(painter, self.showing, now));
         });
     }
 
@@ -512,11 +504,13 @@ impl Toolbar {
     }
 
     fn options_width(&self, tool: Tool) -> f32 {
-        let settings = tool.options().iter().filter_map(|&part| self.setting(part));
-        let (count, width) = settings.fold((0, 0.0), |(count, width), setting| {
-            (count + 1, width + setting.width())
-        });
-        width + (count.max(1) - 1) as f32 * GAP + 2.0 * OPTIONS_PADDING
+        let options = tool.options();
+        let settings: f32 = options
+            .iter()
+            .filter_map(|&part| self.setting(part))
+            .map(Setting::width)
+            .sum();
+        settings + (options.len() - 1) as f32 * GAP + 2.0 * OPTIONS_PADDING
     }
 
     /// Where `tool`'s options show, once the capsule has glided to them.
@@ -540,6 +534,7 @@ impl Toolbar {
             Part::Blur => &self.blur.slider,
             Part::Zoom => &self.zoom.slider,
             Part::Around => &self.around.slider,
+            Part::StepSize => &self.step_size.slider,
             Part::Save => &self.save,
             Part::Autosave => &self.autosave,
             Part::Folder => &self.folder,
@@ -551,6 +546,7 @@ impl Toolbar {
             Part::Blur => Some(&self.blur),
             Part::Zoom => Some(&self.zoom),
             Part::Around => Some(&self.around),
+            Part::StepSize => Some(&self.step_size),
             _ => None,
         }
     }
@@ -560,6 +556,7 @@ impl Toolbar {
             Part::Blur => Some(&mut self.blur),
             Part::Zoom => Some(&mut self.zoom),
             Part::Around => Some(&mut self.around),
+            Part::StepSize => Some(&mut self.step_size),
             _ => None,
         }
     }

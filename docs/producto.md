@@ -11,11 +11,11 @@
 
 ## Editar
 
-Tres herramientas, como iconos en una barra centrada abajo. Encima, en otra cápsula, los niveles de la herramienta activa; Pasos no tiene. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
+Tres herramientas, como iconos en una barra centrada abajo. Encima, en otra cápsula, los niveles de la herramienta activa. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
 
 1. **Desenfocar.** Se arrastra para cubrir uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
 2. **Foco.** Se arrastra sobre un área: queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 %, 200 %. **Desenfocar alrededor:** Ninguno, Suave, Medio o Fuerte, los mismos niveles de Desenfocar, aplicados a todo lo que queda fuera del foco.
-3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco, del tamaño que tenía en la pantalla capturada. Borrar un paso renumera los que siguen.
+3. **Pasos.** Cada clic pone el número siguiente, en un círculo naranja con borde blanco. Borrar un paso renumera los que siguen. Su tamaño se ajusta solo a la captura, para que se lea aunque la captura se achique en un documento. **Tamaño:** Pequeño, Mediano o Grande, el mismo para todos los pasos: cambiarlo cambia los que ya están.
 
 Reglas:
 
