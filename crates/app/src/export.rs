@@ -18,11 +18,13 @@ use std::{
 use kata_editor::Image;
 use windows::{
     Win32::{
-        Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND},
-        Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER},
+        Foundation::{COLORREF, GlobalFree, HANDLE, HGLOBAL, HWND, POINT, SIZE},
+        Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject,
+        },
         Storage::FileSystem::{MOVE_FILE_FLAGS, MoveFileExW},
         System::{
-            Com::{CoTaskMemFree, IDataObject},
+            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree, IDataObject},
             DataExchange::{
                 CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
             },
@@ -32,9 +34,10 @@ use windows::{
         },
         UI::{
             Shell::{
-                BHID_DataObject, FOLDERID_Pictures, ILCreateFromPathW, ILFree, IShellItem,
-                KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHDoDragDrop, SHGetKnownFolderPath,
-                SHOpenFolderAndSelectItems, ShellExecuteW,
+                BHID_DataObject, CLSID_DragDropHelper, DSH_ALLOWDROPDESCRIPTIONTEXT,
+                FOLDERID_Pictures, IDragSourceHelper2, ILCreateFromPathW, ILFree, IShellItem,
+                KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHDRAGIMAGE, SHDoDragDrop,
+                SHGetKnownFolderPath, SHOpenFolderAndSelectItems, ShellExecuteW,
             },
             WindowsAndMessaging::SW_SHOWNORMAL,
         },
@@ -257,19 +260,82 @@ fn same(a: &Path, b: &Path) -> bool {
     a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
 }
 
+/// What follows the pointer while a file is dragged: its pixels, premultiplied BGRA
+/// row by row from the top, how many there are across and down, and where among
+/// them the pointer is.
+pub struct Picture {
+    pub pixels: Vec<u8>,
+    pub size: (u32, u32),
+    pub pointer: (i32, i32),
+}
+
 /// Drags the file at `path` out of `owner`, as File Explorer would, until it's
 /// dropped: into a folder, a document or a message. It's copied wherever it goes,
-/// so the capture keeps its file.
-pub fn drag(owner: HWND, path: &Path) {
+/// so the capture keeps its file. `picture` follows the pointer, or else Windows'
+/// own.
+pub fn drag(owner: HWND, path: &Path, picture: Option<Picture>) {
     let dragged = unsafe {
         SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(path), None)
             .and_then(|item| item.BindToHandler::<_, IDataObject>(None, &BHID_DataObject))
             .and_then(|data| {
+                if let Some(picture) = picture
+                    && let Err(error) = carry(&data, &picture)
+                {
+                    report("drag", &error);
+                }
                 SHDoDragDrop(Some(owner), &data, None::<&IDropSource>, DROPEFFECT_COPY)
             })
     };
     if let Err(error) = dragged {
         report("drag", &error);
+    }
+}
+
+/// Makes `picture` follow the pointer while `data` is dragged.
+fn carry(data: &IDataObject, picture: &Picture) -> Result<()> {
+    let (width, height) = picture.size;
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            // Rows from the top.
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    unsafe {
+        let helper: IDragSourceHelper2 =
+            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)?;
+        // Windows still says where the file goes, as it does for its own pictures.
+        helper.SetFlags(DSH_ALLOWDROPDESCRIPTIONTEXT.0 as u32)?;
+        let mut bits = ptr::null_mut();
+        let bitmap = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0)?;
+        let length = picture
+            .pixels
+            .len()
+            .min(4 * width as usize * height as usize);
+        ptr::copy_nonoverlapping(picture.pixels.as_ptr(), bits.cast(), length);
+        let image = SHDRAGIMAGE {
+            sizeDragImage: SIZE {
+                cx: width as i32,
+                cy: height as i32,
+            },
+            ptOffset: POINT {
+                x: picture.pointer.0,
+                y: picture.pointer.1,
+            },
+            hbmpDragImage: bitmap,
+            // No color stands for transparent: the pixels' own alpha does.
+            crColorKey: COLORREF(u32::MAX),
+        };
+        // Once it takes the bitmap, it frees it.
+        helper.InitializeFromBitmap(&image, data).inspect_err(|_| {
+            let _ = DeleteObject(bitmap.into());
+        })
     }
 }
 

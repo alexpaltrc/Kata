@@ -10,6 +10,7 @@ mod toolbar;
 use std::{
     cell::{Cell, RefCell},
     mem,
+    path::PathBuf,
     time::Instant,
 };
 
@@ -63,7 +64,7 @@ use windows::{
 
 use crate::{
     channel,
-    export::{self, Output},
+    export::{self, Output, Picture},
     report,
     settings::EditorSettings,
 };
@@ -80,6 +81,10 @@ const MIN_CANVAS: f32 = 100.0;
 const MAX_SHARE: f32 = 0.85;
 /// How much each notch of the mouse wheel zooms.
 const ZOOM_STEP: f32 = 1.25;
+/// How much smaller and fainter the capture gets as it lifts off, its file dragged
+/// away.
+const SINK: f32 = 0.04;
+const FADE: f32 = 0.5;
 /// Blinks the caret while the name is typed.
 const BLINK_TIMER: usize = 1;
 const CLASS: PCWSTR = w!("Kata.Editor");
@@ -187,6 +192,8 @@ unsafe fn create(
             chip_hovered: false,
             gesture: None,
             zoom: Animation::idle(1.0),
+            lift: Animation::idle(0.0),
+            carrying: None,
             tracking: false,
             unpublished: false,
             unsaved: false,
@@ -216,10 +223,22 @@ unsafe extern "system" fn window_proc(
         if message == WM_NCDESTROY {
             release(hwnd);
         }
-        window::linked_state::<Editor>(hwnd, message, lparam)
+        let state = || window::linked_state::<Editor>(hwnd, message, lparam);
+        let handled = state()
             .and_then(|editor| editor.try_borrow_mut().ok())
-            .and_then(|mut editor| editor.handle(message, wparam, lparam))
-            .unwrap_or_else(|| DefWindowProcW(hwnd, message, wparam, lparam))
+            .and_then(|mut editor| editor.handle(message, wparam, lparam));
+        // Windows follows a drag from here until the file is dropped, while the editor
+        // goes on drawing, free to show the capture lifting off.
+        if let Some((file, card)) =
+            state().and_then(|editor| editor.try_borrow_mut().ok()?.carrying.take())
+        {
+            export::drag(hwnd, &file, card);
+            // The window may have closed meanwhile, its editor with it.
+            if let Some(mut editor) = state().and_then(|editor| editor.try_borrow_mut().ok()) {
+                editor.dropped();
+            }
+        }
+        handled.unwrap_or_else(|| DefWindowProcW(hwnd, message, wparam, lparam))
     }
 }
 
@@ -324,6 +343,11 @@ struct Editor {
     gesture: Option<Gesture>,
     /// The focus's zoom on show, which glides between levels.
     zoom: Animation,
+    /// From 0 to 1 as the capture lifts off into the card its file is dragged away
+    /// as, and back as it's dropped.
+    lift: Animation,
+    /// The file to drag away once the message at hand is handled, and its card.
+    carrying: Option<(PathBuf, Option<Picture>)>,
     /// Whether Windows will say when the pointer leaves.
     tracking: bool,
     /// The document changed since it was last put on the clipboard.
@@ -1055,19 +1079,31 @@ impl Editor {
         self.invalidate();
     }
 
-    /// Drags the capture's file out of the window, once it's on disk. Returns
-    /// whether the look changes.
+    /// Drags the capture's file out of the window, once it's on disk: the capture
+    /// lifts off into a card that follows the pointer. Returns whether the look
+    /// changes.
     fn drag_file(&mut self) -> bool {
         let Some(file) = self.output.file() else {
             return false;
         };
-        // Windows follows the pointer from here until the file is dropped.
         self.gesture = None;
         self.toolbar.control(Part::Name).cancel();
         let _ = unsafe { ReleaseCapture() };
-        export::drag(self.hwnd, &file);
-        self.hover(Some(self.pointer()));
+        let card = self.gpu.as_ref().and_then(|gpu| {
+            gpu.card(&self.palette, self.scale)
+                .inspect_err(|error| report("drag", error))
+                .ok()
+        });
+        self.carrying = Some((file, card));
+        self.lift = self.lift.retarget(1.0, motion::NORMAL, Easing::DECELERATE);
         true
+    }
+
+    /// The dragged file was dropped, or the drag given up: the capture settles back.
+    fn dropped(&mut self) {
+        self.lift = self.lift.retarget(0.0, motion::NORMAL, Easing::DECELERATE);
+        self.hover(Some(self.pointer()));
+        self.invalidate();
     }
 
     /// Makes the edits on show the document's, when they changed.
@@ -1205,7 +1241,10 @@ impl Editor {
             // The graphics device went away (a driver update, say): start over.
             Err(_) => self.invalidate(),
         }
-        if self.toolbar.is_animating(now) || self.zoom.is_running(now) || self.glide.is_running(now)
+        if self.toolbar.is_animating(now)
+            || self.zoom.is_running(now)
+            || self.glide.is_running(now)
+            || self.lift.is_running(now)
         {
             self.invalidate();
         }
@@ -1230,7 +1269,15 @@ impl Editor {
             let (width, height) = self.window();
             // A zoomed capture slides under the title bar, out of sight.
             let canvas = Area::new(0.0, TITLE_BAR, width, height - TITLE_BAR);
-            painter.clip(canvas, || self.draw_capture(painter, image, now));
+            // Lifting off, the capture sinks back and fades a little.
+            let lift = self.lift.value(now);
+            let capture = self.view.area(self.bounds());
+            let center = (capture.left + capture.width / 2.0, capture.middle());
+            painter.clip(canvas, || {
+                painter.grown(1.0 - FADE * lift, 1.0 - SINK * lift, center, || {
+                    self.draw_capture(painter, image, now);
+                });
+            });
             self.toolbar.draw(painter, now);
         })
     }

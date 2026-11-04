@@ -1,14 +1,18 @@
 //! Drawing in device-independent pixels (DIPs, 1/96 of an inch), lined up with
 //! the screen's pixels.
 
+use std::mem::ManuallyDrop;
+
 use windows::{
     Win32::Graphics::{
         Direct2D::{
-            Common::{D2D_RECT_F, D2D1_COLOR_F},
+            Common::{D2D_RECT_F, D2D1_COLOR_F, D2D1_GRADIENT_STOP},
             D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-            D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-            D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_PARAMETERS1, D2D1_ROUNDED_RECT,
-            ID2D1Bitmap, ID2D1Brush, ID2D1DeviceContext, ID2D1Layer, ID2D1SolidColorBrush,
+            D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2,
+            D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+            D2D1_LAYER_PARAMETERS1, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT,
+            ID2D1Bitmap, ID2D1Brush, ID2D1DeviceContext, ID2D1Layer, ID2D1RenderTarget,
+            ID2D1SolidColorBrush,
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
@@ -150,38 +154,102 @@ impl<'a> Painter<'a> {
         self.transformed(opacity, grown, draw);
     }
 
+    /// Draws what `draw` paints turned `degrees` clockwise around `center`.
+    pub fn turned(&self, degrees: f32, (x, y): Point, draw: impl FnOnce()) {
+        let turned = Matrix3x2::rotation_around(degrees, Vector2::new(x, y));
+        self.transformed(1.0, turned, draw);
+    }
+
     fn transformed(&self, opacity: f32, transform: Matrix3x2, draw: impl FnOnce()) {
         if opacity <= 0.0 {
             return;
         }
         let mut outer = Matrix3x2::default();
-        let translucent = opacity < 1.0;
         unsafe {
             self.context.GetTransform(&mut outer);
             self.context.SetTransform(&(transform * outer));
-            if translucent {
-                let everything = D2D_RECT_F {
-                    left: f32::MIN,
-                    top: f32::MIN,
-                    right: f32::MAX,
-                    bottom: f32::MAX,
-                };
-                self.context.PushLayer(
-                    &D2D1_LAYER_PARAMETERS1 {
-                        contentBounds: everything,
-                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                        maskTransform: Matrix3x2::identity(),
-                        opacity,
-                        ..Default::default()
-                    },
-                    None::<&ID2D1Layer>,
-                );
-            }
+        }
+        if opacity < 1.0 {
+            self.through(D2D1_LAYER_PARAMETERS1 { opacity, ..layer() }, draw);
+        } else {
             draw();
-            if translucent {
-                self.context.PopLayer();
-            }
-            self.context.SetTransform(&outer);
+        }
+        unsafe { self.context.SetTransform(&outer) };
+    }
+
+    /// Draws what `draw` paints, only inside `area` with corners of `radius`.
+    pub fn clip_rounded(&self, area: Area, radius: f32, draw: impl FnOnce()) {
+        let corners = unsafe {
+            self.context
+                .GetFactory()
+                .and_then(|factory| factory.CreateRoundedRectangleGeometry(&rounded(area, radius)))
+        };
+        match corners {
+            Ok(corners) => self.through(
+                D2D1_LAYER_PARAMETERS1 {
+                    contentBounds: area.rect(),
+                    geometricMask: ManuallyDrop::new(Some(corners.into())),
+                    ..layer()
+                },
+                draw,
+            ),
+            Err(_) => draw(),
+        }
+    }
+
+    /// Draws what `draw` paints only under a soft band of light `width` DIPs wide,
+    /// centered on `at` and leaning as a reflection does.
+    pub fn glint(&self, (x, y): Point, width: f32, draw: impl FnOnce()) {
+        /// How far the band leans from upright, in radians.
+        const LEAN: f32 = 0.35;
+        let (across, down) = (LEAN.cos() * width / 2.0, LEAN.sin() * width / 2.0);
+        let stop = |position, a| D2D1_GRADIENT_STOP {
+            position,
+            color: D2D1_COLOR_F {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a,
+            },
+        };
+        let stops = [stop(0.0, 0.0), stop(0.5, 1.0), stop(1.0, 0.0)];
+        let light = unsafe {
+            ID2D1RenderTarget::CreateGradientStopCollection(
+                self.context,
+                &stops,
+                D2D1_GAMMA_2_2,
+                D2D1_EXTEND_MODE_CLAMP,
+            )
+            .and_then(|stops| {
+                self.context.CreateLinearGradientBrush(
+                    &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                        startPoint: Vector2::new(x - across, y - down),
+                        endPoint: Vector2::new(x + across, y + down),
+                    },
+                    None,
+                    &stops,
+                )
+            })
+        };
+        if let Ok(light) = light {
+            self.through(
+                D2D1_LAYER_PARAMETERS1 {
+                    opacityBrush: ManuallyDrop::new(Some(light.into())),
+                    ..layer()
+                },
+                draw,
+            );
+        }
+    }
+
+    /// Draws what `draw` paints through a layer that `parameters` describe.
+    fn through(&self, mut parameters: D2D1_LAYER_PARAMETERS1, draw: impl FnOnce()) {
+        unsafe {
+            self.context.PushLayer(&parameters, None::<&ID2D1Layer>);
+            draw();
+            self.context.PopLayer();
+            ManuallyDrop::drop(&mut parameters.geometricMask);
+            ManuallyDrop::drop(&mut parameters.opacityBrush);
         }
     }
 
@@ -318,13 +386,17 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Stretches `bitmap` over `area`: pixel for pixel when they match, smoothly
-    /// otherwise.
+    /// Stretches `bitmap` over `area`: pixel for pixel when they match, upright,
+    /// smoothly otherwise.
     pub fn bitmap(&self, bitmap: &ID2D1Bitmap, area: Area) {
+        let mut on_screen = Matrix3x2::default();
         unsafe {
+            self.context.GetTransform(&mut on_screen);
             let size = bitmap.GetPixelSize();
-            let exact = (area.width * self.scale - size.width as f32).abs() < 0.01
-                && (area.height * self.scale - size.height as f32).abs() < 0.01;
+            let exact = on_screen.M12 == 0.0
+                && on_screen.M21 == 0.0
+                && (area.width * on_screen.M11 - size.width as f32).abs() < 0.01
+                && (area.height * on_screen.M22 - size.height as f32).abs() < 0.01;
             let interpolation = if exact {
                 D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
             } else {
@@ -347,6 +419,22 @@ impl<'a> Painter<'a> {
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
         }
+    }
+}
+
+/// A layer over everything, at full opacity.
+fn layer() -> D2D1_LAYER_PARAMETERS1 {
+    D2D1_LAYER_PARAMETERS1 {
+        contentBounds: D2D_RECT_F {
+            left: f32::MIN,
+            top: f32::MIN,
+            right: f32::MAX,
+            bottom: f32::MAX,
+        },
+        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+        maskTransform: Matrix3x2::identity(),
+        opacity: 1.0,
+        ..Default::default()
     }
 }
 

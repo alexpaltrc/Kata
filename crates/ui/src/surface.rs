@@ -2,14 +2,17 @@
 //! DirectComposition places on the window, so what's left transparent shows the
 //! window's backdrop, such as Mica.
 
+use std::slice;
+
 use windows::{
     Win32::{
         Foundation::{E_POINTER, HMODULE, HWND},
         Graphics::{
             Direct2D::{
-                Common::{D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT},
-                D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_TARGET,
-                D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                Common::{D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT},
+                D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_CPU_READ,
+                D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
+                D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_MAP_OPTIONS_READ,
                 D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Bitmap1, ID2D1DeviceContext, ID2D1Image,
                 ID2D1SolidColorBrush,
             },
@@ -154,6 +157,54 @@ impl Surface {
             context.SetTarget(None::<&ID2D1Image>);
             drawn?;
             self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()
+        }
+    }
+
+    /// Draws a picture `size` pixels big on a clear background, `scale` pixels to the
+    /// DIP, and returns its pixels: premultiplied BGRA, row by row from the top.
+    pub fn picture(
+        &self,
+        palette: &Palette,
+        scale: f32,
+        size: (u32, u32),
+        paint: impl FnOnce(&Painter),
+    ) -> Result<Vec<u8>> {
+        let (width, height) = at_least_one(size);
+        let size = D2D_SIZE_U { width, height };
+        let properties = |options| D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            bitmapOptions: options,
+            ..Default::default()
+        };
+        let context = &self.context;
+        unsafe {
+            let target =
+                context.CreateBitmap(size, None, 0, &properties(D2D1_BITMAP_OPTIONS_TARGET))?;
+            context.SetTarget(&target);
+            context.BeginDraw();
+            context.Clear(None);
+            paint(&Painter::new(context, &self.brush, palette, scale));
+            let drawn = context.EndDraw(None, None);
+            context.SetTarget(None::<&ID2D1Image>);
+            drawn?;
+            // Only a copy the processor can read gives the pixels back.
+            let readable = D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+            let copy = context.CreateBitmap(size, None, 0, &properties(readable))?;
+            copy.CopyFromBitmap(None, &target, None)?;
+            let mapped = copy.Map(D2D1_MAP_OPTIONS_READ)?;
+            let row = 4 * width as usize;
+            let mut pixels = Vec::with_capacity(row * height as usize);
+            for y in 0..height as usize {
+                let start = mapped.bits.add(y * mapped.pitch as usize);
+                pixels.extend_from_slice(slice::from_raw_parts(start, row));
+            }
+            copy.Unmap()?;
+            Ok(pixels)
         }
     }
 

@@ -1,5 +1,7 @@
 //! The capture's file name, centered in the title bar. Clicking it opens a box to
 //! type the name in, after the time it keeps; dragging it carries the file away.
+//! On hover, a grip and a pencil say so; unnamed, it invites a name; and a glint
+//! of light crosses it as the editor opens.
 
 use std::time::{Duration, Instant};
 
@@ -26,6 +28,20 @@ use crate::strings::strings;
 
 /// Between the box's edges and the text.
 const PADDING: f32 = 11.0;
+/// Between the name's edges and its text at rest: room for the grip and the pencil,
+/// centered in it.
+const SIDE: f32 = 28.0;
+/// The pencil's size, and the grip's dots: their radius and how far apart they are.
+const PENCIL: f32 = 12.0;
+const DOT: f32 = 1.0;
+const DOTS: f32 = 4.0;
+/// How long the glint takes, of which the first part is a pause, and how wide its
+/// band of light is.
+const GLINT: Duration = Duration::from_millis(1400);
+const PAUSE: f32 = 0.35;
+const BAND: f32 = 48.0;
+/// The glint sweeps across evenly, easing in and out.
+const SWEEP: Easing = Easing::new(0.4, 0.0, 0.6, 1.0);
 /// How wide the box opens, room allowing.
 const WIDTH: f32 = 400.0;
 /// The least room the name has in the title bar.
@@ -46,8 +62,10 @@ pub struct Name {
     /// The date every name starts with, and how far after it the name goes.
     prefix: Label,
     lead: f32,
-    /// What the box says while it's empty.
+    /// What the name says after the date while there's none, and the box while
+    /// it's empty.
     hint: Label,
+    pencil: Label,
     /// The name as it's typed, while the box is open.
     field: Option<Field>,
     typed: Label,
@@ -61,6 +79,10 @@ pub struct Name {
     /// When the caret last moved, which shows it at once.
     moved: Instant,
     hovered: bool,
+    /// From 0 to 1 as the grip and the pencil show, on hover.
+    icons: Animation,
+    /// From 0 to 1 as the glint crosses the name, after a pause below 0.
+    glint: Animation,
     /// Where the pointer went down on it.
     pressed: Option<Point>,
     /// The room in the title bar, from left to right, and the point it centers on.
@@ -79,7 +101,8 @@ impl Name {
             shown: fonts.label(&stem)?,
             lead: prefix.offset(prefix.text.encode_utf16().count()),
             prefix,
-            hint: fonts.label(strings().name)?,
+            hint: fonts.label(strings().add_name)?,
+            pencil: fonts.icon('\u{E70F}', PENCIL)?,
             field: None,
             typed: fonts.label("")?,
             high: None,
@@ -88,6 +111,8 @@ impl Name {
             caret: true,
             moved: Instant::now(),
             hovered: false,
+            icons: Animation::idle(0.0),
+            glint: Animation::new(-PAUSE, 1.0, GLINT, SWEEP),
             pressed: None,
             room: (0.0, 0.0),
             center: (0.0, 0.0),
@@ -212,7 +237,24 @@ impl Name {
 
     /// The name's area at rest.
     fn rest(&self) -> Area {
-        self.area(self.shown.width + 2.0 * PADDING)
+        self.area(self.width() + 2.0 * SIDE)
+    }
+
+    /// How wide the name's text is at rest.
+    fn width(&self) -> f32 {
+        if self.invites() {
+            self.lead + self.hint.width
+        } else {
+            self.shown.width
+        }
+    }
+
+    /// Whether the name at rest invites naming the capture: it has none, and there's
+    /// room to say so.
+    fn invites(&self) -> bool {
+        let (left, right) = self.room;
+        name::name(&self.taken, &self.stem).is_empty()
+            && self.lead + self.hint.width + 2.0 * SIDE <= right - left
     }
 
     /// The box's area, open.
@@ -238,10 +280,17 @@ impl Name {
     /// Shortens the name to the room there is.
     fn fit(&mut self) {
         let (left, right) = self.room;
-        if let Ok(shown) = self.fonts.line(&self.stem, right - left - 2.0 * PADDING) {
+        if let Ok(shown) = self.fonts.line(&self.stem, right - left - 2.0 * SIDE) {
             self.shown = shown;
         }
         self.reveal();
+    }
+
+    /// Returns whether the pointer's being over it changed.
+    fn set_hovered(&mut self, hovered: bool) -> bool {
+        let shown = if hovered { 1.0 } else { 0.0 };
+        self.icons = self.icons.retarget(shown, motion::FAST, Easing::DECELERATE);
+        std::mem::replace(&mut self.hovered, hovered) != hovered
     }
 
     fn close(&mut self) -> Option<Field> {
@@ -284,6 +333,41 @@ impl Name {
             return 0;
         };
         field.index(self.typed.position(x - self.start()))
+    }
+
+    /// The name at rest, in `area`.
+    fn draw_rest(&self, painter: &Painter, area: Area, now: Instant) {
+        let palette = painter.palette;
+        let (left, middle) = (area.left + SIDE, area.middle());
+        let invites = self.invites();
+        let draw = |color, hint| {
+            painter.text(&self.shown, left, middle, color);
+            if invites {
+                painter.text(&self.hint, left + self.lead, middle, hint);
+            }
+        };
+        draw(palette.text, palette.text_secondary);
+        let glint = self.glint.value(now);
+        if glint > 0.0 && self.glint.is_running(now) {
+            let x = left - BAND / 2.0 + (self.width() + BAND) * glint;
+            painter.glint((x, middle), BAND, || draw(palette.accent, palette.accent));
+        }
+        let icons = faded(palette.text_secondary, self.icons.value(now));
+        if icons.a <= 0.0 {
+            return;
+        }
+        // A grip on the left, to drag the file away, and a pencil on the right, to
+        // rename it.
+        let grip = area.left + SIDE / 2.0;
+        for (column, row) in [-0.5, 0.5]
+            .into_iter()
+            .flat_map(|x| [(x, -1.0), (x, 0.0), (x, 1.0)])
+        {
+            let dot = (grip + column * DOTS, middle + row * DOTS);
+            painter.circle((painter.snap(dot.0), painter.snap(dot.1)), DOT, icons);
+        }
+        let pencil = area.right() - SIDE / 2.0 - self.pencil.width / 2.0;
+        painter.text(&self.pencil, pencil, middle, icons);
     }
 
     fn draw_field(&self, painter: &Painter, field: &Field, middle: f32) {
@@ -335,7 +419,7 @@ impl Control for Name {
 
     fn hover(&mut self, point: Option<Point>) -> bool {
         let hovered = point.is_some_and(|point| self.contains(point));
-        std::mem::replace(&mut self.hovered, hovered) != hovered
+        self.set_hovered(hovered)
     }
 
     /// With the box open, puts the caret where the pointer is, selecting up to it
@@ -365,7 +449,7 @@ impl Control for Name {
 
     fn release(&mut self, point: Point) -> bool {
         let activated = self.pressed.take().is_some() && !self.is_editing() && self.contains(point);
-        self.hovered = self.contains(point);
+        self.set_hovered(self.contains(point));
         activated
     }
 
@@ -433,17 +517,12 @@ impl Control for Name {
         let inside = Area::new(area.left + 1.0, area.top, area.width - 2.0, area.height);
         painter.clip(inside, || match &self.field {
             Some(field) => self.draw_field(painter, field, area.middle()),
-            None => painter.text(
-                &self.shown,
-                area.left + PADDING,
-                area.middle(),
-                palette.text,
-            ),
+            None => self.draw_rest(painter, area, now),
         });
     }
 
     fn is_animating(&self, now: Instant) -> bool {
-        self.open.is_running(now)
+        self.open.is_running(now) || self.icons.is_running(now) || self.glint.is_running(now)
     }
 }
 

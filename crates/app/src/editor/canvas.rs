@@ -8,6 +8,7 @@ use kata_ui::{
     Graphics, Surface,
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
+    theme::Palette,
 };
 use windows::{
     Win32::{
@@ -26,6 +27,7 @@ use windows::{
 };
 
 use super::{MARGIN, TITLE_BAR};
+use crate::export::Picture;
 
 /// The selected shape's outline width, in DIPs.
 pub const SELECTED: f32 = 2.0;
@@ -39,6 +41,16 @@ const CHIP: f32 = 10.0;
 const CHIP_OFFSET: f32 = 16.0;
 /// The most the capture magnifies: each of its pixels this many screen pixels wide.
 const MAX_ZOOM: f32 = 8.0;
+
+/// The most the card that a dragged capture shrinks into measures, in DIPs; its
+/// corners, as Windows 11's overlays have; how far it leans, in degrees clockwise;
+/// the room around it for its shadow; and how far above its bottom edge the pointer
+/// holds it, so what Windows says about the drop shows below.
+const CARD: (f32, f32) = (200.0, 140.0);
+const CARD_RADIUS: f32 = 8.0;
+const LEAN: f32 = 3.0;
+const CARD_ROOM: f32 = 16.0;
+const HOLD: f32 = 12.0;
 
 const SHADOW: D2D1_COLOR_F = D2D1_COLOR_F {
     r: 0.0,
@@ -86,6 +98,45 @@ impl Gpu {
             )?;
             Ok(Self { surface, image })
         }
+    }
+
+    /// The capture shrunk into a card to carry it away, leaning a little, as a picture
+    /// `scale` pixels to the DIP.
+    pub fn card(&self, palette: &Palette, scale: f32) -> Result<Picture> {
+        let size = unsafe { self.image.GetPixelSize() };
+        let (width, height) = (size.width as f32 / scale, size.height as f32 / scale);
+        let fit = (CARD.0 / width).min(CARD.1 / height).min(1.0);
+        let (width, height) = (width * fit, height * fit);
+        let (sin, cos) = LEAN.to_radians().sin_cos();
+        // Leaning, it takes a little more room.
+        let room = |across: f32, down: f32| {
+            ((across * cos + down * sin + 2.0 * CARD_ROOM) * scale).ceil() as u32
+        };
+        let pixels = (room(width, height), room(height, width));
+        let center = (pixels.0 as f32 / scale / 2.0, pixels.1 as f32 / scale / 2.0);
+        let card = Area::new(
+            center.0 - width / 2.0,
+            center.1 - height / 2.0,
+            width,
+            height,
+        );
+        let drawn = self.surface.picture(palette, scale, pixels, |painter| {
+            painter.turned(LEAN, center, || {
+                painter.shadow(card, CARD_RADIUS, SHADOW);
+                painter.clip_rounded(card, CARD_RADIUS, || painter.bitmap(&self.image, card));
+                painter.stroke(card, CARD_RADIUS, painter.border(), palette.card_stroke);
+            });
+        })?;
+        let below = (height / 2.0 - HOLD).max(0.0);
+        let pointer = (center.0 - below * sin, center.1 + below * cos);
+        Ok(Picture {
+            pixels: drawn,
+            size: pixels,
+            pointer: (
+                (pointer.0 * scale).round() as i32,
+                (pointer.1 * scale).round() as i32,
+            ),
+        })
     }
 
     /// Copies the `areas` of `image` that changed.
