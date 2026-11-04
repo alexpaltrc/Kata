@@ -10,9 +10,14 @@ use crate::{BLUR_LEVELS, Blur, Figure, Image, Rect, Spot, Step, figure, marker};
 
 /// The side of the cells each blur level averages, in pixels at 100 % scale.
 const BLUR_CELLS: [f32; BLUR_LEVELS] = [8.0, 14.0, 24.0];
-/// How far each cell's color is randomly shifted, in levels out of 255. Too little to
-/// see, but it keeps the blur from being matched against guessed text.
+/// How far each cell's brightness is randomly shifted, in levels out of 255: the same
+/// for red, green and blue, so it never tints. Too little to see, but it keeps the
+/// blur from being matched against guessed text.
 const BLUR_NOISE: f32 = 4.0;
+/// How each cell's average blends with the two cells on each side, across and then
+/// down, before the cells blend into each other. Without it, detail finer than a
+/// cell, such as text, mottles the blur.
+const SOFTEN: [f32; 5] = [0.0625, 0.25, 0.375, 0.25, 0.0625];
 /// How much light the image keeps around the focus.
 const FOCUS_LIGHT: f32 = 0.5;
 /// The lit area's corner radius at 100 %.
@@ -191,7 +196,8 @@ impl Renderer {
     }
 
     /// Blurs the haze again after `base` changed in `area`, and returns where the
-    /// haze changed: each pixel blends the cells up to two away from its own.
+    /// haze changed: each pixel blends the cells up to two away from its own, and each
+    /// of those was softened with the cells up to two away from it.
     fn rehaze(&mut self, area: Rect) -> Rect {
         let Some(haze) = &mut self.haze else {
             return area;
@@ -200,7 +206,7 @@ impl Renderer {
         let bounds = self.base.bounds();
         // On the image's grid of cells, as the haze was blurred all at once.
         let around = |area: Rect| {
-            let reach = 2 * cell as i32;
+            let reach = (2 + SOFTEN.len() / 2) as i32 * cell as i32;
             let down = |at: i32| at - at.rem_euclid(cell as i32) - reach;
             let up = |at: i32| at + (-at).rem_euclid(cell as i32) + reach;
             let grown = Rect::new(
@@ -475,16 +481,22 @@ fn blurred(image: &Image, area: Rect, cell: usize, seed: u64, cores: usize) -> I
         }
     }
     let side = |index: usize, len: usize| (len - index * cell).min(cell) as f32;
-    let colors: Vec<[f32; 3]> = sums
+    let averages: Vec<[f32; 3]> = sums
         .iter()
         .enumerate()
         .map(|(at, sum)| {
-            let (column, row) = (at % columns, at / columns);
-            let count = side(column, width) * side(row, height);
-            let key = (origin.0 + column, origin.1 + row);
-            std::array::from_fn(|channel| {
-                sum[channel] as f32 / count + BLUR_NOISE * noise(seed, key, channel)
-            })
+            let count = side(at % columns, width) * side(at / columns, height);
+            sum.map(|sum| sum as f32 / count)
+        })
+        .collect();
+    let softened = soften(&soften(&averages, columns, true), columns, false);
+    let colors: Vec<[f32; 3]> = softened
+        .iter()
+        .enumerate()
+        .map(|(at, color)| {
+            let key = (origin.0 + at % columns, origin.1 + at / columns);
+            let shift = BLUR_NOISE * noise(seed, key);
+            color.map(|value| value + shift)
         })
         .collect();
 
@@ -527,6 +539,31 @@ fn blurred(image: &Image, area: Rect, cell: usize, seed: u64, cores: usize) -> I
     Image::new(width as u32, height as u32, pixels)
 }
 
+/// The cells of `colors`, a grid `columns` wide, each blended with those beside it by
+/// `SOFTEN`: across, or down. Past the edges, the edge cells stand in.
+fn soften(colors: &[[f32; 3]], columns: usize, across: bool) -> Vec<[f32; 3]> {
+    let rows = colors.len() / columns;
+    let reach = SOFTEN.len() / 2;
+    let near = |at: usize, tap: usize, len: usize| (at + tap).saturating_sub(reach).min(len - 1);
+    (0..colors.len())
+        .map(|at| {
+            let (column, row) = (at % columns, at / columns);
+            let mut color = [0.0; 3];
+            for (tap, weight) in SOFTEN.iter().enumerate() {
+                let from = if across {
+                    row * columns + near(column, tap, columns)
+                } else {
+                    near(row, tap, rows) * columns + column
+                };
+                for (sum, value) in color.iter_mut().zip(colors[from]) {
+                    *sum += value * weight;
+                }
+            }
+            color
+        })
+        .collect()
+}
+
 /// The four cells around pixel `at` and their cubic B-spline weights.
 fn spline(at: usize, cell: usize, count: usize) -> [(usize, f32); 4] {
     let position = (at as f32 + 0.5) / cell as f32 - 0.5;
@@ -549,12 +586,10 @@ fn cell(level: usize, scale: f32) -> usize {
     (BLUR_CELLS[level] * scale).round().max(2.0) as usize
 }
 
-/// A repeatable random number between -1 and 1 for each cell, by its column and
-/// row, and channel.
-fn noise(seed: u64, (column, row): (usize, usize), channel: usize) -> f32 {
+/// A repeatable random number between -1 and 1 for each cell, by its column and row.
+fn noise(seed: u64, (column, row): (usize, usize)) -> f32 {
     // SplitMix64's finalizer.
-    let cell = ((row as u64) << 32) | column as u64;
-    let key = (cell << 2) | channel as u64;
+    let key = ((row as u64) << 32) | column as u64;
     let mut z = seed ^ key.wrapping_mul(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -824,7 +859,7 @@ mod tests {
     #[test]
     fn noise_stays_in_range() {
         for cell in 0..1000 {
-            let value = noise(7, (cell, cell / 7), cell % 3);
+            let value = noise(7, (cell, cell / 7));
             assert!((-1.0..1.0).contains(&value));
         }
     }
