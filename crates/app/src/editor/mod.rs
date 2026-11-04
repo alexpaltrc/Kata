@@ -42,7 +42,8 @@ use windows::{
             Input::KeyboardAndMouse::{
                 ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_4, VK_BACK,
                 VK_C, VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2,
-                VK_NUMPAD3, VK_NUMPAD4, VK_RETURN, VK_S, VK_SHIFT, VK_TAB, VK_V, VK_X, VK_Y, VK_Z,
+                VK_NUMPAD3, VK_NUMPAD4, VK_RETURN, VK_S, VK_SHIFT, VK_SPACE, VK_TAB, VK_V, VK_X,
+                VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
@@ -495,6 +496,7 @@ impl Editor {
 
     fn glide_to(&mut self, view: View) {
         self.glide = self.glide.retarget(view, Instant::now());
+        self.toolbar.hint_zoom(view.zoom > self.frame().fit().zoom);
         self.invalidate();
     }
 
@@ -788,6 +790,8 @@ impl Editor {
             VK_DELETE | VK_BACK => self.remove_selected(),
             VK_ESCAPE => self.select(None),
             VK_0 | VK_NUMPAD0 if ctrl => self.glide_to(self.frame().fit()),
+            // Unless a control takes it, the space bar fits a zoomed capture back.
+            VK_SPACE if self.toolbar.focused().is_none() => self.glide_to(self.frame().fit()),
             VK_S if ctrl => self.save(),
             VK_C if ctrl => {
                 self.render_document();
@@ -1300,6 +1304,7 @@ impl Editor {
     fn layout(&mut self) {
         self.view = self.frame().fit();
         self.glide = Glide::rest(self.view);
+        self.toolbar.hint_zoom(false);
         let caption_buttons = window::caption_buttons(self.hwnd, self.scale).left;
         self.toolbar.layout(self.window(), caption_buttons);
     }

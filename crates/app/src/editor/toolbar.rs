@@ -1,6 +1,6 @@
 //! The editor's controls: the capture's name, saving and its folder in the title bar,
 //! and two capsules floating at the bottom, centered: the tools' dock and, above it,
-//! the chosen tool's options.
+//! the chosen tool's options, with a hint above them while the capture is zoomed.
 
 use std::{iter, mem, time::Instant};
 
@@ -11,7 +11,7 @@ use kata_ui::{
     controls::{self, Button, Control, Dock, HEIGHT, IconButton, Item, Slider, Toggle},
     figure::Figure,
     motion::{self, Animation, Easing},
-    paint::{Area, Fonts, Painter, Point},
+    paint::{Area, Fonts, Label, Painter, Point},
     window,
 };
 use windows::core::Result;
@@ -40,6 +40,14 @@ const SETTING_ICON: f32 = 16.0;
 const ICON_GAP: f32 = 8.0;
 /// Between two settings.
 const GAP: f32 = 20.0;
+/// The zoom hint's height, its keycap's, the room after its text, and how far
+/// it rises and grows as it shows.
+const HINT: f32 = 32.0;
+const KEYCAP: f32 = 22.0;
+const KEY_PADDING: f32 = 8.0;
+const HINT_END: f32 = 14.0;
+const RISE: f32 = 8.0;
+const GROW: f32 = 0.1;
 
 /// What dragging or clicking on the capture adds, in the dock's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,6 +163,11 @@ pub struct Toolbar {
     fade: Animation,
     /// The options' width, which glides from one tool's to the next.
     width: Animation,
+    /// The hint that the space bar resets the zoom: the key, what it does, and from 0,
+    /// hidden, to 1, in full.
+    space: Label,
+    reset_zoom: Label,
+    hint: Animation,
 }
 
 impl Toolbar {
@@ -238,6 +251,9 @@ impl Toolbar {
             leaving: tool,
             fade: Animation::idle(1.0),
             width: Animation::idle(0.0),
+            space: fonts.caption(strings.space)?,
+            reset_zoom: fonts.caption(strings.reset_zoom)?,
+            hint: Animation::idle(0.0),
         };
         toolbar.width = Animation::idle(toolbar.options_width(tool));
         Ok(toolbar)
@@ -321,9 +337,12 @@ impl Toolbar {
             .find(|&part| self.get(part).contains(point))
     }
 
-    /// Whether `point` is on the toolbar: on a control, or between the options.
+    /// Whether `point` is on the toolbar: on a control, between the options or on the
+    /// zoom hint.
     pub fn covers(&self, point: Point) -> bool {
-        self.part_at(point).is_some() || self.options_area(self.tool()).contains(point)
+        self.part_at(point).is_some()
+            || self.options_area(self.tool()).contains(point)
+            || (self.hint.target() > 0.0 && self.hint_area().contains(point))
     }
 
     /// The controls on show, as assistive technologies know them, each numbered as
@@ -420,13 +439,17 @@ impl Toolbar {
             let (area, radius) = self.get(part).focus_area();
             painter.focus(area, radius);
         }
-        self.tools.draw_tip(painter, self.options_top(), now);
-        self.forms.draw_tip(painter, self.options_top(), now);
+        self.draw_hint(painter, now);
+        // The tools' names make room for the hint, above it.
+        let tips = self.options_top() - (STACK + HINT) * self.hint.value(now);
+        self.tools.draw_tip(painter, tips, now);
+        self.forms.draw_tip(painter, tips, now);
     }
 
     pub fn is_animating(&self, now: Instant) -> bool {
         self.fade.is_running(now)
             || self.width.is_running(now)
+            || self.hint.is_running(now)
             || self
                 .parts()
                 .into_iter()
@@ -539,6 +562,64 @@ impl Toolbar {
             });
             painter.layer(fade, 0.0, || self.draw_settings(painter, self.showing, now));
         });
+    }
+
+    /// Shows the hint that the space bar resets the zoom while `zoomed`, and hides it
+    /// otherwise.
+    pub fn hint_zoom(&mut self, zoomed: bool) {
+        let (to, easing) = if zoomed {
+            (1.0, Easing::DECELERATE)
+        } else {
+            (0.0, Easing::ACCELERATE)
+        };
+        self.hint = self.hint.retarget(to, motion::NORMAL, easing);
+    }
+
+    /// The zoom hint: a keycap and what the key does, in a pill that rises out of the
+    /// options and grows into place as it shows, and sinks back into them as it hides.
+    fn draw_hint(&self, painter: &Painter, now: Instant) {
+        let shown = self.hint.value(now);
+        let area = self.hint_area();
+        let area = Area {
+            top: area.top + RISE * (1.0 - shown),
+            ..area
+        };
+        let base = (area.left + area.width / 2.0, area.bottom());
+        painter.grown(shown, 1.0 - GROW * (1.0 - shown), base, || {
+            let palette = painter.palette;
+            painter.flyout(area, HINT / 2.0);
+            let inset = (HINT - KEYCAP) / 2.0;
+            let key = painter.align(Area::new(
+                area.left + inset,
+                area.top + inset,
+                self.keycap_width(),
+                KEYCAP,
+            ));
+            painter.fill(key, KEYCAP / 2.0, palette.button);
+            painter.stroke(key, KEYCAP / 2.0, painter.border(), palette.control_stroke);
+            let left = key.left + (key.width - self.space.width) / 2.0;
+            painter.text(&self.space, left, key.middle(), palette.text);
+            let left = key.right() + KEY_PADDING;
+            painter.text(
+                &self.reset_zoom,
+                left,
+                area.middle(),
+                palette.text_secondary,
+            );
+        });
+    }
+
+    /// Where the zoom hint shows in full, centered above the options.
+    fn hint_area(&self) -> Area {
+        let inset = (HINT - KEYCAP) / 2.0;
+        let width = inset + self.keycap_width() + KEY_PADDING + self.reset_zoom.width + HINT_END;
+        let left = (self.window.0 - width) / 2.0;
+        Area::new(left, self.options_top() - STACK - HINT, width, HINT)
+    }
+
+    /// The zoom hint's keycap: as wide as its key, but never narrower than round.
+    fn keycap_width(&self) -> f32 {
+        (self.space.width + 2.0 * KEY_PADDING).max(KEYCAP)
     }
 
     fn draw_settings(&self, painter: &Painter, tool: Tool, now: Instant) {

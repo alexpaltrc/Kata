@@ -139,6 +139,18 @@ impl<'a> Painter<'a> {
     /// Draws what `draw` paints at `opacity`, moved `offset` DIPs to the right, even
     /// inside another layer.
     pub fn layer(&self, opacity: f32, offset: f32, draw: impl FnOnce()) {
+        let moved = Matrix3x2::translation(self.snap(offset), 0.0);
+        self.transformed(opacity, moved, draw);
+    }
+
+    /// Draws what `draw` paints at `opacity`, grown `scale` times around `center`,
+    /// even inside another layer.
+    pub fn grown(&self, opacity: f32, scale: f32, (x, y): Point, draw: impl FnOnce()) {
+        let grown = Matrix3x2::scale_around(scale, scale, Vector2::new(x, y));
+        self.transformed(opacity, grown, draw);
+    }
+
+    fn transformed(&self, opacity: f32, transform: Matrix3x2, draw: impl FnOnce()) {
         if opacity <= 0.0 {
             return;
         }
@@ -146,8 +158,7 @@ impl<'a> Painter<'a> {
         let translucent = opacity < 1.0;
         unsafe {
             self.context.GetTransform(&mut outer);
-            self.context
-                .SetTransform(&(Matrix3x2::translation(self.snap(offset), 0.0) * outer));
+            self.context.SetTransform(&(transform * outer));
             if translucent {
                 let everything = D2D_RECT_F {
                     left: f32::MIN,

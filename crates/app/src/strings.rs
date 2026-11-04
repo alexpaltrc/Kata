@@ -53,6 +53,9 @@ pub struct Strings {
     pub in_use: &'static str,
     /// The Shift key's name.
     pub shift: &'static str,
+    /// The space bar's name, on the hint that it resets the zoom, and what it does.
+    pub space: &'static str,
+    pub reset_zoom: &'static str,
     /// What follows a number to make it a percentage.
     percent: &'static str,
 }
@@ -100,6 +103,8 @@ static SPANISH: Strings = Strings {
     add_modifier: "Añade Ctrl o Alt",
     in_use: "Ya está en uso",
     shift: "Mayús",
+    space: "Espacio",
+    reset_zoom: "Restablecer el zoom",
     percent: "\u{a0}%",
 };
 
@@ -140,6 +145,8 @@ static ENGLISH: Strings = Strings {
     add_modifier: "Add Ctrl or Alt",
     in_use: "Already in use",
     shift: "Shift",
+    space: "Space",
+    reset_zoom: "Reset zoom",
     percent: "%",
 };
 

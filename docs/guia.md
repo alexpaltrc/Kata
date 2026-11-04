@@ -62,8 +62,9 @@ mostrar siempre.
   cambia lo seleccionado.
 - Si un rectángulo cubre toda la captura, arrastrar sobre él dibuja uno nuevo; un clic lo
   selecciona.
-- **Zoom:** la rueda del ratón acerca y aleja la captura hacia donde está el cursor. `Ctrl + 0`
-  la devuelve a su tamaño.
+- **Zoom:** la rueda del ratón acerca y aleja la captura hacia donde está el cursor. `Espacio` o
+  `Ctrl + 0` la devuelven a su tamaño; mientras hay zoom, una pequeña píldora encima de la barra
+  lo recuerda.
 - Kata recuerda la herramienta, sus niveles y el Autoguardado para la siguiente captura.
 
 ## Guardar y copiar, sin pensar
@@ -100,7 +101,7 @@ mostrar siempre.
 | `Supr` o `Retroceso` | Borrar lo seleccionado |
 | `Esc` (en el editor) | Quitar la selección |
 | Rueda del ratón | Acercar o alejar la captura |
-| `Ctrl + 0` | Devolver la captura a su tamaño |
+| `Espacio` o `Ctrl + 0` | Devolver la captura a su tamaño |
 
 ## Bandeja y ventana principal
 

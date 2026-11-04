@@ -23,7 +23,7 @@ Reglas:
 - Cada nivel es un slider con pocos pasos, que recuerda el último valor usado.
 - Un clic selecciona un rectángulo, un paso o una forma (una forma, sobre su línea, para no tapar lo que rodea): se mueve arrastrándolo, un rectángulo o una forma se redimensiona desde sus esquinas, una flecha desde sus dos puntas, y se borra con el botón de su esquina, `Supr` o `Retroceso`. Mover un slider o elegir otra forma cambia lo seleccionado.
 - Un rectángulo que cubre toda la captura no tiene adónde moverse: arrastrar sobre él dibuja uno nuevo con la herramienta activa.
-- **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Ctrl + 0` la devuelve a su tamaño, como en Windows 11. Sin botones. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
+- **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Espacio` o `Ctrl + 0` la devuelven a su tamaño. Sin botones: mientras hay zoom, una píldora encima de la barra dice que `Espacio` lo restablece; surge de la barra al acercar y vuelve a ella al quitar el zoom. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
 - `1`, `2`, `3` y `4` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
 - La herramienta, los niveles y el Autoguardado se recuerdan para la siguiente captura.
 
