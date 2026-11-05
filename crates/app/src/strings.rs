@@ -12,11 +12,13 @@ pub struct Strings {
     pub free: &'static str,
     pub first_capture: &'static str,
     /// The welcome's Ready, with the first capture: how long it took to show and how
-    /// much lighter it is; what the setting that makes Kata the screenshot app does
-    /// there; the way on; and that nothing leaves the PC.
+    /// much lighter it is; the setting that makes Kata the screenshot app, said for
+    /// someone who doesn't know the keys or Windows' own app; the way on; and that
+    /// nothing leaves the PC.
     ready: &'static str,
     lighter: [&'static str; 2],
-    pub screen_keys_short: &'static str,
+    pub make_default: &'static str,
+    pub make_default_detail: &'static str,
     pub go_on: &'static str,
     pub stays_here: &'static str,
     /// The welcome's Premium: that all so far is free, what Premium adds, and the
@@ -115,7 +117,8 @@ static SPANISH: Strings = Strings {
     first_capture: "Toma tu primera captura",
     ready: "Lista en ",
     lighter: ["Y pesa un ", " menos que con Windows"],
-    screen_keys_short: "Impr Pant abre Kata en vez de Recortes",
+    make_default: "Haz de Kata tu app de capturas",
+    make_default_detail: "Las teclas de captura de Windows, como Impr Pant, abrirán Kata",
     go_on: "Continuar",
     stays_here: "Todo se queda en tu equipo",
     all_free: "Todo esto es gratis",
@@ -175,7 +178,8 @@ static ENGLISH: Strings = Strings {
     first_capture: "Take your first capture",
     ready: "Ready in ",
     lighter: ["And it's ", " lighter than with Windows"],
-    screen_keys_short: "Print Screen opens Kata instead of the Snipping Tool",
+    make_default: "Make Kata your screenshot app",
+    make_default_detail: "Windows' screenshot keys, like Print Screen, will open Kata",
     go_on: "Continue",
     stays_here: "Everything stays on your PC",
     all_free: "All of this is free",

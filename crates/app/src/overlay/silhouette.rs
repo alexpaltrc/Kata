@@ -1,9 +1,15 @@
-//! The hint the first few captures show: the outline of a window others cover,
-//! hidden parts and all, traced in Kata's signature colors from the point nearest
-//! the pointer, the way the logo draws itself. Pointing at the window shows it
-//! whole, and the outline fades as the selection lands on it.
+//! The hint the first few captures show: a window's outline, traced in Kata's
+//! signature colors from the point nearest the pointer, the way the logo draws
+//! itself. It picks a window others cover, hidden parts and all: pointing at it
+//! shows it whole, and the outline fades as the selection lands on it. With none
+//! covered, it traces the window the pointer is on, over the selection, and melts
+//! into it; with the pointer on none, the window that shows most, until the
+//! pointer gets there.
 
-use std::time::Instant;
+use std::{
+    cmp::Reverse,
+    time::{Duration, Instant},
+};
 
 use kata_capture::Screenshot;
 use kata_editor::Rect;
@@ -33,6 +39,8 @@ use super::around;
 /// trace.
 const DELAY: f32 = 0.25;
 const TRACE: f32 = 0.8;
+/// How long the outline of the window pointed at takes to melt into the selection.
+const MELT: Duration = Duration::from_millis(500);
 /// The pen's pace, the logo's: off quickly, slowing to a close.
 const PEN: Easing = Easing::new(0.4, 0.0, 0.2, 1.0);
 /// At 100 % scale: how thick the outline is, and how far its shadow reaches past
@@ -45,38 +53,49 @@ const SHADE: f32 = 0.25;
 /// reach it easily.
 const REACH: f32 = 48.0;
 
-/// A covered window's outline, and how far it has been traced.
+/// Why a silhouette traces its window, which sets how it goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// Others cover it: it shows until the pointer gets there, which shows it whole.
+    Covered,
+    /// The pointer is on it, and no window is covered: traced over the selection,
+    /// it melts into it.
+    Pointed,
+    /// The pointer is on no window, and none is covered: the one that shows most,
+    /// until the pointer gets there.
+    Front,
+}
+
+/// A window's outline, and how far it has been traced.
 pub struct Silhouette {
     /// Which window, among the shot's.
     pub index: usize,
+    pub kind: Kind,
     outline: Outline,
     colors: [D2D1_COLOR_F; 4],
     /// How thick the shadow is: none in a contrast theme.
     shadow: f32,
     /// The seconds since the overlay appeared.
     clock: Animation,
-    /// 1 while it shows, heading to 0 once the pointer reaches the window or a drag
-    /// begins.
+    /// 1 while it shows, heading to 0 once the pointer reaches the window (or, if
+    /// pointed at, leaves it, or it's traced) or a drag begins.
     opacity: Animation,
 }
 
 impl Silhouette {
-    /// The hint for `shot`, with the pointer at `pointer`, over window `under`: on
-    /// the frontmost covered window but that one, with enough of it showing for the
-    /// pointer to reach it easily.
+    /// The hint for `shot`, with the pointer at `pointer`, over window `under`.
     pub fn pick(shot: &Screenshot, pointer: (i32, i32), under: Option<usize>) -> Option<Self> {
-        let windows = &shot.windows;
-        let index = (0..windows.len()).find(|&index| {
-            let window = &windows[index];
-            let reach = (REACH * shot.scale_at(window.rect)).round() as i32;
-            let front = windows[..index].iter().map(|front| front.rect);
-            Some(index) != under
-                && window.covered
-                && visible(window.rect, front)
-                    .iter()
-                    .any(|part| part.width() >= reach && part.height() >= reach)
-        })?;
-        let window = &windows[index];
+        let windows: Vec<Candidate> = shot
+            .windows
+            .iter()
+            .map(|window| Candidate {
+                rect: window.rect,
+                covered: window.covered,
+                reach: (REACH * shot.scale_at(window.rect)).round() as i32,
+            })
+            .collect();
+        let (index, kind) = choose(&windows, under)?;
+        let window = &shot.windows[index];
         let scale = shot.scale_at(window.rect);
         let width = (WIDTH * scale).round().max(1.0);
         // Hugging the window from outside, and from inside at the screen's edges.
@@ -101,6 +120,7 @@ impl Silhouette {
         let palette = Palette::current();
         Some(Self {
             index,
+            kind,
             outline: Outline::new(line, radius, width, center),
             colors: if palette.contrast {
                 [palette.accent; 4]
@@ -117,19 +137,36 @@ impl Silhouette {
         })
     }
 
-    /// Starts tracing: at once in full when animation effects are off.
+    /// Starts tracing: at once in full when animation effects are off. The window
+    /// pointed at melts into the selection once traced, so with animation effects
+    /// off it doesn't show.
     pub fn begin(&mut self) {
         self.clock = Animation::clock(DELAY + TRACE);
+        if self.kind == Kind::Pointed {
+            let traced = Duration::from_secs_f32(DELAY + TRACE);
+            self.opacity = Animation::new(1.0, 0.0, MELT, Easing::POINT_TO_POINT).delayed(traced);
+        }
     }
 
-    /// Fades it out, in step with the selection landing on its window. Whether it
-    /// was showing.
+    /// Follows the selection onto `window`, or onto none: a hint pointing at a
+    /// window fades once the selection lands on it, and one tracing the selection
+    /// once it leaves. Whether that showed a covered window whole, the lesson.
+    pub fn follow(&mut self, window: Option<usize>) -> bool {
+        let on = window == Some(self.index);
+        let settled = if self.kind == Kind::Pointed { !on } else { on };
+        settled && self.fade() && self.kind == Kind::Covered
+    }
+
+    /// Fades it out quickly, unless it's nearly gone already. Whether it was showing.
     pub fn fade(&mut self) -> bool {
-        let showing = self.opacity.target() > 0.0;
-        self.opacity = self
-            .opacity
-            .retarget(0.0, motion::FAST, Easing::POINT_TO_POINT);
-        showing
+        let now = Instant::now();
+        let opacity = self.opacity.value(now);
+        let gone = self.opacity.target() == 0.0 && self.opacity.end() <= now + motion::FAST;
+        if gone || opacity <= 0.0 {
+            return false;
+        }
+        self.opacity = Animation::new(opacity, 0.0, motion::FAST, Easing::POINT_TO_POINT);
+        true
     }
 
     /// How it looks at `now`, with the overlay `presence` shown.
@@ -350,6 +387,46 @@ impl Outline {
     }
 }
 
+/// A window a silhouette may trace.
+struct Candidate {
+    rect: Rect,
+    covered: bool,
+    /// How much of it must show, in pixels, for the pointer to reach it easily.
+    reach: i32,
+}
+
+/// Which of `windows`, front to back, to trace with the pointer on window `under`,
+/// and why: the frontmost covered window but that one, else that one, else the one
+/// that shows most. Only one the pointer can reach easily, unless pointed at.
+fn choose(windows: &[Candidate], under: Option<usize>) -> Option<(usize, Kind)> {
+    // How much of a window shows, if the pointer can reach it easily.
+    let shown = |index: usize| {
+        let window = &windows[index];
+        let front = windows[..index].iter().map(|front| front.rect);
+        let parts = visible(window.rect, front);
+        let reach = window.reach;
+        parts
+            .iter()
+            .any(|part| part.width() >= reach && part.height() >= reach)
+            .then(|| {
+                parts
+                    .iter()
+                    .map(|part| part.width() as i64 * part.height() as i64)
+                    .sum()
+            })
+    };
+    let covered = (0..windows.len())
+        .find(|&index| Some(index) != under && windows[index].covered && shown(index).is_some());
+    match (covered, under) {
+        (Some(index), _) => Some((index, Kind::Covered)),
+        (None, Some(index)) => Some((index, Kind::Pointed)),
+        (None, None) => (0..windows.len())
+            .filter_map(|index| Some((index, shown(index)?)))
+            .max_by_key(|&(index, area): &(usize, i64)| (area, Reverse(index)))
+            .map(|(index, _)| (index, Kind::Front)),
+    }
+}
+
 /// The parts of `rect` that the windows `front` of it leave showing.
 fn visible(rect: Rect, front: impl Iterator<Item = Rect>) -> Vec<Rect> {
     front.fold(vec![rect], |parts, front| {
@@ -410,6 +487,46 @@ mod tests {
         let outline = Outline::new(line, 13.0, 3.0, (80.0, 20.0));
         assert_eq!(outline.side, 0);
         assert_eq!(outline.origin, Vector2::new(114.0, 50.5));
+    }
+
+    fn window(rect: Rect, covered: bool) -> Candidate {
+        Candidate {
+            rect,
+            covered,
+            reach: 48,
+        }
+    }
+
+    #[test]
+    fn a_covered_window_comes_first() {
+        // A browser covers half a document, beside a small note no one covers.
+        let windows = [
+            window(Rect::new(0, 0, 800, 600), false),
+            window(Rect::new(400, 100, 1400, 900), true),
+            window(Rect::new(1500, 0, 1700, 200), false),
+        ];
+        assert_eq!(choose(&windows, Some(0)), Some((1, Kind::Covered)));
+        assert_eq!(choose(&windows, None), Some((1, Kind::Covered)));
+        // Pointed at, the covered window shows whole anyway: the hint traces it.
+        assert_eq!(choose(&windows, Some(1)), Some((1, Kind::Pointed)));
+        // Too little of it shows for the pointer to reach it easily.
+        let windows = [
+            window(Rect::new(0, 0, 800, 600), false),
+            window(Rect::new(0, 0, 820, 600), true),
+        ];
+        assert_eq!(choose(&windows, None), Some((0, Kind::Front)));
+    }
+
+    #[test]
+    fn with_none_covered_the_pointed_window_or_the_one_showing_most() {
+        let windows = [
+            window(Rect::new(0, 0, 300, 200), false),
+            window(Rect::new(400, 0, 1400, 900), false),
+            window(Rect::new(0, 1000, 1920, 1048), false),
+        ];
+        assert_eq!(choose(&windows, Some(2)), Some((2, Kind::Pointed)));
+        assert_eq!(choose(&windows, None), Some((1, Kind::Front)));
+        assert_eq!(choose(&[], None), None);
     }
 
     #[test]

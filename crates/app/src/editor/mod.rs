@@ -93,6 +93,9 @@ const FLIGHT: Duration = Duration::from_millis(350);
 const SAVED_AFTER: Duration = Duration::from_millis(400);
 /// Blinks the caret while the name is typed.
 const BLINK_TIMER: usize = 1;
+/// Tries the drag's rehearsal every so many milliseconds, until it plays on its own.
+const REHEARSE_TIMER: usize = 2;
+const REHEARSE_EVERY: u32 = 500;
 const CLASS: PCWSTR = w!("Kata.Editor");
 
 /// A capture to edit.
@@ -155,7 +158,7 @@ unsafe fn create(
         }
     }
     let hints = Hints {
-        drag: settings::hinting(Hint::Drag) && !settings::hinting(Hint::Name),
+        drag: settings::hinting(Hint::Drag),
         folder: (settings::hinting(Hint::Saved))
             .then(|| output.folder_name())
             .flatten()
@@ -236,6 +239,9 @@ unsafe fn create(
         // The first frame is ready before the window shows.
         editor.layout();
         editor.paint();
+        if editor.hints.drag {
+            SetTimer(Some(hwnd), REHEARSE_TIMER, REHEARSE_EVERY, None);
+        }
         let state = Box::into_raw(Box::new(RefCell::new(editor)));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
         let _ = ShowWindow(hwnd, SW_SHOW);
@@ -364,7 +370,9 @@ enum Flight {
 
 /// The welcome's signals this editor still shows.
 struct Hints {
-    /// That the capture drags away from its name, as the pointer first goes over it.
+    /// That the capture drags away from its name: on its own once all else is
+    /// still, the name's invitation included, or, if the user gets to work first,
+    /// as the pointer first goes over the name.
     drag: bool,
     /// That the capture saved itself, and in the folder named so, once a change
     /// first does; and whether that's due.
@@ -460,6 +468,12 @@ impl Editor {
             WM_CHAR if self.toolbar.name().is_editing() => {
                 if self.toolbar.name_mut().type_unit(wparam.0 as u16) {
                     self.naming_changed();
+                }
+            }
+            WM_TIMER if wparam.0 == REHEARSE_TIMER => {
+                self.rehearse();
+                if !self.hints.drag {
+                    let _ = unsafe { KillTimer(Some(self.hwnd), REHEARSE_TIMER) };
                 }
             }
             WM_TIMER if wparam.0 == BLINK_TIMER => {
@@ -641,6 +655,8 @@ impl Editor {
 
     fn press(&mut self, point: Point) {
         self.end_rehearsal();
+        // Getting to work first leaves the rehearsal to the pointer going over the name.
+        let _ = unsafe { KillTimer(Some(self.hwnd), REHEARSE_TIMER) };
         // Pressing away from the name's box ends naming, and does what it does.
         if !self.toolbar.name().contains(point) {
             self.finish_naming();
@@ -1217,8 +1233,9 @@ impl Editor {
         self.invalidate();
     }
 
-    /// The first time the pointer goes over the name, the capture rises toward it
-    /// as the card it's dragged away as, and settles back, when nothing else moves.
+    /// The capture rises toward its name as the card it's dragged away as, and
+    /// settles back, when nothing else moves: once, on its own or as the pointer
+    /// goes over the name.
     fn rehearse(&mut self) {
         let now = Instant::now();
         let name = self.toolbar.name();
@@ -1231,9 +1248,9 @@ impl Editor {
             return;
         }
         let clock = Animation::clock(hints::REHEARSAL);
+        self.hints.drag = false;
         // With animation effects off, it shows nothing.
         if clock.is_running(now) {
-            self.hints.drag = false;
             self.flight = Some(Flight::Rehearse { clock });
             settings::hinted(Hint::Drag, false);
             self.invalidate();

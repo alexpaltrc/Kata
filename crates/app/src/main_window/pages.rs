@@ -187,9 +187,9 @@ impl Pages {
             took: fonts.title(&text.ready(0.0))?,
             lighter: fonts.label(&text.lighter(0.0))?,
             lighter_rise: None,
-            ready_keys: Toggle::new(fonts.label(text.screen_keys)?, settings.screen_keys)
-                .described(fonts.caption(text.screen_keys_short)?)
-                .explained(text.screen_keys_short),
+            ready_keys: Toggle::new(fonts.label(text.make_default)?, settings.screen_keys)
+                .described(fonts.caption(text.make_default_detail)?)
+                .explained(text.make_default_detail),
             ready_setting: Area::default(),
             go_on: Button::new(fonts.label(text.go_on)?),
             stays_here: fonts.caption(text.stays_here)?,

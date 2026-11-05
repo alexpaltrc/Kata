@@ -31,7 +31,7 @@ propio documento: [compresion.md](compresion.md).
 - **Cancelar:** `Esc` o clic derecho.
 - **Ventanas tapadas:** si otra ventana tapa una parte, al pasar el cursor aparece completa, y así
   se captura. Lo que queda fuera de la pantalla no se incluye. En las primeras capturas, una
-  silueta de colores la señala.
+  silueta de colores la señala o, si ninguna está tapada, rodea la que puedes capturar.
 - **Al soltar:** la captura se copia al portapapeles al instante, suena un toque sutil y se guarda
   en segundo plano. Luego se abre el editor (o nada, si así se eligió en Ajustes, para tomar
   varias capturas seguidas).
@@ -120,8 +120,9 @@ mostrar siempre.
   pulsar Nuevo recorte, la ventana se cierra para no salir en la captura.
 - **La primera vez:** la ventana abre con un saludo de Kata y el botón **Toma tu primera
   captura**. Al terminar esa captura, vuelve con ella, lo que tardó en aparecer y cuánto menos
-  pesa que con Windows, y ahí se puede encender **Kata es tu app de capturas**. Desde entonces,
-  abre como siempre.
+  pesa que con Windows, y ahí se puede encender **Haz de Kata tu app de capturas**: desde entonces,
+  las teclas de captura de Windows, como `Impr Pant`, abren Kata. Después, la ventana abre como
+  siempre.
 
 ## Ajustes
 
