@@ -71,7 +71,12 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 ## Pendiente
 
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-- **Bienvenida (onboarding)**, a la altura del resto de Kata. Enseñará lo que hoy no se ve a simple vista, como arrastrar la captura desde su nombre o que todo se guarda solo.
+- **Bienvenida (onboarding)**, a la altura del resto de Kata, en diseño. Se aprende usando Kata de verdad, con una señal a la vez, y nada de lo que enseña es Premium:
+  1. **Hola.** El icono se dibuja solo y lo cruza el destello. Kata se presenta, dice que es gratis y sin límites, e invita a tomar la primera captura.
+  2. **La primera captura**, sobre la pantalla real: una pista sugiere pasar el cursor por una ventana tapada, que sale completa.
+  3. **El editor**, con tres señales, de una en una: ponerle nombre, que se guarda solo (y dónde) y que la captura se arrastra desde su nombre.
+  4. **Lista.** La captura llega como la tarjeta de firma, con lo que tardó en aparecer y cuánto menos pesa, medidos en esa misma captura. Ahí se puede encender Kata como app de capturas, con una línea que explica qué cambia, y se cuenta que nada sale del equipo.
+  5. **Premium**, que se cierra con una X. Primero dice que todo lo visto es gratis, para siempre y sin límites; luego enseña lo que Premium añade. «Seguir gratis» se ve tanto como comprar.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
 - **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 
