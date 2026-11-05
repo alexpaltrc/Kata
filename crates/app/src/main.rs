@@ -206,6 +206,10 @@ impl App {
                     Some(tray::Command::Capture) => self.capture_soon(),
                     Some(tray::Command::OpenFolder) => export::open_folder(),
                     Some(tray::Command::Settings) => self.show(Page::Settings),
+                    Some(tray::Command::ReplayWelcome) => {
+                        settings::forget_welcome();
+                        self.show(Page::Home);
+                    }
                     Some(tray::Command::Exit) => unsafe { PostQuitMessage(0) },
                     None => {}
                 },

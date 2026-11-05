@@ -103,6 +103,13 @@ pub fn welcome_done() {
     }
 }
 
+/// Forgets the welcome and its hints, so Kata greets as on its first day. Only
+/// Kata Dev offers it, to try the welcome again.
+pub fn forget_welcome() {
+    registry::delete(KEY, w!("Welcomed"));
+    registry::delete(KEY, w!("Hints"));
+}
+
 /// How many captures show the hint to point at a covered window, at most.
 const HINTS: usize = 3;
 

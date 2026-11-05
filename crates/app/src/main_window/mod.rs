@@ -492,8 +492,12 @@ impl Main {
         }
     }
 
-    /// Slides `page` in.
+    /// Slides `page` in. The welcome plays from its start, even if it's showing.
     fn go(&mut self, page: Page) {
+        if page == Page::Welcome {
+            self.pages.greet();
+            self.invalidate();
+        }
         if page == self.page {
             return;
         }
@@ -502,9 +506,6 @@ impl Main {
         self.pages.refocus();
         self.direction = if page > self.page { 1.0 } else { -1.0 };
         self.page = page;
-        if page == Page::Welcome {
-            self.pages.greet();
-        }
         self.transition = Animation::new(0.0, 1.0, motion::NORMAL, Easing::DECELERATE);
         self.invalidate();
     }

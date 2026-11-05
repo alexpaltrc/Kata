@@ -41,6 +41,7 @@ pub enum Command {
     Capture,
     OpenFolder,
     Settings,
+    ReplayWelcome,
     Exit,
 }
 
@@ -103,6 +104,7 @@ impl Tray {
         const OPEN_FOLDER: usize = 2;
         const SETTINGS: usize = 3;
         const EXIT: usize = 4;
+        const REPLAY_WELCOME: usize = 5;
         let text = strings();
         unsafe {
             let menu = CreatePopupMenu().ok()?;
@@ -115,6 +117,11 @@ impl Tray {
             );
             let _ = AppendMenuW(menu, MF_STRING, SETTINGS, &HSTRING::from(text.settings));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+            if channel::is_dev() {
+                let replay = HSTRING::from(text.replay_welcome);
+                let _ = AppendMenuW(menu, MF_STRING, REPLAY_WELCOME, &replay);
+                let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+            }
             let _ = AppendMenuW(menu, MF_STRING, EXIT, &HSTRING::from(text.exit));
             // Without these two calls the menu wouldn't close when clicking elsewhere.
             let _ = SetForegroundWindow(self.hwnd);
@@ -132,6 +139,7 @@ impl Tray {
                 CAPTURE => Some(Command::Capture),
                 OPEN_FOLDER => Some(Command::OpenFolder),
                 SETTINGS => Some(Command::Settings),
+                REPLAY_WELCOME => Some(Command::ReplayWelcome),
                 EXIT => Some(Command::Exit),
                 _ => None,
             }
