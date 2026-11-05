@@ -67,8 +67,6 @@ pub struct EditorSettings {
     pub step_size: usize,
     /// The shapes' form: rectangle, ellipse, arrow.
     pub form: usize,
-    /// Whether every change to a capture overwrites its file.
-    pub autosave: bool,
 }
 
 impl EditorSettings {
@@ -80,7 +78,6 @@ impl EditorSettings {
             around: read(w!("Around"), 0).min(BLUR_LEVELS),
             step_size: read(w!("StepSize"), 1).min(STEP_SIZES.len() - 1),
             form: read(w!("Form"), 0).min(2),
-            autosave: read(w!("Autosave"), 1) != 0,
         }
     }
 
@@ -91,7 +88,6 @@ impl EditorSettings {
         write(w!("Around"), self.around);
         write(w!("StepSize"), self.step_size);
         write(w!("Form"), self.form);
-        write(w!("Autosave"), usize::from(self.autosave));
     }
 }
 

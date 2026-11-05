@@ -25,17 +25,17 @@ Reglas:
 - Un rectángulo que cubre toda la captura no tiene adónde moverse: arrastrar sobre él dibuja uno nuevo con la herramienta activa.
 - **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Espacio` o `Ctrl + 0` la devuelven a su tamaño. Sin botones: mientras hay zoom, una píldora encima de la barra dice que `Espacio` lo restablece; surge de la barra al acercar y vuelve a ella al quitar el zoom. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
 - `1`, `2`, `3` y `4` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
-- La herramienta, los niveles y el Autoguardado se recuerdan para la siguiente captura.
+- La herramienta y los niveles se recuerdan para la siguiente captura.
 
 ## Guardado y portapapeles, sin pensar
 
-- **Autoguardado** (interruptor en el editor, activado por defecto): cada cambio sobrescribe el PNG. Al apagarlo aparece el botón **Guardar**.
-- **El portapapeles siempre tiene la versión más reciente:** la captura recién tomada y, después, cada edición, aunque el Autoguardado esté apagado.
+- **Se guarda solo, siempre:** cada cambio sobrescribe el PNG al terminar. No hay interruptor ni botón Guardar: nadie tiene que pensar en guardar, y el nombre tiene todo el sitio de la barra.
+- **El portapapeles siempre tiene la versión más reciente:** la captura recién tomada y, después, cada edición.
 - **La versión editada reemplaza a la original.** No quedan copias ni archivos extra.
-- **El nombre** va arriba, al centro del editor. Con un clic se escribe; la fecha y la hora se quedan delante, para que todas las capturas, con nombre o sin él, se ordenen solas por antigüedad: `2026-11-03 14.32.05 - Pedidos.png`. El archivo cambia de nombre al terminar (Intro, un clic fuera o al cerrar el editor), con o sin Autoguardado. Esc deja el de antes, y un nombre vacío vuelve a la fecha y la hora. Sin nombre, tras la fecha dice «Ponle nombre», en gris. Al pasar el cursor aparecen un asa de puntos a la izquierda (se arrastra) y un lápiz a la derecha (se renombra). Al abrir el editor lo cruza un destello de colores (azul, violeta, rosa y naranja, siempre los mismos, luminosos en el tema oscuro y más intensos en el claro), para que se note que está ahí, y otra vez al cambiarlo.
+- **El nombre** va arriba, al centro del editor. Con un clic se escribe; la fecha y la hora se quedan delante, para que todas las capturas, con nombre o sin él, se ordenen solas por antigüedad: `2026-11-03 14.32.05 - Pedidos.png`. El archivo cambia de nombre al terminar (Intro, un clic fuera o al cerrar el editor). Esc deja el de antes, y un nombre vacío vuelve a la fecha y la hora. Sin nombre, tras la fecha dice «Ponle nombre», en gris. Al pasar el cursor aparecen un asa de puntos a la izquierda (se arrastra) y un lápiz a la derecha (se renombra). Al abrir el editor lo cruza un destello de colores (azul, violeta, rosa y naranja, siempre los mismos, luminosos en el tema oscuro y más intensos en el claro), para que se note que está ahí, y otra vez al cambiarlo.
 - **Arrastrar la captura:** el nombre, arrastrado, lleva el archivo a una carpeta, un documento, un chat o un correo. Se copia: la captura conserva el suyo. Al primer movimiento, la captura despega: se vuelve una tarjeta pequeña de esquinas redondeadas, apenas inclinada, y vuela hasta el cursor mientras la cruza el destello del nombre. La tarjeta lleva el sello de Kata: una sombra honda y suave, un brillo leve y un borde fino con los colores del destello. Desde ahí viaja con el cursor, también sobre el editor; mientras tanto, la captura se hunde y se atenúa un poco, y vuelve al soltar. Si se suelta sobre el editor o se cancela con Esc, la tarjeta vuelve volando a la captura.
-- **El botón de la carpeta** (junto al Autoguardado) abre la carpeta de las capturas, con esta seleccionada.
-- **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan fijos en el archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
+- **El botón de la carpeta** (arriba a la derecha) abre la carpeta de las capturas, con esta seleccionada.
+- **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan fijos en el archivo.
 
 ## Bandeja
 
@@ -71,7 +71,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 ## Pendiente
 
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-- **Bienvenida (onboarding)**, a la altura del resto de Kata. Enseñará lo que hoy no se ve a simple vista, como arrastrar la captura desde su nombre, y permitirá quitar el interruptor de Autoguardado: Kata guardará siempre.
+- **Bienvenida (onboarding)**, a la altura del resto de Kata. Enseñará lo que hoy no se ve a simple vista, como arrastrar la captura desde su nombre o que todo se guarda solo.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
 - **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 

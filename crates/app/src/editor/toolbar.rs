@@ -8,7 +8,7 @@ use kata_editor::{Form, Shape, ZOOMS};
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Button, Control, Dock, HEIGHT, IconButton, Item, Slider, Toggle},
+    controls::{self, Control, Dock, HEIGHT, IconButton, Item, Slider},
     figure::Figure,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
@@ -99,8 +99,6 @@ pub enum Part {
     StepSize,
     Form,
     Name,
-    Save,
-    Autosave,
     Folder,
 }
 
@@ -149,8 +147,6 @@ pub struct Toolbar {
     step_size: Setting,
     forms: Dock,
     name: Name,
-    save: Button,
-    autosave: Toggle,
     folder: IconButton,
     /// The part on show with the keyboard focus.
     focus: Option<Part>,
@@ -218,9 +214,6 @@ impl Toolbar {
             item(icons::arrow(graphics, Dock::ICON)?, strings.forms[2])?,
         ];
         let droplet = || icons::blur(graphics, SETTING_ICON).map(|(outlined, _)| outlined);
-        // Shown only while autosave is off, and only useful once there's a change.
-        let mut save = Button::new(fonts.label(strings.save)?, !settings.autosave);
-        save.enable(false);
         let tool = Tool::at(settings.tool);
         let mut toolbar = Self {
             tools: Dock::new(tools, tool as usize, named),
@@ -242,8 +235,6 @@ impl Toolbar {
             ),
             forms: Dock::compact(forms, settings.form),
             name: Name::new(fonts, names)?,
-            save,
-            autosave: Toggle::new(fonts.label(strings.autosave)?, settings.autosave),
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             focus: None,
             window: (0.0, 0.0),
@@ -268,23 +259,13 @@ impl Toolbar {
             around: self.around.slider.value(),
             step_size: self.step_size.slider.value(),
             form: self.forms.selected(),
-            autosave: self.autosave.is_on(),
         }
     }
 
     /// The narrowest the window fits the toolbar in, in DIPs: the title bar's
     /// controls beside the caption buttons, and the widest capsule at the bottom.
     pub fn min_width(&self) -> f32 {
-        let title = EDGE
-            + name::MIN
-            + EDGE
-            + self.save.width()
-            + EDGE
-            + self.autosave.width()
-            + EDGE
-            + IconButton::WIDTH
-            + END
-            + window::CAPTION_BUTTONS;
+        let title = EDGE + name::MIN + EDGE + IconButton::WIDTH + END + window::CAPTION_BUTTONS;
         let options = Tool::ALL
             .map(|tool| self.options_width(tool))
             .into_iter()
@@ -305,12 +286,8 @@ impl Toolbar {
         let top = |height: f32| (TITLE_BAR - height) / 2.0;
         let folder = caption_buttons - END - IconButton::WIDTH;
         self.folder.place(folder, top(IconButton::HEIGHT));
-        let toggle = folder - EDGE - self.autosave.width();
-        self.autosave.place(toggle, top(HEIGHT));
-        self.save
-            .place(toggle - EDGE - self.save.width(), top(HEIGHT));
         let center = (window.0 / 2.0, TITLE_BAR / 2.0);
-        self.name.place(EDGE, self.save.area().left - EDGE, center);
+        self.name.place(EDGE, folder - EDGE, center);
 
         let (width, height) = window;
         let dock = (width - self.tools.width()) / 2.0;
@@ -371,8 +348,6 @@ impl Toolbar {
             Part::StepSize => &mut self.step_size.slider,
             Part::Form => &mut self.forms,
             Part::Name => &mut self.name,
-            Part::Save => &mut self.save,
-            Part::Autosave => &mut self.autosave,
             Part::Folder => &mut self.folder,
         }
     }
@@ -536,18 +511,6 @@ impl Toolbar {
         &mut self.name
     }
 
-    pub fn autosave(&self) -> bool {
-        self.autosave.is_on()
-    }
-
-    pub fn show_save(&mut self, shown: bool) {
-        self.save.show(shown);
-    }
-
-    pub fn enable_save(&mut self, enabled: bool) {
-        self.save.enable(enabled);
-    }
-
     /// The options' capsule, as wide as it glides to, with the settings crossfading
     /// inside it as the tool changes.
     fn draw_options(&self, painter: &Painter, now: Instant) {
@@ -664,7 +627,7 @@ impl Toolbar {
     fn parts(&self) -> Vec<Part> {
         let mut parts = vec![Part::Tools];
         parts.extend_from_slice(self.tool().options());
-        parts.extend([Part::Name, Part::Save, Part::Autosave, Part::Folder]);
+        parts.extend([Part::Name, Part::Folder]);
         parts
     }
 
@@ -677,8 +640,6 @@ impl Toolbar {
             Part::StepSize => &self.step_size.slider,
             Part::Form => &self.forms,
             Part::Name => &self.name,
-            Part::Save => &self.save,
-            Part::Autosave => &self.autosave,
             Part::Folder => &self.folder,
         }
     }

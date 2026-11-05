@@ -25,8 +25,6 @@ pub struct Strings {
     /// What assistive technologies call the setting that sizes the steps.
     pub step_size: &'static str,
     pub step_sizes: [&'static str; STEP_SIZES.len()],
-    pub autosave: &'static str,
-    pub save: &'static str,
     /// What assistive technologies call the button that shows the capture's file.
     pub open_file_location: &'static str,
     /// The invitation to name the capture: after its date while it has no name, and
@@ -83,8 +81,6 @@ static SPANISH: Strings = Strings {
     no_blur: "Ninguno",
     step_size: "Tamaño de los pasos",
     step_sizes: ["Pequeño", "Mediano", "Grande", "Muy grande"],
-    autosave: "Autoguardado",
-    save: "Guardar",
     open_file_location: "Abrir la ubicación del archivo",
     add_name: "Ponle nombre",
     rename: "Cambiar el nombre",
@@ -125,8 +121,6 @@ static ENGLISH: Strings = Strings {
     no_blur: "None",
     step_size: "Step size",
     step_sizes: ["Small", "Medium", "Large", "Extra large"],
-    autosave: "Autosave",
-    save: "Save",
     open_file_location: "Open file location",
     add_name: "Add a name",
     rename: "Rename",

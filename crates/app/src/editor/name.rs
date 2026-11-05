@@ -475,7 +475,7 @@ impl Control for Name {
             elements.push(Element {
                 control,
                 name: self.stem.clone(),
-                role: Role::Button { enabled: true },
+                role: Role::Button,
                 area: self.rest(),
                 help: strings().rename,
             });

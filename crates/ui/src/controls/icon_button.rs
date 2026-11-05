@@ -91,7 +91,7 @@ impl Control for IconButton {
         elements.push(Element {
             control,
             name: self.name.clone(),
-            role: Role::Button { enabled: true },
+            role: Role::Button,
             area: self.area,
             help: "",
         });

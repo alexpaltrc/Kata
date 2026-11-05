@@ -135,7 +135,7 @@ impl Control for Shortcut {
         elements.push(Element {
             control,
             name: format!("{}, {shows}", self.name),
-            role: Role::Button { enabled: true },
+            role: Role::Button,
             area: self.area(),
             help: "",
         });

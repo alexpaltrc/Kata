@@ -1,6 +1,6 @@
 //! The editor: a window showing a capture, where the user blurs parts of it, puts one
 //! in focus, numbers the steps to follow and points things out with shapes. Each
-//! change reaches the clipboard and, with autosave on, the capture's file.
+//! change reaches the clipboard and the capture's file.
 
 mod canvas;
 mod icons;
@@ -199,7 +199,6 @@ unsafe fn create(
             carrying: None,
             tracking: false,
             unpublished: false,
-            unsaved: false,
             access: Access::new(hwnd),
         };
         // The first frame is ready before the window shows.
@@ -367,10 +366,8 @@ struct Editor {
     carrying: Option<(PathBuf, Option<Picture>, Rc<Handover>)>,
     /// Whether Windows will say when the pointer leaves.
     tracking: bool,
-    /// The document changed since it was last put on the clipboard.
+    /// The document changed since it was last put on the clipboard and in its file.
     unpublished: bool,
-    /// The clipboard has a version the file doesn't.
-    unsaved: bool,
     access: Access,
 }
 
@@ -1007,14 +1004,6 @@ impl Editor {
     fn activated(&mut self, part: Part) {
         match part {
             Part::Tools => self.tool_changed(),
-            Part::Save => self.save(),
-            Part::Autosave => {
-                let on = self.toolbar.autosave();
-                self.toolbar.show_save(!on);
-                if on {
-                    self.save();
-                }
-            }
             Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form => {
                 self.option_changed(part)
             }
@@ -1189,34 +1178,19 @@ impl Editor {
         }
     }
 
-    /// Puts the document on the clipboard and, with autosave on, in its file.
+    /// Puts the document on the clipboard and in its file.
     fn publish(&mut self) {
         self.render_document();
         export::copy(self.hwnd, self.renderer.output());
+        self.output.save(self.renderer.output().clone());
         self.unpublished = false;
-        self.unsaved = true;
-        if self.toolbar.autosave() {
-            self.write();
-        } else {
-            self.toolbar.enable_save(true);
-        }
     }
 
-    /// Brings the clipboard and the file up to date, autosave or not.
+    /// Brings the clipboard and the file up to date, if a change hasn't reached them.
     fn save(&mut self) {
         if self.unpublished {
             self.publish();
         }
-        if self.unsaved {
-            self.write();
-        }
-    }
-
-    fn write(&mut self) {
-        self.render_document();
-        self.output.save(self.renderer.output().clone());
-        self.unsaved = false;
-        self.toolbar.enable_save(false);
     }
 
     /// Renders the document as it's delivered: its edits, at rest.

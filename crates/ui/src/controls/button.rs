@@ -1,5 +1,4 @@
-//! A push button, in the accent color for the main action or standard otherwise,
-//! that can fade in and out of view.
+//! A push button, in the accent color for the main action or standard otherwise.
 
 use std::time::Instant;
 
@@ -8,7 +7,6 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use super::{Action, Control, HEIGHT};
 use crate::{
     access::{Element, Role},
-    motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
     theme::faded,
 };
@@ -23,24 +21,19 @@ pub struct Button {
     accent: bool,
     left: f32,
     top: f32,
-    enabled: bool,
-    /// From 0 when hidden to 1 when shown.
-    presence: Animation,
     hovered: bool,
     pressed: bool,
 }
 
 impl Button {
     /// An accent button.
-    pub fn new(label: Label, shown: bool) -> Self {
+    pub fn new(label: Label) -> Self {
         Self {
             name: label.text.clone(),
             label,
             accent: true,
             left: 0.0,
             top: 0.0,
-            enabled: true,
-            presence: Animation::idle(if shown { 1.0 } else { 0.0 }),
             hovered: false,
             pressed: false,
         }
@@ -49,7 +42,7 @@ impl Button {
     pub fn standard(label: Label) -> Self {
         Self {
             accent: false,
-            ..Self::new(label, true)
+            ..Self::new(label)
         }
     }
 
@@ -70,40 +63,24 @@ impl Button {
         (self.left, self.top) = (left, top);
     }
 
-    pub fn show(&mut self, shown: bool) {
-        let (presence, easing) = if shown {
-            (1.0, Easing::DECELERATE)
-        } else {
-            (0.0, Easing::ACCELERATE)
-        };
-        self.presence = self.presence.retarget(presence, motion::FAST, easing);
-    }
-
-    pub fn enable(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-
     pub fn area(&self) -> Area {
         Area::new(self.left, self.top, self.width(), HEIGHT)
     }
 
-    fn draw_accent(&self, painter: &Painter, presence: f32) {
+    fn draw_accent(&self, painter: &Painter) {
         let palette = painter.palette;
-        let (fill, ink) = if !self.enabled {
-            (palette.accent_disabled, palette.on_accent_disabled)
-        } else if self.pressed && self.hovered {
+        let (fill, ink) = if self.pressed && self.hovered {
             (faded(palette.accent, 0.8), faded(palette.on_accent, 0.7))
         } else if self.hovered {
             (faded(palette.accent, 0.9), palette.on_accent)
         } else {
             (palette.accent, palette.on_accent)
         };
-        let area = self.area();
-        painter.fill(area, RADIUS, faded(fill, presence));
-        self.draw_label(painter, faded(ink, presence));
+        painter.fill(self.area(), RADIUS, fill);
+        self.draw_label(painter, ink);
     }
 
-    fn draw_standard(&self, painter: &Painter, presence: f32) {
+    fn draw_standard(&self, painter: &Painter) {
         let palette = painter.palette;
         let (shade, ink) = if self.pressed && self.hovered {
             (palette.subtle_pressed, palette.text_secondary)
@@ -113,11 +90,10 @@ impl Button {
             (Default::default(), palette.text)
         };
         let area = painter.align(self.area());
-        painter.fill(area, RADIUS, faded(palette.button, presence));
-        painter.fill(area, RADIUS, faded(shade, presence));
-        let border = faded(palette.control_stroke, presence);
-        painter.stroke(area, RADIUS, painter.border(), border);
-        self.draw_label(painter, faded(ink, presence));
+        painter.fill(area, RADIUS, palette.button);
+        painter.fill(area, RADIUS, shade);
+        painter.stroke(area, RADIUS, painter.border(), palette.control_stroke);
+        self.draw_label(painter, ink);
     }
 
     fn draw_label(&self, painter: &Painter, color: D2D1_COLOR_F) {
@@ -129,7 +105,7 @@ impl Button {
 
 impl Control for Button {
     fn contains(&self, point: Point) -> bool {
-        self.presence.target() > 0.0 && self.area().contains(point)
+        self.area().contains(point)
     }
 
     fn hover(&mut self, point: Option<Point>) -> bool {
@@ -143,7 +119,7 @@ impl Control for Button {
     }
 
     fn release(&mut self, point: Point) -> bool {
-        let activated = self.pressed && self.enabled && self.contains(point);
+        let activated = self.pressed && self.contains(point);
         self.pressed = false;
         self.hovered = self.contains(point);
         activated
@@ -154,7 +130,7 @@ impl Control for Button {
     }
 
     fn is_focusable(&self) -> bool {
-        self.presence.target() > 0.0 && self.enabled
+        true
     }
 
     fn focus_area(&self) -> (Area, f32) {
@@ -162,36 +138,28 @@ impl Control for Button {
     }
 
     fn act(&mut self, action: Action) -> bool {
-        action == Action::Activate && self.is_focusable()
+        action == Action::Activate
     }
 
     fn describe(&self, control: usize, elements: &mut Vec<Element>) {
-        if self.presence.target() > 0.0 {
-            elements.push(Element {
-                control,
-                name: self.name.clone(),
-                role: Role::Button {
-                    enabled: self.enabled,
-                },
-                area: self.area(),
-                help: "",
-            });
-        }
+        elements.push(Element {
+            control,
+            name: self.name.clone(),
+            role: Role::Button,
+            area: self.area(),
+            help: "",
+        });
     }
 
-    fn draw(&self, painter: &Painter, now: Instant) {
-        let presence = self.presence.value(now);
-        if presence <= 0.0 {
-            return;
-        }
+    fn draw(&self, painter: &Painter, _now: Instant) {
         if self.accent {
-            self.draw_accent(painter, presence);
+            self.draw_accent(painter);
         } else {
-            self.draw_standard(painter, presence);
+            self.draw_standard(painter);
         }
     }
 
-    fn is_animating(&self, now: Instant) -> bool {
-        self.presence.is_running(now)
+    fn is_animating(&self, _now: Instant) -> bool {
+        false
     }
 }

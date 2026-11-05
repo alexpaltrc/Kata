@@ -7,8 +7,8 @@ use windows::{
         Graphics::{
             Direct2D::Common::D2D1_COLOR_F,
             Gdi::{
-                COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW,
-                COLOR_WINDOWTEXT, GetSysColor, SYS_COLOR_INDEX,
+                COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW, COLOR_WINDOWTEXT, GetSysColor,
+                SYS_COLOR_INDEX,
             },
         },
         System::{
@@ -120,8 +120,6 @@ pub struct Palette {
     pub button: D2D1_COLOR_F,
     pub accent: D2D1_COLOR_F,
     pub on_accent: D2D1_COLOR_F,
-    pub accent_disabled: D2D1_COLOR_F,
-    pub on_accent_disabled: D2D1_COLOR_F,
     /// The inner ring of the keyboard focus visual.
     pub focus_inner: D2D1_COLOR_F,
     /// Surfaces raised over the window, such as tooltips, and their border.
@@ -157,8 +155,6 @@ impl Palette {
                 button: color(0xFFFFFF, 0.7),
                 accent,
                 on_accent: color(0xFFFFFF, 1.0),
-                accent_disabled: color(0x000000, 0.2169),
-                on_accent_disabled: color(0xFFFFFF, 1.0),
                 focus_inner: color(0xFFFFFF, 0.7),
                 flyout: color(0xF9F9F9, 1.0),
                 flyout_stroke: color(0x000000, 0.0578),
@@ -182,8 +178,6 @@ impl Palette {
                 button: color(0xFFFFFF, 0.0605),
                 accent,
                 on_accent: color(0x000000, 1.0),
-                accent_disabled: color(0xFFFFFF, 0.1581),
-                on_accent_disabled: color(0xFFFFFF, 0.5302),
                 focus_inner: color(0x000000, 0.7),
                 flyout: color(0x2C2C2C, 1.0),
                 flyout_stroke: color(0x000000, 0.2),
@@ -218,8 +212,6 @@ impl Palette {
             button: window,
             accent: system(COLOR_HIGHLIGHT),
             on_accent: system(COLOR_HIGHLIGHTTEXT),
-            accent_disabled: system(COLOR_GRAYTEXT),
-            on_accent_disabled: window,
             focus_inner: window,
             flyout: window,
             flyout_stroke: text,

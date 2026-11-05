@@ -65,20 +65,18 @@ mostrar siempre.
 - **Zoom:** la rueda del ratón acerca y aleja la captura hacia donde está el cursor. `Espacio` o
   `Ctrl + 0` la devuelven a su tamaño; mientras hay zoom, una pequeña píldora encima de la barra
   lo recuerda.
-- Kata recuerda la herramienta, sus niveles y el Autoguardado para la siguiente captura.
+- Kata recuerda la herramienta y sus niveles para la siguiente captura.
 
 ## Guardar y copiar, sin pensar
 
-- **Autoguardado** (activado por defecto): cada cambio se guarda sobre el mismo archivo. Al
-  apagarlo aparece el botón **Guardar**.
+- **Se guarda solo:** cada cambio queda en el mismo archivo al instante. No hay nada que guardar.
 - **El portapapeles siempre tiene la última versión:** la captura recién tomada y, después, cada
-  edición, aunque el Autoguardado esté apagado.
+  edición.
 - **Un solo archivo por captura.** La versión editada reemplaza a la original, sin copias extra.
 - **Ponerle nombre:** haz clic en el nombre, arriba al centro, y escribe. Mientras no tiene,
   dice «Ponle nombre» tras la fecha, y al pasar el cursor aparece un lápiz a su derecha. La fecha
   y la hora se quedan delante (`2026-11-03 14.32.05 - Pedidos.png`), así todas se ordenan solas.
-  Intro o un clic fuera lo guarda, aunque el Autoguardado esté apagado, y lo cruza un destello de
-  colores; Esc lo deja como estaba.
+  Intro o un clic fuera lo guarda, y lo cruza un destello de colores; Esc lo deja como estaba.
   Si ya hay un archivo con ese nombre, se le añade «(2)».
 - **Arrastrar la captura:** el asa de puntos que aparece a la izquierda del nombre lo recuerda.
   Arrastra el nombre hasta una carpeta, un documento, un chat o un correo, y suéltalo ahí: la
@@ -86,7 +84,7 @@ mostrar siempre.
   cursor. Se deja una copia; el archivo de la captura no se mueve. Si la sueltas sobre Kata o
   pulsas Esc, vuelve volando a su sitio.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan en el
-  archivo; con el Autoguardado apagado, lo que no se guardó queda solo en el portapapeles.
+  archivo.
 - **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta
   elegida en Ajustes. El botón de la carpeta, en el editor, la abre con la captura ya seleccionada.
 - **Nunca a medias:** cada archivo se escribe aparte y luego reemplaza al anterior, así que nunca

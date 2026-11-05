@@ -113,7 +113,7 @@ impl Pages {
             room: (0.0, 0.0),
             title_row: TITLE_BAR / 2.0,
             title: fonts.caption(channel::name())?,
-            capture: Button::new(fonts.label(text.new_capture)?, true),
+            capture: Button::new(fonts.label(text.new_capture)?),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
             hint: fonts.caption("")?,
             back: IconButton::new(fonts.icon('\u{E72B}', 12.0)?, text.back),

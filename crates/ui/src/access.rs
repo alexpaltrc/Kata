@@ -60,9 +60,7 @@ pub struct Element {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Role {
-    Button {
-        enabled: bool,
-    },
+    Button,
     /// An on/off switch.
     Toggle {
         on: bool,
@@ -237,9 +235,6 @@ fn changes(old: &Element, new: &Element, events: &mut Vec<Event>) {
         );
     }
     match (&old.role, &new.role) {
-        (Role::Button { enabled: was }, Role::Button { enabled }) if was != enabled => {
-            property(UIA_IsEnabledPropertyId, (*was).into(), (*enabled).into());
-        }
         (Role::Toggle { on: was }, Role::Toggle { on }) if was != on => {
             let state = |on| VARIANT::from(toggle_state(on).0);
             property(UIA_ToggleToggleStatePropertyId, state(*was), state(*on));
@@ -476,9 +471,7 @@ impl IRawElementProviderSimple_Impl for Node_Impl {
 
     fn GetPatternProvider(&self, pattern: UIA_PATTERN_ID) -> Result<IUnknown> {
         Ok(match (self.role()?, pattern) {
-            (Role::Button { .. }, UIA_InvokePatternId) => {
-                self.to_interface::<IInvokeProvider>().into()
-            }
+            (Role::Button, UIA_InvokePatternId) => self.to_interface::<IInvokeProvider>().into(),
             (Role::Toggle { .. }, UIA_TogglePatternId) => {
                 self.to_interface::<IToggleProvider>().into()
             }
@@ -498,20 +491,19 @@ impl IRawElementProviderSimple_Impl for Node_Impl {
 
     fn GetPropertyValue(&self, property: UIA_PROPERTY_ID) -> Result<VARIANT> {
         self.with(|tree, element| {
-            let enabled = element.role != Role::Button { enabled: false };
             match property {
                 UIA_NamePropertyId => element.name.as_str().into(),
                 UIA_HelpTextPropertyId => element.help.into(),
                 UIA_ControlTypePropertyId => {
                     let control_type = match element.role {
                         // Toggle switches are buttons that toggle, as in WinUI.
-                        Role::Button { .. } | Role::Toggle { .. } => UIA_ButtonControlTypeId,
+                        Role::Button | Role::Toggle { .. } => UIA_ButtonControlTypeId,
                         Role::Slider { .. } => UIA_SliderControlTypeId,
                         Role::Choice { .. } => UIA_TabItemControlTypeId,
                     };
                     control_type.0.into()
                 }
-                UIA_IsEnabledPropertyId | UIA_IsKeyboardFocusablePropertyId => enabled.into(),
+                UIA_IsEnabledPropertyId | UIA_IsKeyboardFocusablePropertyId => true.into(),
                 UIA_HasKeyboardFocusPropertyId => (tree.focus == Some(self.id)).into(),
                 _ => VARIANT::default(),
             }
