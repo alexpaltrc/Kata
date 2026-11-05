@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod card;
 mod channel;
 mod editor;
 mod export;
@@ -15,11 +16,13 @@ mod sound;
 mod startup;
 mod strings;
 mod tray;
+mod weight;
 
-use std::{cell::RefCell, fmt::Display, mem::size_of, ptr};
+use std::{cell::RefCell, fmt::Display, mem::size_of, ptr, time::Instant};
 
+use card::Thumbnail;
 use kata_ui::{Graphics, theme, window};
-use main_window::Page;
+use main_window::{Page, Ready};
 use screen_keys::ScreenKeys;
 use settings::Settings;
 use tray::Tray;
@@ -50,6 +53,11 @@ pub const CAPTURE: u32 = WM_APP + 3;
 pub const KEYS_CHANGED: u32 = WM_APP + 4;
 /// One of Windows' screenshot keys was pressed, while Kata takes them.
 pub const SCREEN_KEY: u32 = WM_APP + 5;
+/// An editor that was to hand back its capture closed. Its `LPARAM` owns a boxed
+/// `Thumbnail` of the capture as it was left.
+pub const EDITED: u32 = WM_APP + 6;
+/// The first capture was weighed, with Kata and with Windows: see `weight`.
+pub const WEIGHED: u32 = WM_APP + 7;
 const CLASS: PCWSTR = w!("Kata");
 /// Captures started from the tray or the main window wait for it to fade away first.
 const CAPTURE_TIMER: usize = 1;
@@ -179,6 +187,18 @@ struct App {
     screen_keys: Option<ScreenKeys>,
     /// Explorer broadcasts it after restarting; the tray icon must be added again.
     taskbar_created: u32,
+    /// Kata's first capture, until the welcome's Ready shows it.
+    first: Option<First>,
+}
+
+/// What the welcome's Ready says about the first capture, as it comes in.
+struct First {
+    /// How long the capture took to show, from the moment it was asked for.
+    seconds: f32,
+    /// How much lighter Kata's file is than Windows' would be, once weighed.
+    saved: Option<f32>,
+    /// The capture as it was left, once the editor closes.
+    thumbnail: Option<Thumbnail>,
 }
 
 impl App {
@@ -194,6 +214,7 @@ impl App {
             tray,
             screen_keys: settings.screen_keys.then(|| screen_keys::take(hwnd)),
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
+            first: None,
         })
     }
 
@@ -224,6 +245,23 @@ impl App {
                     self.screen_keys = settings.screen_keys.then(|| screen_keys::take(self.hwnd));
                 }
             }
+            EDITED => {
+                let thumbnail = unsafe { Box::from_raw(lparam.0 as *mut Thumbnail) };
+                if let Some(first) = &mut self.first {
+                    first.thumbnail = Some(*thumbnail);
+                    // A capture taken meanwhile is the one to show, once it's left.
+                    if !editor::is_open() {
+                        self.ready();
+                    }
+                }
+            }
+            WEIGHED => {
+                let saved = f32::from_bits(wparam.0 as u32);
+                match &mut self.first {
+                    Some(first) => first.saved = Some(saved),
+                    None => main_window::weighed(saved),
+                }
+            }
             WM_TIMER if wparam.0 == CAPTURE_TIMER => {
                 unsafe {
                     let _ = KillTimer(Some(self.hwnd), CAPTURE_TIMER);
@@ -246,6 +284,7 @@ impl App {
     /// Freezes the screen and lets the user choose an area, which is delivered as
     /// it is or opened in the editor, as the settings say.
     fn capture(&mut self) {
+        let started = Instant::now();
         let shot = match kata_capture::capture() {
             Ok(shot) => shot,
             Err(error) => {
@@ -253,10 +292,17 @@ impl App {
                 return;
             }
         };
-        let Some((area, image)) = overlay::select(&shot) else {
+        let Some((area, image, shown)) = overlay::select(&shot) else {
             return;
         };
-        settings::welcome_done();
+        if settings::welcome_done() {
+            weight::compare(self.hwnd, image.clone());
+            self.first = Some(First {
+                seconds: shown.duration_since(started).as_secs_f32(),
+                saved: None,
+                thumbnail: None,
+            });
+        }
         let capture = editor::Capture {
             image,
             area: area.offset(shot.origin.0, shot.origin.1),
@@ -267,11 +313,41 @@ impl App {
         if settings.sound {
             sound::play();
         }
+        let first = self.first.is_some();
         if settings.open_editor {
-            editor::open(&self.graphics, self.hwnd, capture, settings.tool_names);
+            editor::open(
+                &self.graphics,
+                self.hwnd,
+                capture,
+                settings.tool_names,
+                first,
+            );
         } else {
+            let thumbnail = first.then(|| Thumbnail::of(&capture.image));
             drop(export::Output::new(self.hwnd, capture.image));
+            if let Some(first) = &mut self.first {
+                first.thumbnail = thumbnail;
+                self.ready();
+            }
         }
+    }
+
+    /// Shows the welcome's Ready with the first capture, once it's left.
+    fn ready(&mut self) {
+        let Some(First {
+            seconds,
+            saved,
+            thumbnail: Some(thumbnail),
+        }) = self.first.take()
+        else {
+            return;
+        };
+        let ready = Ready {
+            thumbnail,
+            seconds,
+            saved,
+        };
+        main_window::ready(&self.graphics, self.hwnd, ready);
     }
 
     fn capture_soon(&self) {

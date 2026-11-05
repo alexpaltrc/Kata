@@ -31,6 +31,7 @@ features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
     "Win32_Media_Audio",
     "Win32_Security",
     "Win32_Storage_FileSystem",
@@ -51,11 +52,6 @@ features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ]
-
-# Tests check that Windows reads Kata's PNG files back exactly.
-[dev-dependencies.windows]
-workspace = true
-features = ["Win32_Graphics_Imaging"]
 
 [lints]
 workspace = true

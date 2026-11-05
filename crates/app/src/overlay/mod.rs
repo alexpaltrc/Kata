@@ -83,8 +83,8 @@ const PATIENCE: Duration = Duration::from_millis(500);
 const CORNER: f32 = 8.0;
 
 /// Lets the user choose an area of `shot`, in image coordinates, and gives it back
-/// with its pixels. `None` when they cancel.
-pub fn select(shot: &Screenshot) -> Option<(Rect, Image)> {
+/// with its pixels and when the overlay showed. `None` when they cancel.
+pub fn select(shot: &Screenshot) -> Option<(Rect, Image, Instant)> {
     let mut pointer = POINT::default();
     let _ = unsafe { GetCursorPos(&mut pointer) };
     let pointer = (pointer.x - shot.origin.0, pointer.y - shot.origin.1);
@@ -106,12 +106,13 @@ pub fn select(shot: &Screenshot) -> Option<(Rect, Image)> {
         }
     };
     unsafe { show(hwnd) };
+    let shown = Instant::now();
     overlay.borrow_mut().appear(hwnd);
     let chosen = run(&overlay);
     let whole = chosen.and_then(|_| overlay.borrow_mut().chosen_whole(hwnd));
     let _ = unsafe { DestroyWindow(hwnd) };
     let area = chosen?;
-    Some((area, whole.or_else(|| shot.image.crop(area))?))
+    Some((area, whole.or_else(|| shot.image.crop(area))?, shown))
 }
 
 unsafe fn create(overlay: &RefCell<Overlay<'_>>) -> Result<HWND> {

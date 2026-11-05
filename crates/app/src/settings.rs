@@ -96,11 +96,13 @@ pub fn welcomed() -> bool {
     read(w!("Welcomed"), 0) != 0
 }
 
-/// Remembers that Kata has taken its first capture.
-pub fn welcome_done() {
-    if !welcomed() {
+/// Remembers that Kata has taken its first capture. Returns whether this was it.
+pub fn welcome_done() -> bool {
+    let first = !welcomed();
+    if first {
         write(w!("Welcomed"), 1);
     }
+    first
 }
 
 /// Forgets the welcome and its hints, so Kata greets as on its first day. Only

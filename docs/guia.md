@@ -119,7 +119,9 @@ mostrar siempre.
 - **Ventana principal:** el botón **Nuevo recorte**, el atajo debajo y un acceso a Ajustes. Al
   pulsar Nuevo recorte, la ventana se cierra para no salir en la captura.
 - **La primera vez:** la ventana abre con un saludo de Kata y el botón **Toma tu primera
-  captura**. Tras esa primera captura, abre como siempre.
+  captura**. Al terminar esa captura, vuelve con ella, lo que tardó en aparecer y cuánto menos
+  pesa que con Windows, y ahí se puede encender **Kata es tu app de capturas**. Desde entonces,
+  abre como siempre.
 
 ## Ajustes
 

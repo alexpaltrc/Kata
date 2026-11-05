@@ -65,12 +65,13 @@ use windows::{
 };
 
 use crate::{
+    card::{self, Pose, Thumbnail},
     channel,
     export::{self, Handover, Output, Picture},
     report,
     settings::{self, EditorSettings, Hint},
 };
-use canvas::{Frame, Glide, Gpu, HANDLE_REACH, Pose, View, WHITE};
+use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
 
 /// The title bar's height, in DIPs. Saving sits in it.
@@ -110,15 +111,22 @@ thread_local! {
 
 /// Edits `capture`, which is delivered from the start: on the clipboard, through
 /// `owner`, and in a new file, with the tools named under their icons if
-/// `tool_names`. The capture already open, if any, closes first.
-pub fn open(graphics: &Graphics, owner: HWND, capture: Capture, tool_names: bool) {
+/// `tool_names`. If `hand_back`, closing it posts `EDITED` to `owner` with a
+/// thumbnail of the capture as it was left. The capture already open, if any,
+/// closes first.
+pub fn open(graphics: &Graphics, owner: HWND, capture: Capture, tool_names: bool, hand_back: bool) {
     // Closing delivers the open capture's last changes, which mustn't follow this one.
     close();
     let output = Output::new(owner, capture.image.clone());
-    match unsafe { create(graphics, capture, output, tool_names) } {
+    let back = hand_back.then_some(owner);
+    match unsafe { create(graphics, capture, output, tool_names, back) } {
         Ok(hwnd) => OPEN.set(Some(hwnd)),
         Err(error) => report("editor", &error),
     }
+}
+
+pub fn is_open() -> bool {
+    OPEN.get().is_some()
 }
 
 pub fn close() {
@@ -132,6 +140,7 @@ unsafe fn create(
     capture: Capture,
     output: Output,
     tool_names: bool,
+    hand_back: Option<HWND>,
 ) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
     let settings = EditorSettings::load();
@@ -221,6 +230,7 @@ unsafe fn create(
             saved: None,
             tracking: false,
             unpublished: false,
+            hand_back,
             access: Access::new(hwnd),
         };
         // The first frame is ready before the window shows.
@@ -409,6 +419,8 @@ struct Editor {
     tracking: bool,
     /// The document changed since it was last put on the clipboard and in its file.
     unpublished: bool,
+    /// The window that gets a thumbnail of the capture as the editor closes, if any.
+    hand_back: Option<HWND>,
     access: Access,
 }
 
@@ -490,6 +502,21 @@ impl Editor {
                 self.finish_naming();
                 if self.unpublished {
                     self.publish();
+                }
+                if let Some(owner) = self.hand_back {
+                    self.render_document();
+                    let thumbnail = Box::into_raw(Box::new(Thumbnail::of(self.renderer.output())));
+                    let posted = unsafe {
+                        PostMessageW(
+                            Some(owner),
+                            crate::EDITED,
+                            WPARAM(0),
+                            LPARAM(thumbnail as isize),
+                        )
+                    };
+                    if posted.is_err() {
+                        drop(unsafe { Box::from_raw(thumbnail) });
+                    }
                 }
                 self.access.close(self.hwnd);
                 return None;
@@ -1432,11 +1459,11 @@ impl Editor {
             self.toolbar.draw(painter, now);
             if let Some((pose, opacity, glint)) = self.saved_card(now) {
                 painter.layer(opacity, 0.0, || {
-                    canvas::draw_card(painter, image, pose, glint);
+                    card::draw(painter, image, pose, glint);
                 });
             }
             if let Some((pose, glint)) = self.card(now) {
-                canvas::draw_card(painter, image, pose, glint);
+                card::draw(painter, image, pose, glint);
             }
         })
     }

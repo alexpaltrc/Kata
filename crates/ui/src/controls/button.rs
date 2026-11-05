@@ -19,6 +19,8 @@ pub struct Button {
     /// What assistive technologies call it: its label, unless that needs context.
     name: String,
     accent: bool,
+    /// The least it measures across, whatever its label.
+    least: f32,
     left: f32,
     top: f32,
     hovered: bool,
@@ -32,6 +34,7 @@ impl Button {
             name: label.text.clone(),
             label,
             accent: true,
+            least: 0.0,
             left: 0.0,
             top: 0.0,
             hovered: false,
@@ -56,7 +59,12 @@ impl Button {
     }
 
     pub fn width(&self) -> f32 {
-        self.label.width + 2.0 * PADDING
+        (self.label.width + 2.0 * PADDING).max(self.least)
+    }
+
+    /// Makes it at least `width` DIPs across, as wide as the buttons beside it.
+    pub fn widen(&mut self, width: f32) {
+        self.least = width;
     }
 
     pub fn place(&mut self, left: f32, top: f32) {

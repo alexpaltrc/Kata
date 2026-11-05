@@ -285,3 +285,5 @@ solo si mejora la media sin dejar ninguna captura más grande que con Windows.
 4. Se anotan la media por captura, el peor caso y el tiempo total. Una idea se queda si mejora la
    media sin empeorar de forma notable el peor caso ni la velocidad.
 5. Cada experimento se anota en este documento, funcione o no.
+
+La bienvenida hace esta misma cuenta con la primera captura de quien la usa: la codifica también con el PNG de Windows, en memoria y en segundo plano, y dice en Lista cuánto menos pesa con Kata.

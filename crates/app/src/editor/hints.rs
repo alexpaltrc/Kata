@@ -9,7 +9,7 @@ use kata_ui::{
     paint::Area,
 };
 
-use super::canvas::Pose;
+use crate::card::Pose;
 
 /// The saved copy shows over the capture, lifts off as a card as a glint crosses
 /// it, then arcs into the folder button, landing with a pop; the button opens into

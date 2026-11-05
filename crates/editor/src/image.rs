@@ -67,6 +67,36 @@ impl Image {
         Some(Self::new(rect.width() as u32, rect.height() as u32, pixels))
     }
 
+    /// The image `factor` times smaller across and down, each pixel the average of
+    /// the block it covers. The last row and column of blocks may be partial.
+    pub fn shrunk(&self, factor: u32) -> Self {
+        let factor = factor.max(1);
+        let (width, height) = (self.width.div_ceil(factor), self.height.div_ceil(factor));
+        let mut sums = vec![0u32; width as usize * 3];
+        let mut pixels =
+            Vec::with_capacity(width as usize * height as usize * Self::BYTES_PER_PIXEL);
+        for row in 0..height {
+            sums.fill(0);
+            let (top, bottom) = (row * factor, ((row + 1) * factor).min(self.height));
+            for y in top..bottom {
+                let line = &self.pixels[self.offset(0, y as i32)..][..self.stride()];
+                for (x, pixel) in line.as_chunks::<4>().0.iter().enumerate() {
+                    let sum = &mut sums[x / factor as usize * 3..][..3];
+                    for channel in 0..3 {
+                        sum[channel] += u32::from(pixel[channel]);
+                    }
+                }
+            }
+            for (column, sum) in sums.as_chunks::<3>().0.iter().enumerate() {
+                let left = column as u32 * factor;
+                let count = (bottom - top) * ((left + factor).min(self.width) - left);
+                let average = |sum: u32| ((sum + count / 2) / count) as u8;
+                pixels.extend_from_slice(&[average(sum[0]), average(sum[1]), average(sum[2]), 255]);
+            }
+        }
+        Self::new(width, height, pixels)
+    }
+
     /// Copies `from` onto the part of the image inside `area`, with `from`'s top-left
     /// corner placed at `at`.
     pub fn paste(&mut self, from: &Self, at: (i32, i32), area: Rect) {
@@ -146,6 +176,15 @@ mod tests {
             .iter()
             .map(|px| px[0])
             .collect()
+    }
+
+    #[test]
+    fn shrunk_averages_each_block_partial_ones_too() {
+        let shrunk = numbered().shrunk(2);
+        assert_eq!((shrunk.width(), shrunk.height()), (2, 2));
+        // (0 + 1 + 4 + 5) / 4, (2 + 3 + 6 + 7) / 4, then the last row alone.
+        assert_eq!(blues(&shrunk), [3, 5, 9, 11]);
+        assert_eq!(numbered().shrunk(1), numbered());
     }
 
     #[test]

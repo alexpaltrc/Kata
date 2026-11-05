@@ -1,6 +1,7 @@
-//! The main window's pages: the Welcome, which leads to Kata's first capture;
-//! Home, with the button for a new capture; and Settings. Positions and sizes are
-//! in DIPs.
+//! The main window's pages: the welcome's, in `welcome`; Home, with the button for
+//! a new capture; and Settings. Positions and sizes are in DIPs.
+
+mod welcome;
 
 use std::{
     path::{Path, PathBuf},
@@ -11,13 +12,15 @@ use kata_ui::{
     Graphics,
     access::Element,
     controls::{self, Button, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
-    motion::{Animation, Easing},
+    motion::Animation,
     paint::{Area, Fonts, Label, Painter, Point},
     window::CAPTION_BUTTONS,
 };
 use windows::core::Result;
 
 use crate::{channel, hotkey::Hotkey, settings::Settings, strings::strings};
+pub use welcome::Ready;
+use welcome::{First, GLYPH};
 
 /// The title bar's height, as Windows recommends.
 pub const TITLE_BAR: f32 = 32.0;
@@ -39,31 +42,12 @@ const RADIUS: f32 = 4.0;
 const MIN_WIDTH: f32 = 320.0;
 const CARDS: usize = 7;
 
-/// The welcome's logo, and the room under it, the greeting's and the invitation's.
-const LOGO: f32 = 64.0;
-const LOGO_GAP: f32 = 20.0;
-const GREETING_GAP: f32 = 4.0;
-const INVITATION_GAP: f32 = 24.0;
-/// The welcome's choreography, in seconds: once the window is in, the logo draws
-/// itself; the greeting rises below it, then the invitation; and a glint crosses
-/// the greeting and the logo's light.
-const LEAD: f32 = 0.25;
-const GREETING: f32 = LEAD + 0.55;
-const FREE: f32 = GREETING + 0.1;
-const INVITATION: f32 = LEAD + 0.85;
-const GLINT: f32 = LEAD + 1.0;
-const GLINTING: f32 = 1.1;
-const WELCOME: f32 = GLINT + GLINTING;
-/// What rises takes this long, from this far below, in seconds and DIPs.
-const RISING: f32 = 0.4;
-const RISE: f32 = 8.0;
-/// How wide the glint's band is.
-const BAND: f32 = 96.0;
-
 /// In the order `numbered` counts them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Page {
     Welcome,
+    Ready,
+    Premium,
     Home,
     Settings,
 }
@@ -71,13 +55,29 @@ pub enum Page {
 impl Page {
     /// The page that `page as usize` numbers.
     pub fn numbered(number: usize) -> Self {
-        [Self::Welcome, Self::Home, Self::Settings][number.min(2)]
+        const PAGES: [Page; 5] = [
+            Page::Welcome,
+            Page::Ready,
+            Page::Premium,
+            Page::Home,
+            Page::Settings,
+        ];
+        PAGES[number.min(PAGES.len() - 1)]
+    }
+
+    /// Whether it's one of the welcome's, which come in in turn.
+    fn is_welcome(self) -> bool {
+        self < Self::Home
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     FirstCapture,
+    ReadyKeys,
+    GoOn,
+    StayFree,
+    GetPremium,
     Capture,
     OpenSettings,
     Back,
@@ -110,8 +110,34 @@ pub struct Pages {
     greeting: Label,
     free: Label,
     first_capture: Button,
-    /// How many seconds into the welcome it is.
-    welcome: Animation,
+    /// How many seconds into the welcome's page on show it is.
+    clock: Animation,
+
+    first: Option<First>,
+    /// How long the first capture took to show, and how much lighter it is than
+    /// with Windows, which rises once weighed.
+    took: Label,
+    lighter: Label,
+    lighter_rise: Option<Animation>,
+    /// The setting that makes Kata the screenshot app, on its card; the way on; and
+    /// what it promises.
+    ready_keys: Toggle,
+    ready_setting: Area,
+    go_on: Button,
+    stays_here: Label,
+    /// Where Ready's parts start.
+    ready_top: f32,
+
+    all_free: Label,
+    forever: Label,
+    premium_adds: Label,
+    /// Each perk's glyph, and what it says.
+    perks: [(Label, Label); 3],
+    perks_card: Area,
+    stay_free: Button,
+    get_premium: Button,
+    /// Where Premium's parts start.
+    premium_top: f32,
 
     title: Label,
     capture: Button,
@@ -156,7 +182,30 @@ impl Pages {
             greeting: fonts.title(text.greeting)?,
             free: fonts.label(text.free)?,
             first_capture: Button::new(fonts.label(text.first_capture)?),
-            welcome: welcome(),
+            clock: Animation::idle(0.0),
+            first: None,
+            took: fonts.title(&text.ready(0.0))?,
+            lighter: fonts.label(&text.lighter(0.0))?,
+            lighter_rise: None,
+            ready_keys: Toggle::new(fonts.label(text.screen_keys)?, settings.screen_keys)
+                .described(fonts.caption(text.screen_keys_short)?)
+                .explained(text.screen_keys_short),
+            ready_setting: Area::default(),
+            go_on: Button::new(fonts.label(text.go_on)?),
+            stays_here: fonts.caption(text.stays_here)?,
+            ready_top: 0.0,
+            all_free: fonts.title(text.all_free)?,
+            forever: fonts.label(text.forever)?,
+            premium_adds: fonts.caption(text.premium_adds)?,
+            perks: [
+                (fonts.icon('\u{E765}', GLYPH)?, fonts.label(text.perks[0])?),
+                (fonts.icon('\u{E790}', GLYPH)?, fonts.label(text.perks[1])?),
+                (fonts.icon('\u{E76D}', GLYPH)?, fonts.label(text.perks[2])?),
+            ],
+            perks_card: Area::default(),
+            stay_free: Button::standard(fonts.label(text.stay_free)?),
+            get_premium: Button::standard(fonts.label(text.get_premium)?),
+            premium_top: 0.0,
             title: fonts.caption(channel::name())?,
             capture: Button::new(fonts.label(text.new_capture)?),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
@@ -191,9 +240,10 @@ impl Pages {
         Ok(pages)
     }
 
-    /// The smallest client area that fits both pages.
+    /// The smallest client area that fits every page.
     pub fn min_size(&self) -> (f32, f32) {
         let rows = [
+            self.welcome_width(),
             self.shortcut_title.width + PADDING + self.shortcut.width(),
             self.screen_keys.width() + INFO_GAP + Info::SIZE,
             self.open_editor.width(),
@@ -213,15 +263,7 @@ impl Pages {
     pub fn layout(&mut self, room: (f32, f32), caption_buttons: Area) -> Result<()> {
         self.room = room;
         self.title_row = caption_buttons.middle();
-        let above = LOGO + LOGO_GAP + self.greeting.height + GREETING_GAP + self.free.height;
-        let group = above + INVITATION_GAP + HEIGHT + HINT_GAP + self.hint.height;
-        let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
-        self.logo = Area::new((room.0 - LOGO) / 2.0, top, LOGO, LOGO);
-        let invitation = &mut self.first_capture;
-        invitation.place(
-            (room.0 - invitation.width()) / 2.0,
-            top + above + INVITATION_GAP,
-        );
+        self.layout_welcome();
         let group = HEIGHT + HINT_GAP + self.hint.height;
         let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
         self.capture
@@ -286,6 +328,10 @@ impl Pages {
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
         match part {
             Part::FirstCapture => &mut self.first_capture,
+            Part::ReadyKeys => &mut self.ready_keys,
+            Part::GoOn => &mut self.go_on,
+            Part::StayFree => &mut self.stay_free,
+            Part::GetPremium => &mut self.get_premium,
             Part::Capture => &mut self.capture,
             Part::OpenSettings => &mut self.open_settings,
             Part::Back => &mut self.back,
@@ -303,6 +349,10 @@ impl Pages {
     fn get(&self, part: Part) -> &dyn Control {
         match part {
             Part::FirstCapture => &self.first_capture,
+            Part::ReadyKeys => &self.ready_keys,
+            Part::GoOn => &self.go_on,
+            Part::StayFree => &self.stay_free,
+            Part::GetPremium => &self.get_premium,
             Part::Capture => &self.capture,
             Part::OpenSettings => &self.open_settings,
             Part::Back => &self.back,
@@ -339,14 +389,21 @@ impl Pages {
 
     pub fn draw(&self, page: Page, painter: &Painter, now: Instant) {
         let palette = painter.palette;
+        let controls = || {
+            for &part in parts(page) {
+                self.get(part).draw(painter, now);
+            }
+        };
         match page {
-            Page::Welcome => {
+            // Their controls come in in turn.
+            Page::Welcome | Page::Ready | Page::Premium => {
                 painter.text(&self.title, PADDING, self.title_row, palette.text);
-                self.draw_welcome(painter, now);
+                self.draw_welcome(page, painter, now);
             }
             Page::Home => {
                 painter.text(&self.title, PADDING, self.title_row, palette.text);
                 self.draw_hint(painter, self.capture.area());
+                controls();
             }
             Page::Settings => {
                 painter.text(&self.settings_title, BACK, self.title_row, palette.text);
@@ -366,22 +423,8 @@ impl Pages {
                 painter.text(title, left, top + title.height / 2.0, palette.text);
                 let middle = top + title.height + path.height / 2.0;
                 painter.text(path, left, middle, palette.text_secondary);
-            }
-        }
-        let controls = || {
-            for &part in parts(page) {
-                self.get(part).draw(painter, now);
-            }
-        };
-        if page == Page::Welcome {
-            // The invitation comes last, with the shortcut under it.
-            let (opacity, offset) = self.rising(INVITATION, now);
-            painter.lowered(opacity, offset, || {
                 controls();
-                self.draw_hint(painter, self.first_capture.area());
-            });
-        } else {
-            controls();
+            }
         }
         if let Some(part) = self.focused(page) {
             let (area, radius) = self.get(part).focus_area();
@@ -392,49 +435,11 @@ impl Pages {
         }
     }
 
-    /// The logo draws itself, the greeting rises below it, and a glint crosses them.
-    fn draw_welcome(&self, painter: &Painter, now: Instant) {
-        let palette = painter.palette;
-        let time = self.welcome.value(now);
-        painter.logo(painter.align(self.logo), time - LEAD);
-        let (greeting, free) = (&self.greeting, &self.free);
-        let left = (self.room.0 - greeting.width) / 2.0;
-        let middle = self.logo.bottom() + LOGO_GAP + greeting.height / 2.0;
-        let (opacity, offset) = self.rising(GREETING, now);
-        painter.lowered(opacity, offset, || {
-            painter.text(greeting, left, middle, palette.text);
-        });
-        let (opacity, offset) = self.rising(FREE, now);
-        let below = middle + greeting.height / 2.0 + GREETING_GAP + free.height / 2.0;
-        painter.lowered(opacity, offset, || {
-            let left = (self.room.0 - free.width) / 2.0;
-            painter.text(free, left, below, palette.text_secondary);
-        });
-        let sweep = (time - GLINT) / GLINTING;
-        if sweep > 0.0 && sweep < 1.0 {
-            let x = left - BAND / 2.0 + (greeting.width + BAND) * Easing::SWEEP.apply(sweep);
-            painter.glint(&[(greeting, left)], middle, x, BAND);
-        }
-    }
-
     /// The shortcut, centered under `button`.
     fn draw_hint(&self, painter: &Painter, button: Area) {
         let left = (self.room.0 - self.hint.width) / 2.0;
         let middle = button.bottom() + HINT_GAP + self.hint.height / 2.0;
         painter.text(&self.hint, left, middle, painter.palette.text_secondary);
-    }
-
-    /// How far into the welcome something rising at `start` seconds is: its opacity,
-    /// and how far it still is below its place.
-    fn rising(&self, start: f32, now: Instant) -> (f32, f32) {
-        let progress = (self.welcome.value(now) - start) / RISING;
-        let risen = Easing::DECELERATE.apply(progress);
-        (risen, (1.0 - risen) * RISE)
-    }
-
-    /// Plays the welcome from its start.
-    pub fn greet(&mut self) {
-        self.welcome = welcome();
     }
 
     /// Moves the keyboard focus to `page`'s next control, or the previous one if
@@ -461,7 +466,7 @@ impl Pages {
     }
 
     pub fn is_animating(&self, page: Page, now: Instant) -> bool {
-        (page == Page::Welcome && self.welcome.is_running(now))
+        (page.is_welcome() && self.welcome_animating(page, now))
             || parts(page)
                 .iter()
                 .any(|&part| self.get(part).is_animating(now))
@@ -493,8 +498,17 @@ impl Pages {
         self.trim_folder()
     }
 
-    pub fn screen_keys(&self) -> bool {
-        self.screen_keys.is_on()
+    /// Brings the welcome's switch for Kata as the screenshot app and the settings'
+    /// in line with `part`, whichever of them was switched. Returns whether it's on.
+    pub fn switch_screen_keys(&mut self, part: Part) -> bool {
+        let on = if part == Part::ReadyKeys {
+            self.ready_keys.is_on()
+        } else {
+            self.screen_keys.is_on()
+        };
+        self.ready_keys.set(on);
+        self.screen_keys.set(on);
+        on
     }
 
     pub fn open_editor(&self) -> bool {
@@ -541,12 +555,6 @@ impl Pages {
     }
 }
 
-/// The welcome's clock, counting its seconds from now: at its end at once when
-/// animation effects are off.
-fn welcome() -> Animation {
-    Animation::clock(WELCOME)
-}
-
 /// `page`'s part with the number `describe` gave it.
 pub fn part(page: Page, number: usize) -> Option<Part> {
     parts(page)
@@ -558,6 +566,8 @@ pub fn part(page: Page, number: usize) -> Option<Part> {
 fn parts(page: Page) -> &'static [Part] {
     match page {
         Page::Welcome => &[Part::FirstCapture],
+        Page::Ready => &[Part::ReadyKeys, Part::GoOn],
+        Page::Premium => &[Part::StayFree, Part::GetPremium],
         Page::Home => &[Part::Capture, Part::OpenSettings],
         Page::Settings => &[
             Part::Back,

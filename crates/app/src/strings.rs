@@ -11,6 +11,22 @@ pub struct Strings {
     pub greeting: &'static str,
     pub free: &'static str,
     pub first_capture: &'static str,
+    /// The welcome's Ready, with the first capture: how long it took to show and how
+    /// much lighter it is; what the setting that makes Kata the screenshot app does
+    /// there; the way on; and that nothing leaves the PC.
+    ready: &'static str,
+    lighter: [&'static str; 2],
+    pub screen_keys_short: &'static str,
+    pub go_on: &'static str,
+    pub stays_here: &'static str,
+    /// The welcome's Premium: that all so far is free, what Premium adds, and the
+    /// two ways on.
+    pub all_free: &'static str,
+    pub forever: &'static str,
+    pub premium_adds: &'static str,
+    pub perks: [&'static str; 3],
+    pub stay_free: &'static str,
+    pub get_premium: &'static str,
     pub new_capture: &'static str,
     pub open_captures: &'static str,
     pub settings: &'static str,
@@ -64,11 +80,32 @@ pub struct Strings {
     pub reset_zoom: &'static str,
     /// What follows a number to make it a percentage.
     percent: &'static str,
+    /// What parts a number's decimals from the rest.
+    decimal: &'static str,
 }
 
 impl Strings {
     pub fn percent(&self, value: f32) -> String {
         format!("{}{}", (value * 100.0).round(), self.percent)
+    }
+
+    /// How long the first capture took to show, as its Ready says.
+    pub fn ready(&self, seconds: f32) -> String {
+        // Hundredths below a second, where they count.
+        let digits = if seconds < 1.0 { 2 } else { 1 };
+        let seconds = format!("{:.*}", digits, seconds.max(0.01));
+        format!(
+            "{}{}\u{a0}s",
+            self.ready,
+            seconds.replace('.', self.decimal)
+        )
+    }
+
+    /// How much lighter than with Windows a capture's file is, `saved` being the
+    /// share it saves.
+    pub fn lighter(&self, saved: f32) -> String {
+        let [before, after] = self.lighter;
+        format!("{before}{}{after}", self.percent(saved))
     }
 }
 
@@ -76,6 +113,21 @@ static SPANISH: Strings = Strings {
     greeting: "Hola, soy Kata",
     free: "Gratis y sin límites",
     first_capture: "Toma tu primera captura",
+    ready: "Lista en ",
+    lighter: ["Y pesa un ", " menos que con Windows"],
+    screen_keys_short: "Impr Pant abre Kata en vez de Recortes",
+    go_on: "Continuar",
+    stays_here: "Todo se queda en tu equipo",
+    all_free: "Todo esto es gratis",
+    forever: "Para siempre y sin límites",
+    premium_adds: "Premium añade",
+    perks: [
+        "Un atajo a tu medida",
+        "Tus colores en formas y pasos",
+        "Dibujo a mano alzada",
+    ],
+    stay_free: "Seguir gratis",
+    get_premium: "Obtener Premium",
     new_capture: "Nuevo recorte",
     open_captures: "Abrir capturas",
     settings: "Ajustes",
@@ -114,12 +166,28 @@ static SPANISH: Strings = Strings {
     space: "Espacio",
     reset_zoom: "Restablecer el zoom",
     percent: "\u{a0}%",
+    decimal: ",",
 };
 
 static ENGLISH: Strings = Strings {
     greeting: "Hi, I'm Kata",
     free: "Free, with no limits",
     first_capture: "Take your first capture",
+    ready: "Ready in ",
+    lighter: ["And it's ", " lighter than with Windows"],
+    screen_keys_short: "Print Screen opens Kata instead of the Snipping Tool",
+    go_on: "Continue",
+    stays_here: "Everything stays on your PC",
+    all_free: "All of this is free",
+    forever: "Forever, with no limits",
+    premium_adds: "Premium adds",
+    perks: [
+        "A shortcut of your own",
+        "Your colors in shapes and steps",
+        "Freehand drawing",
+    ],
+    stay_free: "Continue for free",
+    get_premium: "Get Premium",
     new_capture: "New capture",
     open_captures: "Open captures",
     settings: "Settings",
@@ -158,6 +226,7 @@ static ENGLISH: Strings = Strings {
     space: "Space",
     reset_zoom: "Reset zoom",
     percent: "%",
+    decimal: ".",
 };
 
 pub fn strings() -> &'static Strings {

@@ -1,4 +1,5 @@
-//! An on/off switch, its label on the left and the switch on the right.
+//! An on/off switch, its label on the left, over a description if it has one, and
+//! the switch on the right.
 
 use std::time::Instant;
 
@@ -18,6 +19,8 @@ const KNOB_HOVERED: f32 = 7.0;
 
 pub struct Toggle {
     label: Label,
+    /// A line under the label, saying what it does.
+    description: Option<Label>,
     /// What assistive technologies hear about it besides its label.
     help: &'static str,
     on: bool,
@@ -37,6 +40,7 @@ impl Toggle {
         let size = (label.width + GAP + SWITCH.0, HEIGHT);
         Self {
             label,
+            description: None,
             help: "",
             on,
             left: 0.0,
@@ -54,8 +58,22 @@ impl Toggle {
         Self { help, ..self }
     }
 
+    /// The same, with `description` under its label.
+    pub fn described(self, description: Label) -> Self {
+        let size = (
+            self.size.0.max(description.width + GAP + SWITCH.0),
+            self.size.1,
+        );
+        Self {
+            description: Some(description),
+            size,
+            ..self
+        }
+    }
+
     pub fn width(&self) -> f32 {
-        self.label.width + GAP + SWITCH.0
+        let description = self.description.as_ref().map_or(0.0, |line| line.width);
+        self.label.width.max(description) + GAP + SWITCH.0
     }
 
     /// Where its label ends.
@@ -175,7 +193,17 @@ impl Control for Toggle {
         let palette = painter.palette;
         let area = self.area();
         let middle = painter.snap(area.middle());
-        painter.text(&self.label, area.left, middle, palette.text);
+        match &self.description {
+            // One above the other, the pair centered.
+            Some(description) => {
+                let top = middle - (self.label.height + description.height) / 2.0;
+                let label = painter.snap(top + self.label.height / 2.0);
+                painter.text(&self.label, area.left, label, palette.text);
+                let below = painter.snap(top + self.label.height + description.height / 2.0);
+                painter.text(description, area.left, below, palette.text_secondary);
+            }
+            None => painter.text(&self.label, area.left, middle, palette.text),
+        }
 
         let (width, height) = SWITCH;
         let radius = height / 2.0;

@@ -78,6 +78,10 @@ En los primeros editores, tres señales, de una en una:
 
 Cada una se repite hasta que se usa una vez (renombrar, abrir la carpeta, arrastrar), y como mucho en tres editores. Esperan a que nada más se mueva. Con los efectos de animación apagados no aparecen, y el nombre ya está escrito.
 
+Al cerrar el editor de la primera captura, la ventana principal vuelve con **Lista**. La captura llega como la tarjeta del arrastre: sube, despega inclinada y la cruza el destello. Debajo, «Lista en 0,09 s», lo que tardó esa captura en aparecer desde que se pidió, y «Y pesa un 41 % menos que con Windows», medido guardando esa misma captura también con el codificador de Windows. Si esa cuenta aún no termina, la línea llega en cuanto lo hace, y si la diferencia no llega al medio por ciento, no se dice. Luego, el ajuste **Kata es tu app de capturas**, con una línea que explica qué cambia, y **Continuar**, con «Todo se queda en tu equipo» debajo. Con el editor apagado, Lista llega en cuanto se guarda la captura.
+
+Después viene **Premium**: «Todo esto es gratis», con el destello, y «Para siempre y sin límites». Luego, en una tarjeta, lo que Premium añade (un atajo a tu medida, tus colores en formas y pasos, dibujo a mano alzada), una línea tras otra, cada una con su icono en un color de firma. Al final, **Seguir gratis** y **Obtener Premium**, lado a lado y del mismo tamaño y peso. Se cierra con la X de la ventana, y `Esc` lleva al inicio. Mientras Kata no se vende, Premium solo aparece en Kata Dev y los dos botones llevan al inicio: la compra aún no está conectada.
+
 ## Icono
 
 Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el naranja de Kata, un caqui cálido que contrasta con todo y es el mismo de los pasos; sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
@@ -85,12 +89,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 ## Pendiente
 
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-- **Bienvenida (onboarding)**, a la altura del resto de Kata. Se aprende usando Kata de verdad, con una señal a la vez, y nada de lo que enseña es Premium:
-  1. **Hola.** Hecho: ver [Bienvenida](#bienvenida).
-  2. **La primera captura.** Hecho: ver [Bienvenida](#bienvenida).
-  3. **El editor.** Hecho: ver [Bienvenida](#bienvenida).
-  4. **Lista.** La captura llega como la tarjeta de firma, con lo que tardó en aparecer y cuánto menos pesa, medidos en esa misma captura. Ahí se puede encender Kata como app de capturas, con una línea que explica qué cambia, y se cuenta que nada sale del equipo.
-  5. **Premium**, que se cierra con una X. Primero dice que todo lo visto es gratis, para siempre y sin límites; luego enseña lo que Premium añade. «Seguir gratis» se ve tanto como comprar.
+- **Bienvenida (onboarding).** Sus cinco fases (hola, la primera captura, el editor, Lista y Premium) están hechas: ver [Bienvenida](#bienvenida). Falta que Alex las pruebe y conectar «Obtener Premium» con la compra en la Store.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
 - **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 

@@ -8,26 +8,24 @@ use kata_ui::{
     Graphics, Surface,
     motion::{self, Animation, Easing},
     paint::{Area, Label, Painter, Point},
-    theme::{Palette, color},
+    theme::Palette,
 };
 use windows::{
     Win32::{
         Foundation::HWND,
-        Graphics::{
-            Direct2D::{
-                Common::{
-                    D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
-                },
-                D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1, ID2D1Bitmap1,
-            },
-            Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+        Graphics::Direct2D::{
+            Common::{D2D_RECT_U, D2D1_COLOR_F},
+            ID2D1Bitmap1,
         },
     },
     core::Result,
 };
 
 use super::{MARGIN, TITLE_BAR};
-use crate::export::Picture;
+use crate::{
+    card::{self, LEAN, Pose, ROOM},
+    export::Picture,
+};
 
 /// The selected shape's outline width, in DIPs.
 pub const SELECTED: f32 = 2.0;
@@ -41,24 +39,6 @@ const CHIP: f32 = 10.0;
 const CHIP_OFFSET: f32 = 16.0;
 /// The most the capture magnifies: each of its pixels this many screen pixels wide.
 const MAX_ZOOM: f32 = 8.0;
-
-/// The most the card that a dragged capture shrinks into measures, in DIPs; its
-/// corners, as Windows 11's overlays have; how far it leans, in degrees clockwise;
-/// how far above its bottom edge the pointer holds it, so what Windows says about
-/// the drop shows below; and the room around it for its shadows.
-const CARD: (f32, f32) = (200.0, 140.0);
-const CARD_RADIUS: f32 = 8.0;
-const LEAN: f32 = 3.0;
-const HOLD: f32 = 12.0;
-const CARD_ROOM: f32 = 36.0;
-/// The card's shadows, lifted off: a wide one far below and a close one just under
-/// it, each blurred over so many DIPs, cast so far down and so dark.
-const CARD_SHADOWS: [(f32, f32, f32); 2] = [(36.0, 16.0, 0.34), (6.0, 2.0, 0.22)];
-/// Its edge in Kata's own colors, in DIPs; and the glint that crosses it as it
-/// lifts off, for its width, its share of the card's, and its opacity.
-const RIM: f32 = 2.5;
-const GLINT_BAND: f32 = 0.6;
-const GLINT_OPACITY: f32 = 0.5;
 
 const SHADOW: D2D1_COLOR_F = D2D1_COLOR_F {
     r: 0.0,
@@ -84,28 +64,8 @@ impl Gpu {
     /// Covers `hwnd`, whose client area measures `size` pixels, and copies `image`.
     pub fn new(graphics: &Graphics, hwnd: HWND, size: (u32, u32), image: &Image) -> Result<Self> {
         let surface = Surface::new(graphics, hwnd, size)?;
-        let context = surface.context();
-        unsafe {
-            let image = context.CreateBitmap(
-                D2D_SIZE_U {
-                    width: image.width(),
-                    height: image.height(),
-                },
-                Some(image.pixels().as_ptr().cast()),
-                image.stride() as u32,
-                &D2D1_BITMAP_PROPERTIES1 {
-                    pixelFormat: D2D1_PIXEL_FORMAT {
-                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                        alphaMode: D2D1_ALPHA_MODE_IGNORE,
-                    },
-                    dpiX: 96.0,
-                    dpiY: 96.0,
-                    bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
-                    ..Default::default()
-                },
-            )?;
-            Ok(Self { surface, image })
-        }
+        let image = card::bitmap(surface.context(), image)?;
+        Ok(Self { surface, image })
     }
 
     /// The card the capture shrinks into to carry it away, as a picture `scale`
@@ -114,11 +74,11 @@ impl Gpu {
         let size = unsafe { self.image.GetPixelSize() };
         let size = (size.width as f32 / scale, size.height as f32 / scale);
         let held = Pose::held(size, (0.0, 0.0));
-        let (width, height) = (held.area.width, held.area.height);
+        let (width, height) = (held.area().width, held.area().height);
         let (sin, cos) = LEAN.to_radians().sin_cos();
         // Leaning, it takes a little more room.
         let room = |across: f32, down: f32| {
-            ((across * cos + down * sin + 2.0 * CARD_ROOM) * scale).ceil() as u32
+            ((across * cos + down * sin + 2.0 * ROOM) * scale).ceil() as u32
         };
         let pixels = (room(width, height), room(height, width));
         let center = held.center();
@@ -127,7 +87,7 @@ impl Gpu {
             pixels.1 as f32 / scale / 2.0 - center.1,
         );
         let drawn = self.surface.picture(palette, scale, pixels, |painter| {
-            draw_card(painter, &self.image, Pose::held(size, pointer), None);
+            card::draw(painter, &self.image, Pose::held(size, pointer), None);
         })?;
         Ok(Picture {
             pixels: drawn,
@@ -159,129 +119,6 @@ impl Gpu {
         }
         Ok(())
     }
-}
-
-/// Where the card a dragged capture shrinks into is, and how lifted off.
-#[derive(Clone, Copy)]
-pub struct Pose {
-    /// Upright, before it leans around its center.
-    area: Area,
-    /// In degrees clockwise.
-    lean: f32,
-    radius: f32,
-    /// From 0, lying in the window as the capture, to 1, lifted off as a card.
-    lift: f32,
-}
-
-impl Pose {
-    /// The capture, lying over `area`.
-    pub fn flat(area: Area) -> Self {
-        Self {
-            area,
-            lean: 0.0,
-            radius: 0.0,
-            lift: 0.0,
-        }
-    }
-
-    /// The card that a capture `size` DIPs across and down, shown pixel for pixel,
-    /// shrinks into, around `center`.
-    pub fn card(size: (f32, f32), center: Point) -> Self {
-        let fit = (CARD.0 / size.0).min(CARD.1 / size.1).min(1.0);
-        let (width, height) = (size.0 * fit, size.1 * fit);
-        Self {
-            area: Area::new(
-                center.0 - width / 2.0,
-                center.1 - height / 2.0,
-                width,
-                height,
-            ),
-            lean: LEAN,
-            radius: CARD_RADIUS,
-            lift: 1.0,
-        }
-    }
-
-    /// The card, as `pointer` holds it.
-    pub fn held(size: (f32, f32), pointer: Point) -> Self {
-        let card = Self::card(size, pointer);
-        let (sin, cos) = LEAN.to_radians().sin_cos();
-        let below = (card.area.height / 2.0 - HOLD).max(0.0);
-        card.moved((below * sin, -below * cos))
-    }
-
-    /// The card, hanging from the middle of its top edge at `(x, top)`.
-    pub fn hanging(size: (f32, f32), (x, top): Point) -> Self {
-        let card = Self::card(size, (x, top));
-        card.moved((0.0, card.area.height / 2.0))
-    }
-
-    /// Moved `across` and `down`.
-    pub fn moved(mut self, (across, down): (f32, f32)) -> Self {
-        self.area.left += across;
-        self.area.top += down;
-        self
-    }
-
-    /// Shrunk around its center to fit in `most`, settling closer as it shrinks.
-    pub fn shrunk(self, most: (f32, f32)) -> Self {
-        let area = self.area;
-        let fit = (most.0 / area.width).min(most.1 / area.height).min(1.0);
-        let (x, y) = self.center();
-        let (width, height) = (area.width * fit, area.height * fit);
-        Self {
-            area: Area::new(x - width / 2.0, y - height / 2.0, width, height),
-            lean: self.lean,
-            radius: (self.radius * fit).max(2.0),
-            lift: self.lift * fit.sqrt(),
-        }
-    }
-
-    /// The pose `progress` of the way to `to`.
-    pub fn toward(self, to: Self, progress: f32) -> Self {
-        let mix = |from: f32, to: f32| from + (to - from) * progress;
-        Self {
-            area: Area::new(
-                mix(self.area.left, to.area.left),
-                mix(self.area.top, to.area.top),
-                mix(self.area.width, to.area.width),
-                mix(self.area.height, to.area.height),
-            ),
-            lean: mix(self.lean, to.lean),
-            radius: mix(self.radius, to.radius),
-            lift: mix(self.lift, to.lift),
-        }
-    }
-
-    pub fn center(&self) -> Point {
-        (self.area.left + self.area.width / 2.0, self.area.middle())
-    }
-}
-
-/// Draws `image` as the card posed `pose`: the more lifted off, the farther its
-/// shadows fall and the more its light and edge show. A glint crosses it `glint` of
-/// the way, if any.
-pub fn draw_card(painter: &Painter, image: &ID2D1Bitmap1, pose: Pose, glint: Option<f32>) {
-    let Pose {
-        area,
-        lean,
-        radius,
-        lift,
-    } = pose;
-    painter.turned(lean, pose.center(), || {
-        for (blur, down, dark) in CARD_SHADOWS {
-            let shadow = color(0x000000, dark * lift);
-            painter.cast(area, radius, blur * lift, down * lift, shadow);
-        }
-        painter.clip_rounded(area, radius, || painter.bitmap(image, area));
-        painter.sheen(area, radius, lift);
-        if let Some(glint) = glint {
-            let band = GLINT_BAND * area.width;
-            let x = area.left - band / 2.0 + (area.width + band) * glint;
-            painter.glint_across(area, radius, x, band, GLINT_OPACITY);
-        }
-        painter.rim(area, radius, RIM, lift);
-    });
 }
 
 /// What the capture shows in: a window of `window` DIPs, each `scale` pixels wide,

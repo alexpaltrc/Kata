@@ -1,5 +1,6 @@
 //! The main window: a button for a new capture and, a page away, the settings.
-//! Until Kata's first capture, it opens with a welcome instead.
+//! Until Kata's first capture, it opens with a welcome instead, which goes on once
+//! that capture is left.
 
 mod pages;
 
@@ -55,7 +56,7 @@ use crate::{
     settings::{self, Settings},
     sound, startup,
 };
-pub use pages::Page;
+pub use pages::{Page, Ready};
 use pages::{Pages, Part, Prompt, TITLE_BAR};
 
 const CLASS: PCWSTR = w!("Kata.Main");
@@ -65,6 +66,10 @@ const SIZE: (f32, f32) = (480.0, 408.0);
 const SLIDE: f32 = 40.0;
 /// Goes to the page in `wparam`.
 const GO: u32 = WM_APP + 1;
+/// Goes to Ready, its `LPARAM` owning a boxed `Ready` with the first capture.
+const READY: u32 = WM_APP + 2;
+/// Ready's capture was weighed: its `WPARAM` holds the share saved as an `f32`'s bits.
+const WEIGHED: u32 = WM_APP + 3;
 
 thread_local! {
     /// The main window, while it's open.
@@ -89,9 +94,38 @@ pub fn show(graphics: &Graphics, owner: HWND, page: Page) {
         }
         return;
     }
-    match unsafe { create(graphics, owner, page) } {
+    match unsafe { create(graphics, owner, page, None) } {
         Ok(hwnd) => OPEN.set(Some(hwnd)),
         Err(error) => report("window", &error),
+    }
+}
+
+/// Shows the welcome's Ready with Kata's first capture, opening the window if needed.
+pub fn ready(graphics: &Graphics, owner: HWND, ready: Ready) {
+    if let Some(hwnd) = OPEN.get() {
+        let ready = Box::into_raw(Box::new(ready));
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(hwnd);
+            if PostMessageW(Some(hwnd), READY, WPARAM(0), LPARAM(ready as isize)).is_err() {
+                drop(Box::from_raw(ready));
+            }
+        }
+        return;
+    }
+    match unsafe { create(graphics, owner, Page::Ready, Some(ready)) } {
+        Ok(hwnd) => OPEN.set(Some(hwnd)),
+        Err(error) => report("window", &error),
+    }
+}
+
+/// Has Ready say how much lighter its capture is, `saved` being the share.
+pub fn weighed(saved: f32) {
+    if let Some(hwnd) = OPEN.get() {
+        let saved = WPARAM(saved.to_bits() as usize);
+        let _ = unsafe { PostMessageW(Some(hwnd), WEIGHED, saved, LPARAM(0)) };
     }
 }
 
@@ -101,10 +135,19 @@ pub fn close() {
     }
 }
 
-unsafe fn create(graphics: &Graphics, owner: HWND, page: Page) -> Result<HWND> {
+unsafe fn create(
+    graphics: &Graphics,
+    owner: HWND,
+    page: Page,
+    ready: Option<Ready>,
+) -> Result<HWND> {
     let settings = Settings::load();
     let folder = export::folder().unwrap_or_default();
-    let pages = Pages::new(graphics, &settings, &folder, startup::is_on())?;
+    let mut pages = Pages::new(graphics, &settings, &folder, startup::is_on())?;
+    if let Some(ready) = ready {
+        pages.set_ready(ready)?;
+    }
+    pages.start(page);
     let palette = Palette::current();
     let min = pages.min_size();
     unsafe {
@@ -272,6 +315,20 @@ impl Main {
                 return None;
             }
             GO => self.go(Page::numbered(wparam.0)),
+            READY => {
+                let ready = unsafe { Box::from_raw(lparam.0 as *mut Ready) };
+                match self.pages.set_ready(*ready) {
+                    Ok(()) => self.go(Page::Ready),
+                    Err(error) => report("window", &error),
+                }
+            }
+            WEIGHED => {
+                let saved = f32::from_bits(wparam.0 as u32);
+                if let Err(error) = self.pages.weighed(saved) {
+                    report("window", &error);
+                }
+                self.invalidate();
+            }
             WM_GETOBJECT => {
                 let result = self.access.answer(self.hwnd, wparam, lparam)?;
                 self.update_access();
@@ -383,7 +440,7 @@ impl Main {
             self.pages.tab(self.page, window::held(VK_SHIFT));
         } else if let Some((part, action)) = focused.zip(Action::of(key)) {
             self.act(part, action);
-        } else if key == VK_ESCAPE && self.page == Page::Settings {
+        } else if key == VK_ESCAPE && self.page != Page::Home && self.page != Page::Welcome {
             self.go(Page::Home);
         } else {
             return false;
@@ -409,6 +466,10 @@ impl Main {
                 let _ = PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
             },
             Part::OpenSettings => self.go(Page::Settings),
+            // Premium shows in Kata Dev only, until Kata is for sale.
+            Part::GoOn if channel::is_dev() => self.go(Page::Premium),
+            // Buying isn't there yet: both ways go on for free.
+            Part::GoOn | Part::StayFree | Part::GetPremium => self.go(Page::Home),
             Part::Back => self.go(Page::Home),
             // Pressing the current shortcut mustn't start a capture.
             Part::Shortcut => {
@@ -424,8 +485,8 @@ impl Main {
                     sound::play();
                 }
             }
-            Part::ScreenKeys => {
-                self.settings.screen_keys = self.pages.screen_keys();
+            Part::ScreenKeys | Part::ReadyKeys => {
+                self.settings.screen_keys = self.pages.switch_screen_keys(part);
                 self.settings.save();
                 let changed = crate::KEYS_CHANGED;
                 let _ = unsafe { PostMessageW(Some(self.owner), changed, WPARAM(0), LPARAM(0)) };
@@ -492,12 +553,10 @@ impl Main {
         }
     }
 
-    /// Slides `page` in. The welcome plays from its start, even if it's showing.
+    /// Slides `page` in. The welcome's pages play from their start, even if showing.
     fn go(&mut self, page: Page) {
-        if page == Page::Welcome {
-            self.pages.greet();
-            self.invalidate();
-        }
+        self.pages.start(page);
+        self.invalidate();
         if page == self.page {
             return;
         }
@@ -516,9 +575,16 @@ impl Main {
         let fresh = self.surface.is_none();
         let surface = match self.surface.take() {
             Some(surface) => Ok(surface),
-            None => Surface::new(&self.graphics, self.hwnd, self.size),
+            None => {
+                self.pages.forget_device();
+                Surface::new(&self.graphics, self.hwnd, self.size)
+            }
         };
-        match surface.and_then(|mut surface| self.draw(&mut surface, now).map(|()| surface)) {
+        let drawn = surface.and_then(|mut surface| {
+            self.pages.upload(surface.context())?;
+            self.draw(&mut surface, now).map(|()| surface)
+        });
+        match drawn {
             Ok(surface) => self.surface = Some(surface),
             Err(error) if fresh => {
                 report("window", &error);
