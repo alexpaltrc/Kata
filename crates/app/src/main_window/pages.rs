@@ -219,7 +219,7 @@ impl Pages {
                 fonts.label(text.add_modifier)?,
                 fonts.label(text.in_use)?,
             ],
-            screen_keys: Toggle::new(fonts.label(text.screen_keys)?, settings.screen_keys)
+            screen_keys: Toggle::new(fonts.label(text.make_default)?, settings.screen_keys)
                 .explained(text.screen_keys_help),
             screen_keys_info: Info::new(
                 fonts.icon('\u{E946}', 16.0)?,

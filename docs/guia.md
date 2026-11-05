@@ -131,7 +131,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Ajuste | Por defecto | Qué hace |
 |---|---|---|
 | Atajo | `Ctrl + Mayús + S` | Un clic y se pulsa el nuevo. Lleva `Ctrl` o `Alt`, salvo `Impr Pant`, que puede ir solo. Si otra app lo usa, lo avisa. |
-| Kata es tu app de capturas | Apagado | `Impr Pant` y `Win + Mayús + S` abren la captura de Kata en vez de Recortes. El icono «i» de al lado lo explica. |
+| Haz de Kata tu app de capturas | Apagado | Las teclas de captura de Windows, `Impr Pant` y `Win + Mayús + S`, abren la captura de Kata en vez de Recortes. El icono «i» de al lado lo explica. |
 | Abrir el editor al capturar | Encendido | Apagado, la captura solo se copia y se guarda. |
 | Mostrar los nombres de las herramientas | Apagado | El nombre de cada herramienta, siempre debajo de su icono. |
 | Sonido | Encendido | El toque al capturar. |
@@ -166,7 +166,7 @@ monitor y haz clic. Entra todo, también la barra de tareas.
 capturas de ventanas y páginas suele ahorrar entre 5 y 20 % frente al codificador de Windows; con
 fotos, pesa prácticamente lo mismo. Detalles en [compresion.md](compresion.md).
 
-**¿Puedo usar la tecla Impr Pant?** Sí. Enciende «Kata es tu app de capturas» en Ajustes. Desde
+**¿Puedo usar la tecla Impr Pant?** Sí. Enciende «Haz de Kata tu app de capturas» en Ajustes. Desde
 entonces, `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`) y `Win + Mayús + S` abren Kata.
 Al apagarlo, esas teclas vuelven a Windows al instante.
 

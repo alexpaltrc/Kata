@@ -4,7 +4,7 @@ Kata no recopila, guarda ni envía datos personales. No se conecta a internet.
 
 Las capturas se guardan solo en tu equipo, en la carpeta que elijas, y se copian a tu portapapeles. Los ajustes se guardan en tu equipo y se borran al desinstalar Kata.
 
-Si activas «Kata es tu app de capturas», Kata solo reconoce Impr Pant y Win + Mayús + S. No registra ni guarda nada de lo que escribes.
+Si haces de Kata tu app de capturas, solo reconoce Impr Pant y Win + Mayús + S. No registra ni guarda nada de lo que escribes.
 
 ---
 
@@ -14,7 +14,7 @@ Kata does not collect, store or send personal data. It does not connect to the i
 
 Screenshots are saved only on your device, in the folder you choose, and copied to your clipboard. Settings stay on your device and are removed when you uninstall Kata.
 
-If you turn on "Kata is your screenshot app", Kata only recognizes Print Screen and Win + Shift + S. It does not record or store anything you type.
+If you make Kata your screenshot app, it only recognizes Print Screen and Win + Shift + S. It does not record or store anything you type.
 
 ---
 
