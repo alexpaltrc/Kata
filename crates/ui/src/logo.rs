@@ -22,7 +22,7 @@ use windows_numerics::Vector2;
 use crate::{
     motion::Easing,
     paint::{Area, Painter, diagonal, rounded},
-    theme::{color, mix},
+    theme::{self, color, mix},
 };
 
 /// The corners' stroke on the logo's 16-unit grid: how thick it is, how far from
@@ -88,7 +88,7 @@ impl Painter<'_> {
         } else {
             self.gradient(&stops(BRIGHT, DEEP), from, to).ok()
         };
-        let signature = self.signature();
+        let signature = theme::signature(palette.light);
         for (index, corner) in corners(area).into_iter().enumerate() {
             let start = index as f32 * STAGGER;
             let traced = PEN.apply(progress(time, start, TRACE));

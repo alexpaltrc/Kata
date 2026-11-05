@@ -103,6 +103,25 @@ pub fn welcome_done() {
     }
 }
 
+/// How many captures show the hint to point at a covered window, at most.
+const HINTS: usize = 3;
+
+/// Whether captures still show the hint to point at a covered window: until the
+/// user follows it, and for a few captures at most.
+pub fn hinting() -> bool {
+    read(w!("Hints"), 0) < HINTS
+}
+
+/// Remembers that a capture showed the hint, or that the user followed it.
+pub fn hinted(followed: bool) {
+    let hints = if followed {
+        HINTS
+    } else {
+        read(w!("Hints"), 0) + 1
+    };
+    write(w!("Hints"), hints.min(HINTS));
+}
+
 fn read(name: PCWSTR, default: usize) -> usize {
     registry::read_dword(KEY, name).map_or(default, |value| value as usize)
 }

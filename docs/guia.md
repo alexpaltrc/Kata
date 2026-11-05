@@ -30,7 +30,8 @@ propio documento: [compresion.md](compresion.md).
   entero, con la barra de tareas, y un clic lo captura.
 - **Cancelar:** `Esc` o clic derecho.
 - **Ventanas tapadas:** si otra ventana tapa una parte, al pasar el cursor aparece completa, y así
-  se captura. Lo que queda fuera de la pantalla no se incluye.
+  se captura. Lo que queda fuera de la pantalla no se incluye. En las primeras capturas, una
+  silueta de colores la señala.
 - **Al soltar:** la captura se copia al portapapeles al instante, suena un toque sutil y se guarda
   en segundo plano. Luego se abre el editor (o nada, si así se eligió en Ajustes, para tomar
   varias capturas seguidas).

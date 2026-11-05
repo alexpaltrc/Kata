@@ -68,6 +68,8 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 
 Hasta la primera captura, la ventana principal abre con la bienvenida. El icono se dibuja solo: cada esquina se traza en un color de firma, una tras otra, y se calienta hasta el naranja de Kata pasando por los colores que siguen al suyo; luego se enciende el centro. Llegan «Hola, soy Kata» y «Gratis y sin límites», el botón **Toma tu primera captura** con el atajo debajo, y el destello cruza el saludo. Si se cierra sin capturar, vuelve a aparecer la próxima vez.
 
+En las primeras capturas, si hay una ventana tapada por otra, su silueta se traza en los colores de firma, como el icono: nace en el punto más cercano al cursor y rodea la ventana en los dos sentidos hasta cerrarse, también por donde está tapada. Al pasar el cursor por ella, la silueta se funde en el anillo blanco de la selección y la ventana sale completa. Arrastrar o `Esc` la apagan. Se repite hasta que se usa una vez, y como mucho en tres capturas.
+
 ## Icono
 
 Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el naranja de Kata, un caqui cálido que contrasta con todo y es el mismo de los pasos; sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
@@ -77,7 +79,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 - **Bienvenida (onboarding)**, a la altura del resto de Kata. Se aprende usando Kata de verdad, con una señal a la vez, y nada de lo que enseña es Premium:
   1. **Hola.** Hecho: ver [Bienvenida](#bienvenida).
-  2. **La primera captura**, sobre la pantalla real: una pista sugiere pasar el cursor por una ventana tapada, que sale completa.
+  2. **La primera captura.** Hecho: ver [Bienvenida](#bienvenida).
   3. **El editor**, con tres señales, de una en una: ponerle nombre, que se guarda solo (y dónde) y que la captura se arrastra desde su nombre.
   4. **Lista.** La captura llega como la tarjeta de firma, con lo que tardó en aparecer y cuánto menos pesa, medidos en esa misma captura. Ahí se puede encender Kata como app de capturas, con una línea que explica qué cambia, y se cuenta que nada sale del equipo.
   5. **Premium**, que se cierra con una X. Primero dice que todo lo visto es gratis, para siempre y sin límites; luego enseña lo que Premium añade. «Seguir gratis» se ve tanto como comprar.

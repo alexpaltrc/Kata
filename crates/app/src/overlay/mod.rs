@@ -2,7 +2,10 @@
 //! to capture: hovering highlights the window or monitor under the pointer, a click
 //! takes it, and dragging selects any area. In a monitor's corners, the whole
 //! monitor is highlighted. A window partly covered by others shows whole while
-//! hovered, and is captured whole.
+//! hovered, and is captured whole: the first few captures hint at it by tracing
+//! one's silhouette.
+
+mod silhouette;
 
 use std::{
     cell::RefCell,
@@ -31,7 +34,7 @@ use windows::{
                 D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_BITMAP_PROPERTIES,
                 D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_HWND_RENDER_TARGET_PROPERTIES,
                 D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT,
-                ID2D1Bitmap, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
+                ID2D1Bitmap, ID2D1RenderTarget, ID2D1SolidColorBrush,
             },
             DirectWrite::{
                 DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
@@ -61,7 +64,9 @@ use windows::{
 };
 use windows_numerics::Vector2;
 
-use crate::{channel, report};
+use silhouette::{Drawn, Hint, Silhouette};
+
+use crate::{channel, report, settings};
 
 /// How dark the screen gets outside the selection.
 const DIM: f32 = 0.45;
@@ -221,6 +226,8 @@ struct Overlay<'a> {
     /// The covered window shown whole, and how visible: it fades in once Windows
     /// has drawn it, and out when the pointer leaves it.
     reveal: Option<(usize, Animation)>,
+    /// The hint that points at a covered window, in the first few captures.
+    silhouette: Option<Silhouette>,
 }
 
 enum Whole {
@@ -250,11 +257,21 @@ impl<'a> Overlay<'a> {
             sender,
             receiver,
             reveal: None,
+            silhouette: settings::hinting()
+                .then(|| Silhouette::pick(shot, pointer, window))
+                .flatten(),
         }
     }
 
     fn appear(&mut self, hwnd: HWND) {
         self.presence = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
+        if let Some(silhouette) = &mut self.silhouette {
+            silhouette.begin();
+            settings::hinted(false);
+            // Drawn whole ahead of time, it shows the moment the pointer gets there.
+            let index = silhouette.index;
+            self.ask(hwnd, index);
+        }
         self.aim(hwnd, self.window);
         invalidate(hwnd);
     }
@@ -263,6 +280,12 @@ impl<'a> Overlay<'a> {
     /// for whole, and shown whole as soon as it's drawn.
     fn aim(&mut self, hwnd: HWND, window: Option<usize>) {
         self.window = window;
+        if let Some(silhouette) = &mut self.silhouette
+            && window == Some(silhouette.index)
+            && silhouette.fade()
+        {
+            settings::hinted(true);
+        }
         if let Some((shown, opacity)) = &mut self.reveal
             && Some(*shown) != window
         {
@@ -399,6 +422,9 @@ impl<'a> Overlay<'a> {
                     self.from = area;
                     self.to = area;
                     self.glide = Animation::idle(1.0);
+                    if let Some(silhouette) = &mut self.silhouette {
+                        silhouette.fade();
+                    }
                     self.aim(hwnd, None);
                     invalidate(hwnd);
                 }
@@ -447,7 +473,7 @@ impl<'a> Overlay<'a> {
             None => Canvas::new(self.graphics, hwnd, &self.shot.image),
         }
         .and_then(|mut canvas| {
-            canvas.draw(&self.graphics.dwrite, &frame)?;
+            canvas.draw(self.graphics, &frame)?;
             Ok(canvas)
         });
         match drawn {
@@ -466,6 +492,10 @@ impl<'a> Overlay<'a> {
             || self
                 .reveal
                 .is_some_and(|(_, opacity)| opacity.is_running(now))
+            || self
+                .silhouette
+                .as_ref()
+                .is_some_and(|silhouette| silhouette.is_running(now))
         {
             invalidate(hwnd);
         }
@@ -487,6 +517,10 @@ impl<'a> Overlay<'a> {
                     opacity: opacity.value(now) * presence,
                 })
             }),
+            silhouette: self
+                .silhouette
+                .as_ref()
+                .map(|silhouette| silhouette.at(now, presence)),
             selection,
             size: (self.to.width(), self.to.height()),
             area: self
@@ -543,6 +577,8 @@ struct Frame<'a> {
     presence: f32,
     /// A covered window shown whole, over the frozen screen.
     whole: Option<Reveal<'a>>,
+    /// The hint that points at a covered window.
+    silhouette: Option<Hint<'a>>,
     selection: Rect,
     /// The size the label reads: where the selection is heading.
     size: (i32, i32),
@@ -561,11 +597,13 @@ struct Reveal<'a> {
 
 /// The Direct2D resources the overlay draws with.
 struct Canvas {
-    target: ID2D1HwndRenderTarget,
+    target: ID2D1RenderTarget,
     bounds: Rect,
     screen: ID2D1Bitmap,
     /// The last window shown whole, by index.
     whole: Option<(usize, ID2D1Bitmap)>,
+    /// The hint's outline and colors, once it shows.
+    silhouette: Option<Drawn>,
     brush: ID2D1SolidColorBrush,
     typography: IDWriteTypography,
     /// The label's text format and the display scale it was made for.
@@ -576,22 +614,25 @@ impl Canvas {
     fn new(graphics: &Graphics, hwnd: HWND, image: &Image) -> Result<Self> {
         unsafe {
             // At 96 DPI, Direct2D's units are physical pixels, like the capture's.
-            let target = graphics.d2d.CreateHwndRenderTarget(
-                &D2D1_RENDER_TARGET_PROPERTIES {
-                    pixelFormat: PIXEL_FORMAT,
-                    dpiX: 96.0,
-                    dpiY: 96.0,
-                    ..Default::default()
-                },
-                &D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                    hwnd,
-                    pixelSize: D2D_SIZE_U {
-                        width: image.width(),
-                        height: image.height(),
+            let target: ID2D1RenderTarget = graphics
+                .d2d
+                .CreateHwndRenderTarget(
+                    &D2D1_RENDER_TARGET_PROPERTIES {
+                        pixelFormat: PIXEL_FORMAT,
+                        dpiX: 96.0,
+                        dpiY: 96.0,
+                        ..Default::default()
                     },
-                    presentOptions: D2D1_PRESENT_OPTIONS_NONE,
-                },
-            )?;
+                    &D2D1_HWND_RENDER_TARGET_PROPERTIES {
+                        hwnd,
+                        pixelSize: D2D_SIZE_U {
+                            width: image.width(),
+                            height: image.height(),
+                        },
+                        presentOptions: D2D1_PRESENT_OPTIONS_NONE,
+                    },
+                )?
+                .into();
             let screen = bitmap(&target, image)?;
             let brush = target.CreateSolidColorBrush(&rgba(0.0, 0.0, 0.0, 0.0), None)?;
             // Tabular figures keep the label from jittering as its numbers change.
@@ -605,6 +646,7 @@ impl Canvas {
                 bounds: image.bounds(),
                 screen,
                 whole: None,
+                silhouette: None,
                 brush,
                 typography,
                 label_format: None,
@@ -612,7 +654,7 @@ impl Canvas {
         }
     }
 
-    fn draw(&mut self, dwrite: &IDWriteFactory, frame: &Frame) -> Result<()> {
+    fn draw(&mut self, graphics: &Graphics, frame: &Frame) -> Result<()> {
         let presence = frame.presence;
         let selection = frame.selection;
         let ring = frame.scale.round().max(1.0) as i32;
@@ -621,10 +663,18 @@ impl Canvas {
         let white = clamp(selection.inflate(ring));
         let shadow = clamp(white.inflate(ring));
         let label = if presence > 0.0 {
-            Some(self.label(dwrite, frame, ring as f32)?)
+            Some(self.label(&graphics.dwrite, frame, ring as f32)?)
         } else {
             None
         };
+        // A hint that can't be drawn is left out: the capture goes on without it.
+        let silhouette = frame.silhouette.as_ref().filter(|hint| hint.opacity > 0.0);
+        if silhouette.is_some() && self.silhouette.is_none() {
+            self.silhouette = frame
+                .silhouette
+                .as_ref()
+                .and_then(|hint| hint.silhouette.prepare(&graphics.d2d, &self.target).ok());
+        }
         let whole = match &frame.whole {
             Some(reveal) if reveal.opacity > 0.0 => {
                 if self
@@ -661,6 +711,9 @@ impl Canvas {
                 brush.SetColor(&rgba(0.0, 0.0, 0.0, DIM * presence));
                 for band in around(self.bounds, selection) {
                     target.FillRectangle(&rect_f(band), brush);
+                }
+                if let (Some(hint), Some(drawn)) = (silhouette, &self.silhouette) {
+                    drawn.draw(&graphics.d2d, target, brush, hint);
                 }
                 outline(
                     target,
@@ -760,12 +813,7 @@ struct Label {
 }
 
 impl Label {
-    unsafe fn draw(
-        &self,
-        target: &ID2D1HwndRenderTarget,
-        brush: &ID2D1SolidColorBrush,
-        presence: f32,
-    ) {
+    unsafe fn draw(&self, target: &ID2D1RenderTarget, brush: &ID2D1SolidColorBrush, presence: f32) {
         let rounded = |rect| D2D1_ROUNDED_RECT {
             rect,
             radiusX: self.radius,
@@ -795,7 +843,7 @@ const PIXEL_FORMAT: D2D1_PIXEL_FORMAT = D2D1_PIXEL_FORMAT {
 };
 
 /// `image` as a bitmap `target` can draw, pixel for pixel.
-fn bitmap(target: &ID2D1HwndRenderTarget, image: &Image) -> Result<ID2D1Bitmap> {
+fn bitmap(target: &ID2D1RenderTarget, image: &Image) -> Result<ID2D1Bitmap> {
     unsafe {
         target.CreateBitmap(
             D2D_SIZE_U {
@@ -827,7 +875,7 @@ fn around(bounds: Rect, hole: Rect) -> impl Iterator<Item = Rect> {
 
 /// Paints a band `thickness` pixels wide just inside the edges of `outer`.
 unsafe fn outline(
-    target: &ID2D1HwndRenderTarget,
+    target: &ID2D1RenderTarget,
     brush: &ID2D1SolidColorBrush,
     outer: Rect,
     thickness: f32,

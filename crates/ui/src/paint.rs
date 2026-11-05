@@ -28,7 +28,7 @@ use windows_numerics::{Matrix3x2, Vector2};
 use crate::{
     Graphics,
     figure::Figure,
-    theme::{Palette, color, faded},
+    theme::{self, Palette, color, faded},
 };
 
 /// A position in DIPs.
@@ -250,7 +250,7 @@ impl<'a> Painter<'a> {
             color: color(rgb, alpha * opacity),
         };
         // From its trailing edge to its leading one, fading in and out at both.
-        let [blue, violet, pink, orange] = self.signature();
+        let [blue, violet, pink, orange] = theme::signature(self.palette.light);
         let stops = [
             stop(0.0, blue, 0.0),
             stop(0.2, blue, 1.0),
@@ -287,7 +287,7 @@ impl<'a> Painter<'a> {
     /// A line `width` DIPs thick, just inside the edges of `area`, in Kata's own
     /// colors from its top-left corner to its bottom-right, at `opacity`.
     pub fn rim(&self, area: Area, radius: f32, width: f32, opacity: f32) {
-        let [blue, violet, pink, orange] = self.signature();
+        let [blue, violet, pink, orange] = theme::signature(self.palette.light);
         let stop = |position, rgb| D2D1_GRADIENT_STOP {
             position,
             color: color(rgb, opacity),
@@ -310,16 +310,6 @@ impl<'a> Painter<'a> {
                     None,
                 );
             }
-        }
-    }
-
-    /// Blue, violet, pink and orange, the same whatever the accent: luminous over
-    /// dark themes, and deeper over light ones, where light tones fade.
-    pub(crate) fn signature(&self) -> [u32; 4] {
-        if self.palette.light {
-            [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D]
-        } else {
-            [0x78A8FF, 0xB18CFF, 0xFF85C0, 0xFFB27A]
         }
     }
 

@@ -225,6 +225,17 @@ impl Palette {
     }
 }
 
+/// Kata's own colors for its special effects, as `0xRRGGBB`: blue, violet, pink and
+/// orange, the same whatever the accent. Luminous over dark themes, and deeper over
+/// light ones, where light tones fade.
+pub const fn signature(light: bool) -> [u32; 4] {
+    if light {
+        [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D]
+    } else {
+        [0x78A8FF, 0xB18CFF, 0xFF85C0, 0xFFB27A]
+    }
+}
+
 /// A color written as `0xRRGGBB`.
 pub fn color(rgb: u32, alpha: f32) -> D2D1_COLOR_F {
     let [_, r, g, b] = rgb.to_be_bytes().map(|channel| f32::from(channel) / 255.0);
