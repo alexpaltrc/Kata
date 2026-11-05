@@ -73,8 +73,8 @@ En las primeras capturas, la silueta de una ventana se traza en los colores de f
 En los primeros editores, tres señales, de una en una:
 
 - **El nombre.** «Ponle nombre» se escribe solo, letra a letra y con su cursor, y luego lo cruza el destello.
-- **Se guarda solo.** Al guardarse la primera edición, una copia de la captura despega como la tarjeta del arrastre y vuela en arco hasta el botón de la carpeta. El botón late, se abre en una píldora con el nombre de la carpeta, la cruza el destello y se cierra.
-- **Se arrastra desde el nombre.** En cuanto el nombre termina de escribirse solo y nada más se mueve, la captura sube como tarjeta, queda colgando bajo el nombre y vuelve a su sitio. Si se empieza a editar antes, lo hace la primera vez que el cursor pasa por el nombre. Si se arrastra en ese momento, la tarjeta sale desde donde está.
+- **Se guarda solo.** Al guardarse la primera edición, el botón de la carpeta late y de debajo le sale un globo, como los de Windows, que dice «Guardado automáticamente». El globo vuelve a entrar, y el botón se abre en una píldora con el nombre de la carpeta, la cruza el destello y se cierra. Si la píldora no cabe junto al nombre, solo sale el globo.
+- **Se arrastra desde el nombre.** En cuanto el nombre termina de escribirse solo y nada más se mueve, el nombre se ve como bajo el cursor, con su asa, y la captura sube como tarjeta y queda colgando bajo él. Entonces el nombre se desplaza un poco, como si alguien lo arrastrara, con la tarjeta siguiéndolo un instante después, y vuelve; la tarjeta regresa a su sitio. Si se empieza a editar antes, lo hace la primera vez que el cursor pasa por el nombre. Si se arrastra en ese momento, la tarjeta sale desde donde está.
 
 Cada una se repite hasta que se usa una vez (renombrar, abrir la carpeta, arrastrar), y como mucho en tres editores. Esperan a que nada más se mueva. Con los efectos de animación apagados no aparecen, y el nombre ya está escrito.
 

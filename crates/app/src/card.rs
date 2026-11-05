@@ -110,20 +110,6 @@ impl Pose {
         self
     }
 
-    /// Shrunk around its center to fit in `most`, settling closer as it shrinks.
-    pub fn shrunk(self, most: (f32, f32)) -> Self {
-        let area = self.area;
-        let fit = (most.0 / area.width).min(most.1 / area.height).min(1.0);
-        let (x, y) = self.center();
-        let (width, height) = (area.width * fit, area.height * fit);
-        Self {
-            area: Area::new(x - width / 2.0, y - height / 2.0, width, height),
-            lean: self.lean,
-            radius: (self.radius * fit).max(2.0),
-            lift: self.lift * fit.sqrt(),
-        }
-    }
-
     /// The pose `progress` of the way to `to`.
     pub fn toward(self, to: Self, progress: f32) -> Self {
         let mix = |from: f32, to: f32| from + (to - from) * progress;

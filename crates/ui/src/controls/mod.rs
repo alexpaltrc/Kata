@@ -6,7 +6,7 @@ mod icon_button;
 mod info;
 mod shortcut;
 mod slider;
-mod tip;
+pub mod tip;
 mod toggle;
 
 use std::time::Instant;

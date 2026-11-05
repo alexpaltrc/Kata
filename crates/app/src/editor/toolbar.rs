@@ -8,7 +8,7 @@ use kata_editor::{Form, Shape, ZOOMS};
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Control, Dock, HEIGHT, IconButton, Item, Slider},
+    controls::{self, Control, Dock, HEIGHT, IconButton, Item, Slider, tip},
     figure::Figure,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
@@ -49,14 +49,26 @@ const KEY_PADDING: f32 = 8.0;
 const HINT_END: f32 = 14.0;
 const RISE: f32 = 8.0;
 const GROW: f32 = 0.1;
-/// The pill the folder button opens into to name the folder: between its text and
-/// the folder, and before the text; its corners; how far its text rises as it
-/// shows; and the glint's band of light across it.
+/// The pill the folder button opens into, to name the folder the capture saved
+/// itself in: between the name and the button, and before the name; its corners;
+/// how far the name rises as it shows and goes; and the glint's band of light
+/// across it.
 const PILL_GAP: f32 = 8.0;
 const PILL_PADDING: f32 = 12.0;
 const PILL_RADIUS: f32 = 4.0;
 const PILL_RISE: f32 = 4.0;
 const PILL_BAND: f32 = 64.0;
+/// How far the tip that says the capture saved itself comes out from under the
+/// folder button.
+const TIP_RISE: f32 = 4.0;
+
+/// That the capture saved itself: the note that says so, the folder's name, and
+/// the clock the folder button says it on.
+struct Saved {
+    note: Label,
+    folder: Label,
+    clock: Animation,
+}
 
 /// What dragging or clicking on the capture adds, in the dock's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,9 +169,9 @@ pub struct Toolbar {
     forms: Dock,
     name: Name,
     folder: IconButton,
-    /// The folder the capture saved itself in, which the folder button names as the
-    /// capture lands in it the first few times, and that signal's clock.
-    saved: Option<(Label, Animation)>,
+    /// That the capture saved itself, which the folder button says the first few
+    /// times.
+    saved: Option<Saved>,
     /// The part on show with the keyboard focus.
     focus: Option<Part>,
     /// The window's size, in DIPs.
@@ -436,13 +448,14 @@ impl Toolbar {
         let tips = self.options_top() - (STACK + HINT) * self.hint.value(now);
         self.tools.draw_tip(painter, tips, now);
         self.forms.draw_tip(painter, tips, now);
+        self.draw_told(painter, now);
     }
 
     pub fn is_animating(&self, now: Instant) -> bool {
         self.fade.is_running(now)
             || self.width.is_running(now)
             || self.hint.is_running(now)
-            || (self.saved.as_ref()).is_some_and(|(_, clock)| clock.is_running(now))
+            || (self.saved.as_ref()).is_some_and(|saved| saved.clock.is_running(now))
             || self
                 .parts()
                 .into_iter()
@@ -529,57 +542,80 @@ impl Toolbar {
         &mut self.name
     }
 
-    pub fn folder(&self) -> Area {
-        self.folder.area()
+    /// Says on `clock` that the capture saved itself, with `note`, and in `folder`:
+    /// the button beats, a tip under it says so, and the button opens to name the
+    /// folder.
+    pub fn show_saved(&mut self, note: Label, folder: Label, clock: Animation) {
+        self.saved = Some(Saved {
+            note,
+            folder,
+            clock,
+        });
     }
 
-    /// Shows that the capture saved itself in `folder`, on `clock`: the button pops
-    /// as the capture lands in it, then opens to name the folder.
-    pub fn show_saved(&mut self, folder: Label, clock: Animation) {
-        self.saved = Some((folder, clock));
-    }
-
-    /// The folder button, popping and opening into a pill that names the folder
-    /// while the capture lands in it, room beside the name allowing.
+    /// The folder button, beating and opening into a pill that names the folder,
+    /// room beside the name allowing.
     fn draw_folder(&self, painter: &Painter, now: Instant) {
-        let Some((label, clock)) = self
-            .saved
-            .as_ref()
-            .filter(|(_, clock)| clock.is_running(now))
-        else {
+        let Some(saved) = (self.saved.as_ref()).filter(|saved| saved.clock.is_running(now)) else {
             return self.folder.draw(painter, now);
         };
-        let seconds = clock.value(now);
+        let seconds = saved.clock.value(now);
         let button = self.folder.area();
-        let room = label.width + PILL_GAP;
-        let open = hints::pill(seconds);
-        if open > 0.0 && self.name.extent(now).right() + EDGE <= button.left - room {
-            let palette = painter.palette;
-            let pill = Area::new(
-                button.left - room * open,
-                button.top,
-                button.width + room * open,
-                button.height,
-            );
-            let pill = painter.align(pill);
-            painter.fill(pill, PILL_RADIUS, faded(palette.subtle_hover, open));
-            // The name shows over the second half of the opening, rising into place.
-            let shown = (2.0 * open - 1.0).clamp(0.0, 1.0);
-            let left = button.left - room + PILL_PADDING;
-            let middle = button.middle() + PILL_RISE * (1.0 - shown);
-            painter.clip(pill, || {
-                painter.text(label, left, middle, faded(palette.text, shown));
-                if !palette.contrast
-                    && let Some(glint) = hints::folder_glint(seconds)
-                {
-                    let x = left - PILL_BAND / 2.0 + (label.width + PILL_BAND) * glint;
-                    painter.glint(&[(label, left)], middle, x, PILL_BAND);
-                }
-            });
+        let reach = saved.folder.width + PILL_GAP;
+        if reach <= button.left - EDGE - self.name.extent(now).right() {
+            self.draw_pill(painter, &saved.folder, &hints::pill(seconds, reach));
         }
         let center = (button.left + button.width / 2.0, button.middle());
         painter.grown(1.0, hints::pop(seconds), center, || {
             self.folder.draw(painter, now);
+        });
+    }
+
+    /// The pill the folder button opens into, as `pill` says, with the `folder`'s
+    /// name ending by the button and rising into place and away.
+    fn draw_pill(&self, painter: &Painter, folder: &Label, pill: &hints::Pill) {
+        if pill.fill <= 0.0 {
+            return;
+        }
+        let palette = painter.palette;
+        let button = self.folder.area();
+        let area = Area::new(
+            button.left - pill.reach,
+            button.top,
+            button.width + pill.reach,
+            button.height,
+        );
+        let area = painter.align(area);
+        painter.fill(area, PILL_RADIUS, faded(palette.subtle_hover, pill.fill));
+        if pill.shown <= 0.0 {
+            return;
+        }
+        let left = button.left - folder.width - PILL_GAP + PILL_PADDING;
+        let middle = button.middle() + PILL_RISE * pill.below;
+        painter.clip(area, || {
+            painter.text(folder, left, middle, faded(palette.text, pill.shown));
+            if !palette.contrast
+                && let Some(glint) = pill.glint
+            {
+                let x = left - PILL_BAND / 2.0 + (folder.width + PILL_BAND) * glint;
+                painter.glint(&[(folder, left)], middle, x, PILL_BAND);
+            }
+        });
+    }
+
+    /// The tip that comes out from under the folder button to say the capture saved
+    /// itself, and goes back in.
+    fn draw_told(&self, painter: &Painter, now: Instant) {
+        let Some(saved) = (self.saved.as_ref()).filter(|saved| saved.clock.is_running(now)) else {
+            return;
+        };
+        let told = hints::told(saved.clock.value(now));
+        if told <= 0.0 {
+            return;
+        }
+        let bounds = Area::new(0.0, 0.0, self.window.0, self.window.1);
+        painter.lowered(1.0, -TIP_RISE * (1.0 - told), || {
+            tip::draw(painter, &saved.note, self.folder.area(), bounds, told);
         });
     }
 

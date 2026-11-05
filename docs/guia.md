@@ -90,8 +90,8 @@ mostrar siempre.
   archivo.
 - **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta
   elegida en Ajustes. El botón de la carpeta, en el editor, la abre con la captura ya seleccionada.
-  En las primeras capturas, al guardarse la primera edición, una copia vuela hasta ese botón, que
-  dice el nombre de la carpeta.
+  En las primeras capturas, al guardarse la primera edición, ese botón dice «Guardado
+  automáticamente» y luego el nombre de la carpeta.
 - **Nunca a medias:** cada archivo se escribe aparte y luego reemplaza al anterior, así que nunca
   queda una imagen a medio guardar.
 

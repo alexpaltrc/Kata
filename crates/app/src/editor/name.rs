@@ -1,8 +1,9 @@
 //! The capture's file name, centered in the title bar. Clicking it opens a box to
 //! type the name in, after the time it keeps; dragging it carries the file away.
 //! On hover, a grip and a pencil say so; unnamed, it invites a name, typing the
-//! invitation the first few times; and a glint of colored light crosses it as the
-//! editor opens, and again once it's renamed.
+//! invitation the first few times; it's carried a little way off and back, once,
+//! to show it drags; and a glint of colored light crosses it as the editor opens,
+//! and again once it's renamed.
 
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,7 @@ use windows::{
     core::Result,
 };
 
+use super::hints;
 use crate::strings::strings;
 
 /// Between the box's edges and the text.
@@ -94,6 +96,8 @@ pub struct Name {
     glint: Animation,
     /// The seconds since the invitation to name it started typing itself.
     typing: Animation,
+    /// It's carried off as if dragged, to show it drags.
+    rehearsal: Rehearsal,
     /// Where the pointer went down on it.
     pressed: Option<Point>,
     /// The room in the title bar, from left to right, and the point it centers on.
@@ -125,6 +129,7 @@ impl Name {
             icons: Animation::idle(0.0),
             glint: glint(PAUSE),
             typing: Animation::idle(TYPING),
+            rehearsal: Rehearsal::Playing(Animation::idle(hints::REHEARSAL)),
             pressed: None,
             room: (0.0, 0.0),
             center: (0.0, 0.0),
@@ -153,9 +158,51 @@ impl Name {
         self.glint = glint(SETTLE).delayed(Duration::from_secs_f32(TYPED));
     }
 
-    /// Whether the invitation is still typing itself.
+    /// Whether the invitation is still typing itself, or a glint crossing the name.
     pub fn is_inviting(&self, now: Instant) -> bool {
-        self.typing.is_running(now)
+        self.typing.is_running(now) || self.glint.is_running(now)
+    }
+
+    /// Carries it off as if dragged, and back, on `clock`.
+    pub fn rehearse(&mut self, clock: Animation) {
+        self.rehearsal = Rehearsal::Playing(clock);
+    }
+
+    /// Brings it back from where its rehearsal got to, cutting it short.
+    pub fn cut_rehearsal(&mut self, now: Instant) {
+        if let Rehearsal::Playing(clock) = self.rehearsal
+            && clock.is_running(now)
+        {
+            let back = Animation::new(1.0, 0.0, motion::FAST, Easing::DECELERATE);
+            self.rehearsal = Rehearsal::Cut {
+                at: clock.value(now),
+                back,
+            };
+        }
+    }
+
+    /// Where its rehearsal carries it, `seconds` in.
+    pub fn carried(&self, seconds: f32) -> Area {
+        let ((across, down), _) = hints::rehearsed_name(seconds, self.room_after());
+        let rest = self.rest();
+        Area::new(rest.left + across, rest.top + down, rest.width, rest.height)
+    }
+
+    /// How far its rehearsal carries it now, across and down, and how much it shows
+    /// as under the pointer, from 0 to 1.
+    fn rehearsed(&self, now: Instant) -> ((f32, f32), f32) {
+        let (at, share) = match self.rehearsal {
+            Rehearsal::Playing(clock) if clock.is_running(now) => (clock.value(now), 1.0),
+            Rehearsal::Cut { at, back } if back.is_running(now) => (at, back.value(now)),
+            _ => return ((0.0, 0.0), 0.0),
+        };
+        let ((across, down), shown) = hints::rehearsed_name(at, self.room_after());
+        ((across * share, down * share), shown * share)
+    }
+
+    /// The room to the right of it at rest.
+    fn room_after(&self) -> f32 {
+        self.room.1 - self.rest().right()
     }
 
     /// The most room it takes now: the box, while it opens, is open or closes.
@@ -372,8 +419,9 @@ impl Name {
         field.index(self.typed.position(x - self.start()))
     }
 
-    /// The name at rest, in `area`.
-    fn draw_rest(&self, painter: &Painter, area: Area, now: Instant) {
+    /// The name at rest, in `area`, with its grip and pencil showing as much as
+    /// `icons` says of each.
+    fn draw_rest(&self, painter: &Painter, area: Area, icons: (f32, f32), now: Instant) {
         let palette = painter.palette;
         let (left, middle) = (area.left + SIDE, area.middle());
         let invites = self.invites();
@@ -402,22 +450,26 @@ impl Name {
             let labels = [(&self.shown, left), (&self.hint, left + self.lead)];
             painter.glint(&labels[..if invites { 2 } else { 1 }], middle, x, BAND);
         }
-        let icons = faded(palette.text_secondary, self.icons.value(now));
-        if icons.a <= 0.0 {
-            return;
-        }
         // A grip on the left, to drag the file away, and a pencil on the right, to
         // rename it.
-        let grip = area.left + SIDE / 2.0;
-        for (column, row) in [-0.5, 0.5]
-            .into_iter()
-            .flat_map(|x| [(x, -1.0), (x, 0.0), (x, 1.0)])
-        {
-            let dot = (grip + column * DOTS, middle + row * DOTS);
-            painter.circle((painter.snap(dot.0), painter.snap(dot.1)), DOT, icons);
+        let (grip, pencil) = (
+            faded(palette.text_secondary, icons.0),
+            faded(palette.text_secondary, icons.1),
+        );
+        if grip.a > 0.0 {
+            let left = area.left + SIDE / 2.0;
+            for (column, row) in [-0.5, 0.5]
+                .into_iter()
+                .flat_map(|x| [(x, -1.0), (x, 0.0), (x, 1.0)])
+            {
+                let dot = (left + column * DOTS, middle + row * DOTS);
+                painter.circle((painter.snap(dot.0), painter.snap(dot.1)), DOT, grip);
+            }
         }
-        let pencil = area.right() - SIDE / 2.0 - self.pencil.width / 2.0;
-        painter.text(&self.pencil, pencil, middle, icons);
+        if pencil.a > 0.0 {
+            let left = area.right() - SIDE / 2.0 - self.pencil.width / 2.0;
+            painter.text(&self.pencil, left, middle, pencil);
+        }
     }
 
     /// How much of the invitation has typed itself, in UTF-16 units, and whether a
@@ -465,6 +517,48 @@ impl Name {
             );
             painter.fill(caret, 0.0, palette.text);
         }
+    }
+
+    /// The name or the box, showing `shown` much as under the pointer besides.
+    fn draw_moved(&self, painter: &Painter, shown: f32, now: Instant) {
+        let palette = painter.palette;
+        let open = self.open.value(now);
+        let (rest, opened) = (self.rest(), self.opened());
+        let lerp = |from: f32, to: f32| from + (to - from) * open;
+        let area = painter.align(Area::new(
+            lerp(rest.left, opened.left),
+            rest.top,
+            lerp(rest.width, opened.width),
+            HEIGHT,
+        ));
+        // At rest, a subtle button.
+        let shade = if self.pressed.is_some() && self.hovered {
+            palette.subtle_pressed
+        } else if self.hovered {
+            palette.subtle_hover
+        } else {
+            faded(palette.subtle_hover, shown)
+        };
+        painter.fill(area, RADIUS, faded(shade, 1.0 - open));
+        // Open, a text box, underlined in the accent color while it's typed in.
+        if open > 0.0 {
+            painter.fill(area, RADIUS, faded(palette.input, open));
+            let stroke = faded(palette.control_stroke, open);
+            painter.stroke(area, RADIUS, painter.border(), stroke);
+            let line = Area::new(area.left, area.bottom() - 2.0, area.width, 2.0);
+            painter.clip(line, || {
+                painter.fill(area, RADIUS, faded(palette.accent, open));
+            });
+        }
+        let inside = Area::new(area.left + 1.0, area.top, area.width - 2.0, area.height);
+        painter.clip(inside, || match &self.field {
+            Some(field) => self.draw_field(painter, field, area.middle()),
+            None => {
+                // Rehearsing a drag shows the grip alone.
+                let icons = self.icons.value(now);
+                self.draw_rest(painter, area, (icons.max(shown), icons), now);
+            }
+        });
     }
 }
 
@@ -546,39 +640,10 @@ impl Control for Name {
         if self.taken.is_empty() {
             return;
         }
-        let palette = painter.palette;
-        let open = self.open.value(now);
-        let (rest, opened) = (self.rest(), self.opened());
-        let lerp = |from: f32, to: f32| from + (to - from) * open;
-        let area = painter.align(Area::new(
-            lerp(rest.left, opened.left),
-            rest.top,
-            lerp(rest.width, opened.width),
-            HEIGHT,
-        ));
-        // At rest, a subtle button.
-        let shade = if self.pressed.is_some() && self.hovered {
-            palette.subtle_pressed
-        } else if self.hovered {
-            palette.subtle_hover
-        } else {
-            Default::default()
-        };
-        painter.fill(area, RADIUS, faded(shade, 1.0 - open));
-        // Open, a text box, underlined in the accent color while it's typed in.
-        if open > 0.0 {
-            painter.fill(area, RADIUS, faded(palette.input, open));
-            let stroke = faded(palette.control_stroke, open);
-            painter.stroke(area, RADIUS, painter.border(), stroke);
-            let line = Area::new(area.left, area.bottom() - 2.0, area.width, 2.0);
-            painter.clip(line, || {
-                painter.fill(area, RADIUS, faded(palette.accent, open));
-            });
-        }
-        let inside = Area::new(area.left + 1.0, area.top, area.width - 2.0, area.height);
-        painter.clip(inside, || match &self.field {
-            Some(field) => self.draw_field(painter, field, area.middle()),
-            None => self.draw_rest(painter, area, now),
+        // Carried off in its rehearsal, it shows as under the pointer.
+        let ((across, down), shown) = self.rehearsed(now);
+        painter.layer(1.0, across, || {
+            painter.lowered(1.0, down, || self.draw_moved(painter, shown, now));
         });
     }
 
@@ -587,7 +652,19 @@ impl Control for Name {
             || self.icons.is_running(now)
             || self.glint.is_running(now)
             || self.typing.is_running(now)
+            || match self.rehearsal {
+                Rehearsal::Playing(clock) => clock.is_running(now),
+                Rehearsal::Cut { back, .. } => back.is_running(now),
+            }
     }
+}
+
+/// How the name's carried off as if dragged: playing on its clock, or cut short
+/// `at` so many seconds in, coming back from there as `back` goes from 1 to 0.
+#[derive(Clone, Copy)]
+enum Rehearsal {
+    Playing(Animation),
+    Cut { at: f32, back: Animation },
 }
 
 /// A glint that crosses the name after a pause, `pause` long in the band's travel.

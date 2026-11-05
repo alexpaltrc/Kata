@@ -57,6 +57,9 @@ pub struct Strings {
     pub add_name: &'static str,
     /// What clicking the file name does, for assistive technologies.
     pub rename: &'static str,
+    /// What the tip under the folder button says the first few times a capture
+    /// saves itself.
+    pub saved_itself: &'static str,
     pub shortcut: &'static str,
     pub open_editor: &'static str,
     pub tool_names: &'static str,
@@ -150,6 +153,7 @@ static SPANISH: Strings = Strings {
     open_file_location: "Abrir la ubicación del archivo",
     add_name: "Ponle nombre",
     rename: "Cambiar el nombre",
+    saved_itself: "Guardado automáticamente",
     shortcut: "Atajo",
     open_editor: "Abrir el editor al capturar",
     tool_names: "Mostrar los nombres de las herramientas",
@@ -210,6 +214,7 @@ static ENGLISH: Strings = Strings {
     open_file_location: "Open file location",
     add_name: "Add a name",
     rename: "Rename",
+    saved_itself: "Saved automatically",
     shortcut: "Shortcut",
     open_editor: "Open the editor after capturing",
     tool_names: "Show tool names",

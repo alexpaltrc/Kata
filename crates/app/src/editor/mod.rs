@@ -70,6 +70,7 @@ use crate::{
     export::{self, Handover, Output, Picture},
     report,
     settings::{self, EditorSettings, Hint},
+    strings::strings,
 };
 use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
@@ -89,7 +90,7 @@ const ZOOM_STEP: f32 = 1.25;
 const SINK: f32 = 0.04;
 const FADE: f32 = 0.5;
 const FLIGHT: Duration = Duration::from_millis(350);
-/// How long after the first change saves itself a copy flies into the folder.
+/// How long after the first change saves itself the folder button says so.
 const SAVED_AFTER: Duration = Duration::from_millis(400);
 /// Blinks the caret while the name is typed.
 const BLINK_TIMER: usize = 1;
@@ -159,10 +160,15 @@ unsafe fn create(
     }
     let hints = Hints {
         drag: settings::hinting(Hint::Drag),
-        folder: (settings::hinting(Hint::Saved))
+        saved: (settings::hinting(Hint::Saved))
             .then(|| output.folder_name())
             .flatten()
-            .and_then(|folder| fonts.label(&folder).ok()),
+            .and_then(|folder| {
+                Some((
+                    fonts.label(strings().saved_itself).ok()?,
+                    fonts.label(&folder).ok()?,
+                ))
+            }),
         due: false,
     };
     let chip = fonts.icon('\u{E711}', 10.0)?;
@@ -363,8 +369,8 @@ enum Flight {
     /// Back into the capture from `from`, where it was let go without going
     /// anywhere, `travel` of the way still to go.
     Back { from: Pose, travel: Animation },
-    /// Up under the name and back, on `clock`, to show the capture drags away from
-    /// there.
+    /// Up under the name as it's carried off and back, on `clock`, to show the
+    /// capture drags away from there.
     Rehearse { clock: Animation },
 }
 
@@ -374,9 +380,9 @@ struct Hints {
     /// still, the name's invitation included, or, if the user gets to work first,
     /// as the pointer first goes over the name.
     drag: bool,
-    /// That the capture saved itself, and in the folder named so, once a change
-    /// first does; and whether that's due.
-    folder: Option<Label>,
+    /// That the capture saved itself, said so, and in the folder named so, once a
+    /// change first does; and whether that's due.
+    saved: Option<(Label, Label)>,
     due: bool,
 }
 
@@ -1233,9 +1239,9 @@ impl Editor {
         self.invalidate();
     }
 
-    /// The capture rises toward its name as the card it's dragged away as, and
-    /// settles back, when nothing else moves: once, on its own or as the pointer
-    /// goes over the name.
+    /// The name is carried off and back as if dragged, with the capture hanging
+    /// under it as the card it's dragged away as, when nothing else moves: once, on
+    /// its own or as the pointer goes over the name.
     fn rehearse(&mut self) {
         let now = Instant::now();
         let name = self.toolbar.name();
@@ -1252,18 +1258,20 @@ impl Editor {
         // With animation effects off, it shows nothing.
         if clock.is_running(now) {
             self.flight = Some(Flight::Rehearse { clock });
+            self.toolbar.name_mut().rehearse(clock);
             settings::hinted(Hint::Drag, false);
             self.invalidate();
         }
     }
 
-    /// Pressing during the rehearsal ends it: the card flies back into the capture,
-    /// unless a drag takes it from there.
+    /// Pressing during the rehearsal ends it: the name comes back, and the card flies
+    /// back into the capture, unless a drag takes it from there.
     fn end_rehearsal(&mut self) {
         let now = Instant::now();
         if !matches!(self.flight, Some(Flight::Rehearse { .. })) {
             return;
         }
+        self.toolbar.name_mut().cut_rehearsal(now);
         if let Some((from, _)) = self.card(now) {
             self.lift = Animation::idle(self.lifted(now)).retarget(0.0, FLIGHT, Easing::DECELERATE);
             self.flight = Some(Flight::Back {
@@ -1273,22 +1281,22 @@ impl Editor {
         }
     }
 
-    /// Once a change first saves itself, a copy of the capture flies into its
-    /// folder, which opens to name it, when nothing else moves.
+    /// Once a change first saves itself, a tip under the folder button says so and
+    /// the button opens to name the folder, when nothing else moves.
     fn show_saved(&mut self, now: Instant) {
         let name = self.toolbar.name();
         if !self.hints.due || self.is_busy(now) || name.is_editing() || name.is_inviting(now) {
             return;
         }
         self.hints.due = false;
-        let Some(folder) = self.hints.folder.take() else {
+        let Some((note, folder)) = self.hints.saved.take() else {
             return;
         };
         // A beat after the change, which shows first.
         let clock = Animation::clock(hints::SAVED).delayed(SAVED_AFTER);
         if clock.is_running(now) {
             self.saved = Some(clock);
-            self.toolbar.show_saved(folder, clock);
+            self.toolbar.show_saved(note, folder, clock);
             settings::hinted(Hint::Saved, false);
             self.invalidate();
         }
@@ -1356,7 +1364,7 @@ impl Editor {
         export::copy(self.hwnd, self.renderer.output());
         self.output.save(self.renderer.output().clone());
         self.unpublished = false;
-        self.hints.due = self.hints.folder.is_some();
+        self.hints.due = self.hints.saved.is_some();
     }
 
     /// Brings the clipboard and the file up to date, if a change hasn't reached them.
@@ -1474,11 +1482,6 @@ impl Editor {
                 });
             });
             self.toolbar.draw(painter, now);
-            if let Some((pose, opacity, glint)) = self.saved_card(now) {
-                painter.layer(opacity, 0.0, || {
-                    card::draw(painter, image, pose, glint);
-                });
-            }
             if let Some((pose, glint)) = self.card(now) {
                 card::draw(painter, image, pose, glint);
             }
@@ -1504,21 +1507,13 @@ impl Editor {
                 Some((self.flat().toward(*from, travel.value(now)), None))
             }
             Flight::Rehearse { clock } => {
-                let name = self.toolbar.name().extent(now);
+                let name = self.toolbar.name();
+                let carried = |seconds| name.carried(seconds);
                 let pose =
-                    hints::rehearsed_card(clock.value(now), self.flat(), self.card_size(), name);
+                    hints::rehearsed_card(clock.value(now), self.flat(), self.card_size(), carried);
                 Some((pose, None))
             }
         }
-    }
-
-    /// The saved copy of the capture on its way to the folder, while it flies: how
-    /// it's posed, how opaque, and how far across it the glint is.
-    fn saved_card(&self, now: Instant) -> Option<(Pose, f32, Option<f32>)> {
-        let clock = self.saved.filter(|clock| clock.is_running(now))?;
-        let folder = self.toolbar.folder();
-        let center = (folder.left + folder.width / 2.0, folder.middle());
-        hints::saved_card(clock.value(now), self.flat(), self.card_size(), center)
     }
 
     /// How lifted off the capture is, from 0 to 1, as its card rises.

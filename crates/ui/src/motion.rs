@@ -32,6 +32,8 @@ impl Easing {
     pub const POINT_TO_POINT: Self = Self::new(0.55, 0.55, 0.0, 1.0);
     /// A glint sweeping across: evenly, easing in and out.
     pub const SWEEP: Self = Self::new(0.4, 0.0, 0.6, 1.0);
+    /// Something arriving like a spring: a little past its mark, then settling.
+    pub const SPRING: Self = Self::new(0.3, 1.4, 0.6, 1.0);
 
     pub const fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         Self { x1, y1, x2, y2 }

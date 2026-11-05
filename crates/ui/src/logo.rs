@@ -56,8 +56,6 @@ pub const DRAWING: f32 = 3.0 * STAGGER + TRACE + WARM;
 
 /// A pen's stroke: quick to leave, gentle to land.
 const PEN: Easing = Easing::new(0.4, 0.0, 0.2, 1.0);
-/// The light grows a little past its size and settles.
-const SPRING: Easing = Easing::new(0.3, 1.4, 0.6, 1.0);
 /// How big the light is as it starts growing.
 const SEED: f32 = 0.25;
 
@@ -139,7 +137,8 @@ impl Painter<'_> {
         };
         // Quick to show, so that it never looks dim on a dark theme.
         let opacity = Easing::DECELERATE.apply(progress(time, LIGHT_UP, KINDLE));
-        let scale = SEED + (1.0 - SEED) * SPRING.apply(lighting);
+        // It grows a little past its size and settles.
+        let scale = SEED + (1.0 - SEED) * Easing::SPRING.apply(lighting);
         let center = (lit.left + lit.width / 2.0, lit.middle());
         self.grown(opacity, scale, center, || unsafe {
             self.context
