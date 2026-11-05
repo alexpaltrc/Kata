@@ -257,7 +257,7 @@ impl<'a> Overlay<'a> {
             sender,
             receiver,
             reveal: None,
-            silhouette: settings::hinting()
+            silhouette: settings::hinting(settings::Hint::Window)
                 .then(|| Silhouette::pick(shot, pointer, window))
                 .flatten(),
         }
@@ -267,7 +267,7 @@ impl<'a> Overlay<'a> {
         self.presence = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
         if let Some(silhouette) = &mut self.silhouette {
             silhouette.begin();
-            settings::hinted(false);
+            settings::hinted(settings::Hint::Window, false);
             // Drawn whole ahead of time, it shows the moment the pointer gets there.
             let index = silhouette.index;
             self.ask(hwnd, index);
@@ -284,7 +284,7 @@ impl<'a> Overlay<'a> {
             && window == Some(silhouette.index)
             && silhouette.fade()
         {
-            settings::hinted(true);
+            settings::hinted(settings::Hint::Window, true);
         }
         if let Some((shown, opacity)) = &mut self.reveal
             && Some(*shown) != window

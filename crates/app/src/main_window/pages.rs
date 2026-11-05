@@ -4,7 +4,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use kata_ui::{
@@ -544,8 +544,7 @@ impl Pages {
 /// The welcome's clock, counting its seconds from now: at its end at once when
 /// animation effects are off.
 fn welcome() -> Animation {
-    let linear = Easing::new(0.0, 0.0, 1.0, 1.0);
-    Animation::new(0.0, WELCOME, Duration::from_secs_f32(WELCOME), linear)
+    Animation::clock(WELCOME)
 }
 
 /// `page`'s part with the number `describe` gave it.

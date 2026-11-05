@@ -107,26 +107,53 @@ pub fn welcome_done() {
 /// Kata Dev offers it, to try the welcome again.
 pub fn forget_welcome() {
     registry::delete(KEY, w!("Welcomed"));
-    registry::delete(KEY, w!("Hints"));
+    for hint in Hint::ALL {
+        registry::delete(KEY, hint.value());
+    }
 }
 
-/// How many captures show the hint to point at a covered window, at most.
-const HINTS: usize = 3;
-
-/// Whether captures still show the hint to point at a covered window: until the
-/// user follows it, and for a few captures at most.
-pub fn hinting() -> bool {
-    read(w!("Hints"), 0) < HINTS
+/// A hint of the welcome, shown until the user does what it suggests, and a few
+/// times at most.
+#[derive(Clone, Copy)]
+pub enum Hint {
+    /// In a capture, to point at a covered window.
+    Window,
+    /// In the editor, to name the capture.
+    Name,
+    /// In the editor, that the capture saves itself, and where.
+    Saved,
+    /// In the editor, that the capture drags away from its name.
+    Drag,
 }
 
-/// Remembers that a capture showed the hint, or that the user followed it.
-pub fn hinted(followed: bool) {
-    let hints = if followed {
-        HINTS
-    } else {
-        read(w!("Hints"), 0) + 1
-    };
-    write(w!("Hints"), hints.min(HINTS));
+impl Hint {
+    const ALL: [Self; 4] = [Self::Window, Self::Name, Self::Saved, Self::Drag];
+
+    /// How many times it shows, at most.
+    const MOST: usize = 3;
+
+    /// The registry value counting the times it showed.
+    fn value(self) -> PCWSTR {
+        match self {
+            Self::Window => w!("Hints"),
+            Self::Name => w!("NameHints"),
+            Self::Saved => w!("SaveHints"),
+            Self::Drag => w!("DragHints"),
+        }
+    }
+}
+
+/// Whether `hint` still shows.
+pub fn hinting(hint: Hint) -> bool {
+    read(hint.value(), 0) < Hint::MOST
+}
+
+/// Remembers that `hint` showed once more, or that the user followed it.
+pub fn hinted(hint: Hint, followed: bool) {
+    let times = read(hint.value(), 0);
+    if times < Hint::MOST {
+        write(hint.value(), if followed { Hint::MOST } else { times + 1 });
+    }
 }
 
 fn read(name: PCWSTR, default: usize) -> usize {

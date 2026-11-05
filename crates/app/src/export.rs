@@ -138,6 +138,13 @@ impl Output {
         Some((saver.taken.clone(), stem))
     }
 
+    /// The name of the folder the file is in, such as "Kata". None without a file.
+    pub fn folder_name(&self) -> Option<String> {
+        let pending = lock(&self.saver.as_ref()?.slot);
+        let folder = pending.at.parent()?.file_name()?;
+        Some(folder.to_string_lossy().into_owned())
+    }
+
     /// Replaces the file's contents with `image`, in the background.
     pub fn save(&self, image: Image) {
         if let Some(saver) = &self.saver {

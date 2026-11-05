@@ -70,6 +70,14 @@ Hasta la primera captura, la ventana principal abre con la bienvenida. El icono 
 
 En las primeras capturas, si hay una ventana tapada por otra, su silueta se traza en los colores de firma, como el icono: nace en el punto más cercano al cursor y rodea la ventana en los dos sentidos hasta cerrarse, también por donde está tapada. Al pasar el cursor por ella, la silueta se funde en el anillo blanco de la selección y la ventana sale completa. Arrastrar o `Esc` la apagan. Se repite hasta que se usa una vez, y como mucho en tres capturas.
 
+En los primeros editores, tres señales, de una en una:
+
+- **El nombre.** «Ponle nombre» se escribe solo, letra a letra y con su cursor, y luego lo cruza el destello.
+- **Se guarda solo.** Al guardarse la primera edición, una copia de la captura despega como la tarjeta del arrastre y vuela en arco hasta el botón de la carpeta. El botón late, se abre en una píldora con el nombre de la carpeta, la cruza el destello y se cierra.
+- **Se arrastra desde el nombre.** Cuando el nombre ya no se escribe solo, la primera vez que el cursor pasa por él, la captura sube como tarjeta, queda colgando bajo el nombre y vuelve a su sitio. Si se arrastra en ese momento, la tarjeta sale desde donde está.
+
+Cada una se repite hasta que se usa una vez (renombrar, abrir la carpeta, arrastrar), y como mucho en tres editores. Esperan a que nada más se mueva. Con los efectos de animación apagados no aparecen, y el nombre ya está escrito.
+
 ## Icono
 
 Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el naranja de Kata, un caqui cálido que contrasta con todo y es el mismo de los pasos; sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
@@ -80,7 +88,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 - **Bienvenida (onboarding)**, a la altura del resto de Kata. Se aprende usando Kata de verdad, con una señal a la vez, y nada de lo que enseña es Premium:
   1. **Hola.** Hecho: ver [Bienvenida](#bienvenida).
   2. **La primera captura.** Hecho: ver [Bienvenida](#bienvenida).
-  3. **El editor**, con tres señales, de una en una: ponerle nombre, que se guarda solo (y dónde) y que la captura se arrastra desde su nombre.
+  3. **El editor.** Hecho: ver [Bienvenida](#bienvenida).
   4. **Lista.** La captura llega como la tarjeta de firma, con lo que tardó en aparecer y cuánto menos pesa, medidos en esa misma captura. Ahí se puede encender Kata como app de capturas, con una línea que explica qué cambia, y se cuenta que nada sale del equipo.
   5. **Premium**, que se cierra con una X. Primero dice que todo lo visto es gratis, para siempre y sin límites; luego enseña lo que Premium añade. «Seguir gratis» se ve tanto como comprar.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.

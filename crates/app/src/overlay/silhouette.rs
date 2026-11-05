@@ -3,7 +3,7 @@
 //! the pointer, the way the logo draws itself. Pointing at the window shows it
 //! whole, and the outline fades as the selection lands on it.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use kata_capture::Screenshot;
 use kata_editor::Rect;
@@ -119,9 +119,7 @@ impl Silhouette {
 
     /// Starts tracing: at once in full when animation effects are off.
     pub fn begin(&mut self) {
-        let linear = Easing::new(0.0, 0.0, 1.0, 1.0);
-        let total = DELAY + TRACE;
-        self.clock = Animation::new(0.0, total, Duration::from_secs_f32(total), linear);
+        self.clock = Animation::clock(DELAY + TRACE);
     }
 
     /// Fades it out, in step with the selection landing on its window. Whether it

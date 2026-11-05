@@ -49,6 +49,10 @@ impl IconButton {
         self.area = area;
         self.bleeds = true;
     }
+
+    pub fn area(&self) -> Area {
+        self.area
+    }
 }
 
 impl Control for IconButton {

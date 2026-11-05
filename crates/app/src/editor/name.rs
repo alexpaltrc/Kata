@@ -1,7 +1,8 @@
 //! The capture's file name, centered in the title bar. Clicking it opens a box to
 //! type the name in, after the time it keeps; dragging it carries the file away.
-//! On hover, a grip and a pencil say so; unnamed, it invites a name; and a glint
-//! of colored light crosses it as the editor opens, and again once it's renamed.
+//! On hover, a grip and a pencil say so; unnamed, it invites a name, typing the
+//! invitation the first few times; and a glint of colored light crosses it as the
+//! editor opens, and again once it's renamed.
 
 use std::time::{Duration, Instant};
 
@@ -42,6 +43,13 @@ const GLINT: Duration = Duration::from_millis(1400);
 const PAUSE: f32 = 0.35;
 const SETTLE: f32 = 0.1;
 const BAND: f32 = 96.0;
+/// When an unnamed capture invites a name, the invitation types itself: from so
+/// many seconds after the editor opens until so many, with a caret that then
+/// blinks every so long and is gone after so many.
+const TYPE_FROM: f32 = 0.25;
+const TYPED: f32 = 1.1;
+const BLINK: f32 = 0.3;
+const TYPING: f32 = 2.6;
 
 /// How wide the box opens, room allowing.
 const WIDTH: f32 = 400.0;
@@ -84,6 +92,8 @@ pub struct Name {
     icons: Animation,
     /// From 0 to 1 as the glint crosses the name, after a pause below 0.
     glint: Animation,
+    /// The seconds since the invitation to name it started typing itself.
+    typing: Animation,
     /// Where the pointer went down on it.
     pressed: Option<Point>,
     /// The room in the title bar, from left to right, and the point it centers on.
@@ -114,6 +124,7 @@ impl Name {
             hovered: false,
             icons: Animation::idle(0.0),
             glint: glint(PAUSE),
+            typing: Animation::idle(TYPING),
             pressed: None,
             room: (0.0, 0.0),
             center: (0.0, 0.0),
@@ -130,6 +141,30 @@ impl Name {
 
     pub fn is_editing(&self) -> bool {
         self.field.is_some()
+    }
+
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    /// Types the invitation to name the capture, letter by letter, then glints.
+    pub fn invite(&mut self) {
+        self.typing = Animation::clock(TYPING);
+        self.glint = glint(SETTLE).delayed(Duration::from_secs_f32(TYPED));
+    }
+
+    /// Whether the invitation is still typing itself.
+    pub fn is_inviting(&self, now: Instant) -> bool {
+        self.typing.is_running(now)
+    }
+
+    /// The most room it takes now: the box, while it opens, is open or closes.
+    pub fn extent(&self, now: Instant) -> Area {
+        if self.is_editing() || self.open.value(now) > 0.0 {
+            self.opened()
+        } else {
+            self.rest()
+        }
     }
 
     /// Opens the box, with the name selected.
@@ -344,7 +379,22 @@ impl Name {
         let invites = self.invites();
         painter.text(&self.shown, left, middle, palette.text);
         if invites {
-            painter.text(&self.hint, left + self.lead, middle, palette.text_secondary);
+            let start = left + self.lead;
+            let (typed, caret) = self.typed(now);
+            let end = start + self.hint.offset(typed);
+            painter.clip(Area::new(start, area.top, end - start, area.height), || {
+                painter.text(&self.hint, start, middle, palette.text_secondary);
+            });
+            if caret {
+                let height = self.hint.height;
+                let caret = Area::new(
+                    painter.snap(end),
+                    middle - height / 2.0,
+                    painter.border(),
+                    height,
+                );
+                painter.fill(caret, 0.0, palette.text);
+            }
         }
         let glint = self.glint.value(now);
         if glint > 0.0 && self.glint.is_running(now) {
@@ -368,6 +418,17 @@ impl Name {
         }
         let pencil = area.right() - SIDE / 2.0 - self.pencil.width / 2.0;
         painter.text(&self.pencil, pencil, middle, icons);
+    }
+
+    /// How much of the invitation has typed itself, in UTF-16 units, and whether a
+    /// caret shows after it.
+    fn typed(&self, now: Instant) -> (usize, bool) {
+        let seconds = self.typing.value(now);
+        let units = self.hint.text.encode_utf16().count();
+        let progress = ((seconds - TYPE_FROM) / (TYPED - TYPE_FROM)).clamp(0.0, 1.0);
+        let blinks = ((seconds - TYPED) / BLINK).max(0.0) as u32;
+        let caret = (TYPE_FROM..TYPING).contains(&seconds) && blinks.is_multiple_of(2);
+        ((progress * units as f32).round() as usize, caret)
     }
 
     fn draw_field(&self, painter: &Painter, field: &Field, middle: f32) {
@@ -522,7 +583,10 @@ impl Control for Name {
     }
 
     fn is_animating(&self, now: Instant) -> bool {
-        self.open.is_running(now) || self.icons.is_running(now) || self.glint.is_running(now)
+        self.open.is_running(now)
+            || self.icons.is_running(now)
+            || self.glint.is_running(now)
+            || self.typing.is_running(now)
     }
 }
 

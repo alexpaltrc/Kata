@@ -3,6 +3,7 @@
 //! change reaches the clipboard and the capture's file.
 
 mod canvas;
+mod hints;
 mod icons;
 mod name;
 mod toolbar;
@@ -67,7 +68,7 @@ use crate::{
     channel,
     export::{self, Handover, Output, Picture},
     report,
-    settings::EditorSettings,
+    settings::{self, EditorSettings, Hint},
 };
 use canvas::{Frame, Glide, Gpu, HANDLE_REACH, Pose, View, WHITE};
 use toolbar::{Part, Tool, Toolbar};
@@ -87,6 +88,8 @@ const ZOOM_STEP: f32 = 1.25;
 const SINK: f32 = 0.04;
 const FADE: f32 = 0.5;
 const FLIGHT: Duration = Duration::from_millis(350);
+/// How long after the first change saves itself a copy flies into the folder.
+const SAVED_AFTER: Duration = Duration::from_millis(400);
 /// Blinks the caret while the name is typed.
 const BLINK_TIMER: usize = 1;
 const CLASS: PCWSTR = w!("Kata.Editor");
@@ -132,7 +135,24 @@ unsafe fn create(
 ) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
     let settings = EditorSettings::load();
-    let toolbar = Toolbar::new(graphics, &fonts, &settings, tool_names, output.names())?;
+    let names = output.names();
+    let mut toolbar = Toolbar::new(graphics, &fonts, &settings, tool_names, names.clone())?;
+    // The welcome's signals, the first few times.
+    if names.is_some() && settings::hinting(Hint::Name) {
+        toolbar.name_mut().invite();
+        // With animation effects off, the name shows typed, as it always does.
+        if toolbar.name().is_inviting(Instant::now()) {
+            settings::hinted(Hint::Name, false);
+        }
+    }
+    let hints = Hints {
+        drag: settings::hinting(Hint::Drag) && !settings::hinting(Hint::Name),
+        folder: (settings::hinting(Hint::Saved))
+            .then(|| output.folder_name())
+            .flatten()
+            .and_then(|folder| fonts.label(&folder).ok()),
+        due: false,
+    };
     let chip = fonts.icon('\u{E711}', 10.0)?;
     let palette = Palette::current();
     let min = min_size(&toolbar);
@@ -197,6 +217,8 @@ unsafe fn create(
             lift: Animation::idle(0.0),
             flight: None,
             carrying: None,
+            hints,
+            saved: None,
             tracking: false,
             unpublished: false,
             access: Access::new(hwnd),
@@ -314,14 +336,30 @@ enum Gesture {
 
 /// How the card a dragged capture shrinks into flies in the window.
 enum Flight {
-    /// Out to the pointer, as a glint crosses it, until Windows takes it over.
+    /// Out to the pointer from `from`, `travel` of the way, as a glint crosses it,
+    /// until Windows takes it over.
     Out {
+        from: Pose,
+        travel: Animation,
         glint: Animation,
         handover: Rc<Handover>,
     },
     /// Back into the capture from `from`, where it was let go without going
-    /// anywhere.
-    Back { from: Point },
+    /// anywhere, `travel` of the way still to go.
+    Back { from: Pose, travel: Animation },
+    /// Up under the name and back, on `clock`, to show the capture drags away from
+    /// there.
+    Rehearse { clock: Animation },
+}
+
+/// The welcome's signals this editor still shows.
+struct Hints {
+    /// That the capture drags away from its name, as the pointer first goes over it.
+    drag: bool,
+    /// That the capture saved itself, and in the folder named so, once a change
+    /// first does; and whether that's due.
+    folder: Option<Label>,
+    due: bool,
 }
 
 struct Editor {
@@ -364,6 +402,9 @@ struct Editor {
     /// The file to drag away once the message at hand is handled, its card, and
     /// how the card gets to the pointer.
     carrying: Option<(PathBuf, Option<Picture>, Rc<Handover>)>,
+    hints: Hints,
+    /// The clock of the signal that the capture saved itself, while it shows.
+    saved: Option<Animation>,
     /// Whether Windows will say when the pointer leaves.
     tracking: bool,
     /// The document changed since it was last put on the clipboard and in its file.
@@ -557,7 +598,11 @@ impl Editor {
 
     /// Follows the pointer while no button is down. Returns whether the look changes.
     fn hover(&mut self, point: Option<Point>) -> bool {
+        let named = self.toolbar.name().is_hovered();
         let toolbar = self.toolbar.hover(point);
+        if !named && self.toolbar.name().is_hovered() {
+            self.rehearse();
+        }
         let chip = point.is_some_and(|point| !self.toolbar.covers(point) && self.chip_at(point));
         let shape = point
             .filter(|_| !chip)
@@ -568,6 +613,7 @@ impl Editor {
     }
 
     fn press(&mut self, point: Point) {
+        self.end_rehearsal();
         // Pressing away from the name's box ends naming, and does what it does.
         if !self.toolbar.name().contains(point) {
             self.finish_naming();
@@ -1008,7 +1054,10 @@ impl Editor {
                 self.option_changed(part)
             }
             Part::Name => self.start_naming(),
-            Part::Folder => self.output.show(),
+            Part::Folder => {
+                settings::hinted(Hint::Saved, true);
+                self.output.show();
+            }
         }
     }
 
@@ -1076,6 +1125,7 @@ impl Editor {
             && let Some(named) = self.output.rename(&stem)
         {
             self.toolbar.name_mut().set(named);
+            settings::hinted(Hint::Name, true);
         }
         self.stop_blinking();
     }
@@ -1100,17 +1150,20 @@ impl Editor {
                 .inspect_err(|error| report("drag", error))
                 .ok()
         });
-        self.lift = self.lift.retarget(1.0, FLIGHT, Easing::DECELERATE);
+        settings::hinted(Hint::Drag, true);
+        // From wherever the card is, if it shows, such as risen toward the name.
+        let now = Instant::now();
+        let from = self.card(now).map_or_else(|| self.flat(), |(pose, _)| pose);
+        self.lift = Animation::idle(self.lifted(now)).retarget(1.0, FLIGHT, Easing::DECELERATE);
+        let travel = Animation::new(0.0, 1.0, FLIGHT, Easing::DECELERATE);
         // Windows takes the card over once the editor's own lands at the pointer.
         let handover = Rc::new(Handover {
-            landing: if card.is_some() {
-                self.lift.end()
-            } else {
-                Instant::now()
-            },
+            landing: if card.is_some() { travel.end() } else { now },
             taken: Cell::new(false),
         });
         self.flight = card.is_some().then(|| Flight::Out {
+            from,
+            travel,
             glint: Animation::new(0.0, 1.0, FLIGHT, Easing::SWEEP),
             handover: handover.clone(),
         });
@@ -1121,15 +1174,90 @@ impl Editor {
     /// The dragged file was dropped, or the drag given up: the capture settles back,
     /// and its card flies back into it unless it `went` somewhere.
     fn dropped(&mut self, went: bool) {
+        let from = self.card(Instant::now()).map_or_else(
+            || Pose::held(self.card_size(), self.pointer()),
+            |(pose, _)| pose,
+        );
         let flew = matches!(self.flight.take(), Some(Flight::Out { .. }));
         if flew && !went {
             self.flight = Some(Flight::Back {
-                from: self.pointer(),
+                from,
+                travel: Animation::new(1.0, 0.0, FLIGHT, Easing::DECELERATE),
             });
         }
         self.lift = self.lift.retarget(0.0, FLIGHT, Easing::DECELERATE);
         self.hover(Some(self.pointer()));
         self.invalidate();
+    }
+
+    /// The first time the pointer goes over the name, the capture rises toward it
+    /// as the card it's dragged away as, and settles back, when nothing else moves.
+    fn rehearse(&mut self) {
+        let now = Instant::now();
+        let name = self.toolbar.name();
+        if !self.hints.drag
+            || self.is_busy(now)
+            || name.is_editing()
+            || name.is_inviting(now)
+            || self.output.file().is_none()
+        {
+            return;
+        }
+        let clock = Animation::clock(hints::REHEARSAL);
+        // With animation effects off, it shows nothing.
+        if clock.is_running(now) {
+            self.hints.drag = false;
+            self.flight = Some(Flight::Rehearse { clock });
+            settings::hinted(Hint::Drag, false);
+            self.invalidate();
+        }
+    }
+
+    /// Pressing during the rehearsal ends it: the card flies back into the capture,
+    /// unless a drag takes it from there.
+    fn end_rehearsal(&mut self) {
+        let now = Instant::now();
+        if !matches!(self.flight, Some(Flight::Rehearse { .. })) {
+            return;
+        }
+        if let Some((from, _)) = self.card(now) {
+            self.lift = Animation::idle(self.lifted(now)).retarget(0.0, FLIGHT, Easing::DECELERATE);
+            self.flight = Some(Flight::Back {
+                from,
+                travel: Animation::new(1.0, 0.0, FLIGHT, Easing::DECELERATE),
+            });
+        }
+    }
+
+    /// Once a change first saves itself, a copy of the capture flies into its
+    /// folder, which opens to name it, when nothing else moves.
+    fn show_saved(&mut self, now: Instant) {
+        let name = self.toolbar.name();
+        if !self.hints.due || self.is_busy(now) || name.is_editing() || name.is_inviting(now) {
+            return;
+        }
+        self.hints.due = false;
+        let Some(folder) = self.hints.folder.take() else {
+            return;
+        };
+        // A beat after the change, which shows first.
+        let clock = Animation::clock(hints::SAVED).delayed(SAVED_AFTER);
+        if clock.is_running(now) {
+            self.saved = Some(clock);
+            self.toolbar.show_saved(folder, clock);
+            settings::hinted(Hint::Saved, false);
+            self.invalidate();
+        }
+    }
+
+    /// Whether something already moves, which a signal waits for: a gesture, a
+    /// card, the zoom or another signal.
+    fn is_busy(&self, now: Instant) -> bool {
+        self.gesture.is_some()
+            || self.flight.is_some()
+            || self.saved.is_some_and(|clock| clock.is_running(now))
+            || self.glide.is_running(now)
+            || self.view.zoom > self.frame().fit().zoom
     }
 
     /// Makes the edits on show the document's, when they changed.
@@ -1184,6 +1312,7 @@ impl Editor {
         export::copy(self.hwnd, self.renderer.output());
         self.output.save(self.renderer.output().clone());
         self.unpublished = false;
+        self.hints.due = self.hints.folder.is_some();
     }
 
     /// Brings the clipboard and the file up to date, if a change hasn't reached them.
@@ -1214,7 +1343,12 @@ impl Editor {
     fn paint(&mut self) {
         let _ = unsafe { ValidateRect(Some(self.hwnd), None) };
         let now = Instant::now();
-        if matches!(self.flight, Some(Flight::Back { .. })) && !self.lift.is_running(now) {
+        let landed = match &self.flight {
+            Some(Flight::Back { travel, .. }) => !travel.is_running(now),
+            Some(Flight::Rehearse { clock }) => !clock.is_running(now),
+            _ => false,
+        };
+        if landed {
             self.flight = None;
         }
         let view = self.glide.at(now);
@@ -1260,12 +1394,14 @@ impl Editor {
             || self.glide.is_running(now)
             || self.lift.is_running(now)
             || self.card(now).is_some()
+            || self.saved.is_some_and(|clock| clock.is_running(now))
         {
             self.invalidate();
         }
         if self.unpublished && self.gesture.is_none() && !self.zoom.is_running(now) {
             self.publish();
         }
+        self.show_saved(now);
         self.update_access();
     }
 
@@ -1285,7 +1421,7 @@ impl Editor {
             // A zoomed capture slides under the title bar, out of sight.
             let canvas = Area::new(0.0, TITLE_BAR, width, height - TITLE_BAR);
             // Lifting off, the capture sinks back and fades a little.
-            let lift = self.lift.value(now);
+            let lift = self.lifted(now);
             let capture = self.view.area(self.bounds());
             let center = (capture.left + capture.width / 2.0, capture.middle());
             painter.clip(canvas, || {
@@ -1294,6 +1430,11 @@ impl Editor {
                 });
             });
             self.toolbar.draw(painter, now);
+            if let Some((pose, opacity, glint)) = self.saved_card(now) {
+                painter.layer(opacity, 0.0, || {
+                    canvas::draw_card(painter, image, pose, glint);
+                });
+            }
             if let Some((pose, glint)) = self.card(now) {
                 canvas::draw_card(painter, image, pose, glint);
             }
@@ -1303,22 +1444,59 @@ impl Editor {
     /// The card the capture flies as, while it shows, and how far across it the
     /// glint is, if it's crossing.
     fn card(&self, now: Instant) -> Option<(Pose, Option<f32>)> {
-        let (held, glint) = match self.flight.as_ref()? {
-            Flight::Out { glint, handover } if !handover.taken.get() => {
+        match self.flight.as_ref()? {
+            Flight::Out {
+                from,
+                travel,
+                glint,
+                handover,
+            } if !handover.taken.get() => {
+                let held = Pose::held(self.card_size(), self.pointer());
                 let crossing = glint.is_running(now).then(|| glint.value(now));
-                (self.pointer(), crossing)
+                Some((from.toward(held, travel.value(now)), crossing))
             }
-            Flight::Back { from } => (*from, None),
-            Flight::Out { .. } => return None,
-        };
+            Flight::Out { .. } => None,
+            Flight::Back { from, travel } => {
+                Some((self.flat().toward(*from, travel.value(now)), None))
+            }
+            Flight::Rehearse { clock } => {
+                let name = self.toolbar.name().extent(now);
+                let pose =
+                    hints::rehearsed_card(clock.value(now), self.flat(), self.card_size(), name);
+                Some((pose, None))
+            }
+        }
+    }
+
+    /// The saved copy of the capture on its way to the folder, while it flies: how
+    /// it's posed, how opaque, and how far across it the glint is.
+    fn saved_card(&self, now: Instant) -> Option<(Pose, f32, Option<f32>)> {
+        let clock = self.saved.filter(|clock| clock.is_running(now))?;
+        let folder = self.toolbar.folder();
+        let center = (folder.left + folder.width / 2.0, folder.middle());
+        hints::saved_card(clock.value(now), self.flat(), self.card_size(), center)
+    }
+
+    /// How lifted off the capture is, from 0 to 1, as its card rises.
+    fn lifted(&self, now: Instant) -> f32 {
+        match &self.flight {
+            Some(Flight::Rehearse { clock }) => hints::rehearsal_lift(clock.value(now)),
+            _ => self.lift.value(now),
+        }
+    }
+
+    /// The capture, lying where it shows.
+    fn flat(&self) -> Pose {
+        Pose::flat(self.view.area(self.bounds()))
+    }
+
+    /// The capture's size in DIPs, shown pixel for pixel.
+    fn card_size(&self) -> (f32, f32) {
         let bounds = self.bounds();
-        let size = (
+        (
             bounds.width() as f32 / self.scale,
             bounds.height() as f32 / self.scale,
-        );
-        let flat = Pose::flat(self.view.area(bounds));
-        let pose = flat.toward(Pose::held(size, held), self.lift.value(now));
-        Some((pose, glint))
+        )
     }
 
     /// The capture with its frame, and the outlines, handles and chip over it.

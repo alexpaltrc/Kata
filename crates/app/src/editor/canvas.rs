@@ -185,13 +185,10 @@ impl Pose {
     }
 
     /// The card that a capture `size` DIPs across and down, shown pixel for pixel,
-    /// shrinks into, as `pointer` holds it.
-    pub fn held(size: (f32, f32), pointer: Point) -> Self {
+    /// shrinks into, around `center`.
+    pub fn card(size: (f32, f32), center: Point) -> Self {
         let fit = (CARD.0 / size.0).min(CARD.1 / size.1).min(1.0);
         let (width, height) = (size.0 * fit, size.1 * fit);
-        let (sin, cos) = LEAN.to_radians().sin_cos();
-        let below = (height / 2.0 - HOLD).max(0.0);
-        let center = (pointer.0 + below * sin, pointer.1 - below * cos);
         Self {
             area: Area::new(
                 center.0 - width / 2.0,
@@ -202,6 +199,41 @@ impl Pose {
             lean: LEAN,
             radius: CARD_RADIUS,
             lift: 1.0,
+        }
+    }
+
+    /// The card, as `pointer` holds it.
+    pub fn held(size: (f32, f32), pointer: Point) -> Self {
+        let card = Self::card(size, pointer);
+        let (sin, cos) = LEAN.to_radians().sin_cos();
+        let below = (card.area.height / 2.0 - HOLD).max(0.0);
+        card.moved((below * sin, -below * cos))
+    }
+
+    /// The card, hanging from the middle of its top edge at `(x, top)`.
+    pub fn hanging(size: (f32, f32), (x, top): Point) -> Self {
+        let card = Self::card(size, (x, top));
+        card.moved((0.0, card.area.height / 2.0))
+    }
+
+    /// Moved `across` and `down`.
+    pub fn moved(mut self, (across, down): (f32, f32)) -> Self {
+        self.area.left += across;
+        self.area.top += down;
+        self
+    }
+
+    /// Shrunk around its center to fit in `most`, settling closer as it shrinks.
+    pub fn shrunk(self, most: (f32, f32)) -> Self {
+        let area = self.area;
+        let fit = (most.0 / area.width).min(most.1 / area.height).min(1.0);
+        let (x, y) = self.center();
+        let (width, height) = (area.width * fit, area.height * fit);
+        Self {
+            area: Area::new(x - width / 2.0, y - height / 2.0, width, height),
+            lean: self.lean,
+            radius: (self.radius * fit).max(2.0),
+            lift: self.lift * fit.sqrt(),
         }
     }
 
@@ -221,7 +253,7 @@ impl Pose {
         }
     }
 
-    fn center(&self) -> Point {
+    pub fn center(&self) -> Point {
         (self.area.left + self.area.width / 2.0, self.area.middle())
     }
 }

@@ -78,16 +78,20 @@ mostrar siempre.
   dice «Ponle nombre» tras la fecha, y al pasar el cursor aparece un lápiz a su derecha. La fecha
   y la hora se quedan delante (`2026-11-03 14.32.05 - Pedidos.png`), así todas se ordenan solas.
   Intro o un clic fuera lo guarda, y lo cruza un destello de colores; Esc lo deja como estaba.
-  Si ya hay un archivo con ese nombre, se le añade «(2)».
+  Si ya hay un archivo con ese nombre, se le añade «(2)». En las primeras capturas, «Ponle nombre»
+  se escribe solo.
 - **Arrastrar la captura:** el asa de puntos que aparece a la izquierda del nombre lo recuerda.
   Arrastra el nombre hasta una carpeta, un documento, un chat o un correo, y suéltalo ahí: la
   captura despega como una pequeña tarjeta inclinada, la cruza un destello y vuela hasta el
   cursor. Se deja una copia; el archivo de la captura no se mueve. Si la sueltas sobre Kata o
-  pulsas Esc, vuelve volando a su sitio.
+  pulsas Esc, vuelve volando a su sitio. En las primeras capturas, al pasar el cursor por el
+  nombre, la captura sube hacia él como tarjeta y vuelve, para recordarlo.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan en el
   archivo.
 - **Dónde:** `Imágenes\Kata`, con nombres como `2026-11-03 14.32.05.png`, o en la carpeta
   elegida en Ajustes. El botón de la carpeta, en el editor, la abre con la captura ya seleccionada.
+  En las primeras capturas, al guardarse la primera edición, una copia vuela hasta ese botón, que
+  dice el nombre de la carpeta.
 - **Nunca a medias:** cada archivo se escribe aparte y luego reemplaza al anterior, así que nunca
   queda una imagen a medio guardar.
 

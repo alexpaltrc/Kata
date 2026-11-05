@@ -12,12 +12,13 @@ use kata_ui::{
     figure::Figure,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
+    theme::faded,
     window,
 };
 use windows::core::Result;
 
 use super::{
-    TITLE_BAR, icons,
+    TITLE_BAR, hints, icons,
     name::{self, Name},
 };
 use crate::{settings::EditorSettings, strings::strings};
@@ -48,6 +49,14 @@ const KEY_PADDING: f32 = 8.0;
 const HINT_END: f32 = 14.0;
 const RISE: f32 = 8.0;
 const GROW: f32 = 0.1;
+/// The pill the folder button opens into to name the folder: between its text and
+/// the folder, and before the text; its corners; how far its text rises as it
+/// shows; and the glint's band of light across it.
+const PILL_GAP: f32 = 8.0;
+const PILL_PADDING: f32 = 12.0;
+const PILL_RADIUS: f32 = 4.0;
+const PILL_RISE: f32 = 4.0;
+const PILL_BAND: f32 = 64.0;
 
 /// What dragging or clicking on the capture adds, in the dock's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +157,9 @@ pub struct Toolbar {
     forms: Dock,
     name: Name,
     folder: IconButton,
+    /// The folder the capture saved itself in, which the folder button names as the
+    /// capture lands in it the first few times, and that signal's clock.
+    saved: Option<(Label, Animation)>,
     /// The part on show with the keyboard focus.
     focus: Option<Part>,
     /// The window's size, in DIPs.
@@ -236,6 +248,7 @@ impl Toolbar {
             forms: Dock::compact(forms, settings.form),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
+            saved: None,
             focus: None,
             window: (0.0, 0.0),
             showing: tool,
@@ -407,7 +420,11 @@ impl Toolbar {
         let options = self.tool().options();
         for part in self.parts() {
             if !options.contains(&part) {
-                self.get(part).draw(painter, now);
+                if part == Part::Folder {
+                    self.draw_folder(painter, now);
+                } else {
+                    self.get(part).draw(painter, now);
+                }
             }
         }
         if let Some(part) = self.focused() {
@@ -425,6 +442,7 @@ impl Toolbar {
         self.fade.is_running(now)
             || self.width.is_running(now)
             || self.hint.is_running(now)
+            || (self.saved.as_ref()).is_some_and(|(_, clock)| clock.is_running(now))
             || self
                 .parts()
                 .into_iter()
@@ -509,6 +527,60 @@ impl Toolbar {
 
     pub fn name_mut(&mut self) -> &mut Name {
         &mut self.name
+    }
+
+    pub fn folder(&self) -> Area {
+        self.folder.area()
+    }
+
+    /// Shows that the capture saved itself in `folder`, on `clock`: the button pops
+    /// as the capture lands in it, then opens to name the folder.
+    pub fn show_saved(&mut self, folder: Label, clock: Animation) {
+        self.saved = Some((folder, clock));
+    }
+
+    /// The folder button, popping and opening into a pill that names the folder
+    /// while the capture lands in it, room beside the name allowing.
+    fn draw_folder(&self, painter: &Painter, now: Instant) {
+        let Some((label, clock)) = self
+            .saved
+            .as_ref()
+            .filter(|(_, clock)| clock.is_running(now))
+        else {
+            return self.folder.draw(painter, now);
+        };
+        let seconds = clock.value(now);
+        let button = self.folder.area();
+        let room = label.width + PILL_GAP;
+        let open = hints::pill(seconds);
+        if open > 0.0 && self.name.extent(now).right() + EDGE <= button.left - room {
+            let palette = painter.palette;
+            let pill = Area::new(
+                button.left - room * open,
+                button.top,
+                button.width + room * open,
+                button.height,
+            );
+            let pill = painter.align(pill);
+            painter.fill(pill, PILL_RADIUS, faded(palette.subtle_hover, open));
+            // The name shows over the second half of the opening, rising into place.
+            let shown = (2.0 * open - 1.0).clamp(0.0, 1.0);
+            let left = button.left - room + PILL_PADDING;
+            let middle = button.middle() + PILL_RISE * (1.0 - shown);
+            painter.clip(pill, || {
+                painter.text(label, left, middle, faded(palette.text, shown));
+                if !palette.contrast
+                    && let Some(glint) = hints::folder_glint(seconds)
+                {
+                    let x = left - PILL_BAND / 2.0 + (label.width + PILL_BAND) * glint;
+                    painter.glint(&[(label, left)], middle, x, PILL_BAND);
+                }
+            });
+        }
+        let center = (button.left + button.width / 2.0, button.middle());
+        painter.grown(1.0, hints::pop(seconds), center, || {
+            self.folder.draw(painter, now);
+        });
     }
 
     /// The options' capsule, as wide as it glides to, with the settings crossfading

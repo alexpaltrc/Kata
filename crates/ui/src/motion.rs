@@ -92,6 +92,21 @@ impl Animation {
         Self::lasting(value, value, Duration::ZERO, Easing::DECELERATE)
     }
 
+    /// Counts `seconds` from now, its value the seconds gone by: a timeline for
+    /// motions in step. At its end at once if animation effects are off.
+    pub fn clock(seconds: f32) -> Self {
+        let linear = Easing::new(0.0, 0.0, 1.0, 1.0);
+        Self::new(0.0, seconds, Duration::from_secs_f32(seconds), linear)
+    }
+
+    /// Starts `by` later, holding its first value until then.
+    pub fn delayed(mut self, by: Duration) -> Self {
+        if !self.duration.is_zero() {
+            self.start += by;
+        }
+        self
+    }
+
     fn lasting(from: f32, to: f32, duration: Duration, easing: Easing) -> Self {
         Self {
             from,
@@ -183,6 +198,15 @@ mod tests {
         assert!(animation.is_running(start + FAST / 2));
         assert_eq!(animation.value(start + FAST), 20.0);
         assert!(!animation.is_running(start + FAST));
+    }
+
+    #[test]
+    fn delayed_holds_its_first_value_until_it_starts() {
+        let animation = Animation::lasting(0.0, 1.0, FAST, Easing::DECELERATE).delayed(FAST);
+        let start = animation.start - FAST;
+        assert_eq!(animation.value(start + FAST / 2), 0.0);
+        assert!(animation.is_running(start + FAST / 2));
+        assert_eq!(animation.value(start + 2 * FAST), 1.0);
     }
 
     #[test]
