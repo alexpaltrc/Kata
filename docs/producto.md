@@ -64,6 +64,10 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |
 | Iniciar con Windows | Desactivado | Kata arranca en la bandeja, sin abrir ventanas. |
 
+## Bienvenida
+
+Hasta la primera captura, la ventana principal abre con la bienvenida. El icono se dibuja solo: cada esquina se traza en un color de firma, una tras otra, y se calienta hasta el naranja de Kata pasando por los colores que siguen al suyo; luego se enciende el centro. Llegan «Hola, soy Kata» y «Gratis y sin límites», el botón **Toma tu primera captura** con el atajo debajo, y el destello cruza el saludo. Si se cierra sin capturar, vuelve a aparecer la próxima vez.
+
 ## Icono
 
 Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el naranja de Kata, un caqui cálido que contrasta con todo y es el mismo de los pasos; sin placa, como los iconos de Windows 11. En la bandeja, solo las esquinas, en blanco o negro.
@@ -71,8 +75,8 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 ## Pendiente
 
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
-- **Bienvenida (onboarding)**, a la altura del resto de Kata, en diseño. Se aprende usando Kata de verdad, con una señal a la vez, y nada de lo que enseña es Premium:
-  1. **Hola.** El icono se dibuja solo y lo cruza el destello. Kata se presenta, dice que es gratis y sin límites, e invita a tomar la primera captura.
+- **Bienvenida (onboarding)**, a la altura del resto de Kata. Se aprende usando Kata de verdad, con una señal a la vez, y nada de lo que enseña es Premium:
+  1. **Hola.** Hecho: ver [Bienvenida](#bienvenida).
   2. **La primera captura**, sobre la pantalla real: una pista sugiere pasar el cursor por una ventana tapada, que sale completa.
   3. **El editor**, con tres señales, de una en una: ponerle nombre, que se guarda solo (y dónde) y que la captura se arrastra desde su nombre.
   4. **Lista.** La captura llega como la tarjeta de firma, con lo que tardó en aparecer y cuánto menos pesa, medidos en esa misma captura. Ahí se puede encender Kata como app de capturas, con una línea que explica qué cambia, y se cuenta que nada sale del equipo.

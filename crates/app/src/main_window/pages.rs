@@ -1,15 +1,17 @@
-//! The main window's two pages: Home, with the button for a new capture, and
-//! Settings. Positions and sizes are in DIPs.
+//! The main window's pages: the Welcome, which leads to Kata's first capture;
+//! Home, with the button for a new capture; and Settings. Positions and sizes are
+//! in DIPs.
 
 use std::{
     path::{Path, PathBuf},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use kata_ui::{
     Graphics,
     access::Element,
     controls::{self, Button, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
+    motion::{Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
     window::CAPTION_BUTTONS,
 };
@@ -37,14 +39,45 @@ const RADIUS: f32 = 4.0;
 const MIN_WIDTH: f32 = 320.0;
 const CARDS: usize = 7;
 
+/// The welcome's logo, and the room under it, the greeting's and the invitation's.
+const LOGO: f32 = 64.0;
+const LOGO_GAP: f32 = 20.0;
+const GREETING_GAP: f32 = 4.0;
+const INVITATION_GAP: f32 = 24.0;
+/// The welcome's choreography, in seconds: once the window is in, the logo draws
+/// itself; the greeting rises below it, then the invitation; and a glint crosses
+/// the greeting and the logo's light.
+const LEAD: f32 = 0.25;
+const GREETING: f32 = LEAD + 0.55;
+const FREE: f32 = GREETING + 0.1;
+const INVITATION: f32 = LEAD + 0.85;
+const GLINT: f32 = LEAD + 1.0;
+const GLINTING: f32 = 1.1;
+const WELCOME: f32 = GLINT + GLINTING;
+/// What rises takes this long, from this far below, in seconds and DIPs.
+const RISING: f32 = 0.4;
+const RISE: f32 = 8.0;
+/// How wide the glint's band is.
+const BAND: f32 = 96.0;
+
+/// In the order `numbered` counts them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Page {
+    Welcome,
     Home,
     Settings,
 }
 
+impl Page {
+    /// The page that `page as usize` numbers.
+    pub fn numbered(number: usize) -> Self {
+        [Self::Welcome, Self::Home, Self::Settings][number.min(2)]
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
+    FirstCapture,
     Capture,
     OpenSettings,
     Back,
@@ -72,6 +105,13 @@ pub struct Pages {
     room: (f32, f32),
     /// The middle of the title bar's row of buttons and titles.
     title_row: f32,
+
+    logo: Area,
+    greeting: Label,
+    free: Label,
+    first_capture: Button,
+    /// How many seconds into the welcome it is.
+    welcome: Animation,
 
     title: Label,
     capture: Button,
@@ -112,6 +152,11 @@ impl Pages {
         let mut pages = Self {
             room: (0.0, 0.0),
             title_row: TITLE_BAR / 2.0,
+            logo: Area::default(),
+            greeting: fonts.title(text.greeting)?,
+            free: fonts.label(text.free)?,
+            first_capture: Button::new(fonts.label(text.first_capture)?),
+            welcome: welcome(),
             title: fonts.caption(channel::name())?,
             capture: Button::new(fonts.label(text.new_capture)?),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
@@ -168,6 +213,15 @@ impl Pages {
     pub fn layout(&mut self, room: (f32, f32), caption_buttons: Area) -> Result<()> {
         self.room = room;
         self.title_row = caption_buttons.middle();
+        let above = LOGO + LOGO_GAP + self.greeting.height + GREETING_GAP + self.free.height;
+        let group = above + INVITATION_GAP + HEIGHT + HINT_GAP + self.hint.height;
+        let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
+        self.logo = Area::new((room.0 - LOGO) / 2.0, top, LOGO, LOGO);
+        let invitation = &mut self.first_capture;
+        invitation.place(
+            (room.0 - invitation.width()) / 2.0,
+            top + above + INVITATION_GAP,
+        );
         let group = HEIGHT + HINT_GAP + self.hint.height;
         let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
         self.capture
@@ -231,6 +285,7 @@ impl Pages {
 
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
         match part {
+            Part::FirstCapture => &mut self.first_capture,
             Part::Capture => &mut self.capture,
             Part::OpenSettings => &mut self.open_settings,
             Part::Back => &mut self.back,
@@ -247,6 +302,7 @@ impl Pages {
 
     fn get(&self, part: Part) -> &dyn Control {
         match part {
+            Part::FirstCapture => &self.first_capture,
             Part::Capture => &self.capture,
             Part::OpenSettings => &self.open_settings,
             Part::Back => &self.back,
@@ -284,11 +340,13 @@ impl Pages {
     pub fn draw(&self, page: Page, painter: &Painter, now: Instant) {
         let palette = painter.palette;
         match page {
+            Page::Welcome => {
+                painter.text(&self.title, PADDING, self.title_row, palette.text);
+                self.draw_welcome(painter, now);
+            }
             Page::Home => {
                 painter.text(&self.title, PADDING, self.title_row, palette.text);
-                let left = (self.room.0 - self.hint.width) / 2.0;
-                let middle = self.capture.area().bottom() + HINT_GAP + self.hint.height / 2.0;
-                painter.text(&self.hint, left, middle, palette.text_secondary);
+                self.draw_hint(painter, self.capture.area());
             }
             Page::Settings => {
                 painter.text(&self.settings_title, BACK, self.title_row, palette.text);
@@ -310,8 +368,20 @@ impl Pages {
                 painter.text(path, left, middle, palette.text_secondary);
             }
         }
-        for &part in parts(page) {
-            self.get(part).draw(painter, now);
+        let controls = || {
+            for &part in parts(page) {
+                self.get(part).draw(painter, now);
+            }
+        };
+        if page == Page::Welcome {
+            // The invitation comes last, with the shortcut under it.
+            let (opacity, offset) = self.rising(INVITATION, now);
+            painter.lowered(opacity, offset, || {
+                controls();
+                self.draw_hint(painter, self.first_capture.area());
+            });
+        } else {
+            controls();
         }
         if let Some(part) = self.focused(page) {
             let (area, radius) = self.get(part).focus_area();
@@ -320,6 +390,51 @@ impl Pages {
         if page == Page::Settings {
             self.screen_keys_info.draw_tip(painter, now);
         }
+    }
+
+    /// The logo draws itself, the greeting rises below it, and a glint crosses them.
+    fn draw_welcome(&self, painter: &Painter, now: Instant) {
+        let palette = painter.palette;
+        let time = self.welcome.value(now);
+        painter.logo(painter.align(self.logo), time - LEAD);
+        let (greeting, free) = (&self.greeting, &self.free);
+        let left = (self.room.0 - greeting.width) / 2.0;
+        let middle = self.logo.bottom() + LOGO_GAP + greeting.height / 2.0;
+        let (opacity, offset) = self.rising(GREETING, now);
+        painter.lowered(opacity, offset, || {
+            painter.text(greeting, left, middle, palette.text);
+        });
+        let (opacity, offset) = self.rising(FREE, now);
+        let below = middle + greeting.height / 2.0 + GREETING_GAP + free.height / 2.0;
+        painter.lowered(opacity, offset, || {
+            let left = (self.room.0 - free.width) / 2.0;
+            painter.text(free, left, below, palette.text_secondary);
+        });
+        let sweep = (time - GLINT) / GLINTING;
+        if sweep > 0.0 && sweep < 1.0 {
+            let x = left - BAND / 2.0 + (greeting.width + BAND) * Easing::SWEEP.apply(sweep);
+            painter.glint(&[(greeting, left)], middle, x, BAND);
+        }
+    }
+
+    /// The shortcut, centered under `button`.
+    fn draw_hint(&self, painter: &Painter, button: Area) {
+        let left = (self.room.0 - self.hint.width) / 2.0;
+        let middle = button.bottom() + HINT_GAP + self.hint.height / 2.0;
+        painter.text(&self.hint, left, middle, painter.palette.text_secondary);
+    }
+
+    /// How far into the welcome something rising at `start` seconds is: its opacity,
+    /// and how far it still is below its place.
+    fn rising(&self, start: f32, now: Instant) -> (f32, f32) {
+        let progress = (self.welcome.value(now) - start) / RISING;
+        let risen = Easing::DECELERATE.apply(progress);
+        (risen, (1.0 - risen) * RISE)
+    }
+
+    /// Plays the welcome from its start.
+    pub fn greet(&mut self) {
+        self.welcome = welcome();
     }
 
     /// Moves the keyboard focus to `page`'s next control, or the previous one if
@@ -346,9 +461,10 @@ impl Pages {
     }
 
     pub fn is_animating(&self, page: Page, now: Instant) -> bool {
-        parts(page)
-            .iter()
-            .any(|&part| self.get(part).is_animating(now))
+        (page == Page::Welcome && self.welcome.is_running(now))
+            || parts(page)
+                .iter()
+                .any(|&part| self.get(part).is_animating(now))
     }
 
     pub fn set_hotkey(&mut self, hotkey: Hotkey) -> Result<()> {
@@ -425,6 +541,13 @@ impl Pages {
     }
 }
 
+/// The welcome's clock, counting its seconds from now: at its end at once when
+/// animation effects are off.
+fn welcome() -> Animation {
+    let linear = Easing::new(0.0, 0.0, 1.0, 1.0);
+    Animation::new(0.0, WELCOME, Duration::from_secs_f32(WELCOME), linear)
+}
+
 /// `page`'s part with the number `describe` gave it.
 pub fn part(page: Page, number: usize) -> Option<Part> {
     parts(page)
@@ -435,6 +558,7 @@ pub fn part(page: Page, number: usize) -> Option<Part> {
 
 fn parts(page: Page) -> &'static [Part] {
     match page {
+        Page::Welcome => &[Part::FirstCapture],
         Page::Home => &[Part::Capture, Part::OpenSettings],
         Page::Settings => &[
             Part::Back,

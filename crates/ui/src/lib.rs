@@ -5,6 +5,7 @@ pub mod controls;
 pub mod figure;
 mod graphics;
 pub mod icon;
+pub mod logo;
 pub mod motion;
 pub mod paint;
 mod surface;

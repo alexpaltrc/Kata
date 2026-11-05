@@ -1,4 +1,5 @@
 //! The main window: a button for a new capture and, a page away, the settings.
+//! Until Kata's first capture, it opens with a welcome instead.
 
 mod pages;
 
@@ -51,7 +52,7 @@ use crate::{
     channel, export,
     hotkey::{self, Hotkey, Press},
     report,
-    settings::Settings,
+    settings::{self, Settings},
     sound, startup,
 };
 pub use pages::Page;
@@ -73,6 +74,11 @@ thread_local! {
 /// Shows `page` in the main window, opening it if needed. `owner` is Kata's
 /// resident window, which holds the capture shortcut.
 pub fn show(graphics: &Graphics, owner: HWND, page: Page) {
+    let page = if page == Page::Home && !settings::welcomed() {
+        Page::Welcome
+    } else {
+        page
+    };
     if let Some(hwnd) = OPEN.get() {
         unsafe {
             if IsIconic(hwnd).as_bool() {
@@ -265,8 +271,7 @@ impl Main {
                 self.follow_theme();
                 return None;
             }
-            GO if wparam.0 == Page::Settings as usize => self.go(Page::Settings),
-            GO => self.go(Page::Home),
+            GO => self.go(Page::numbered(wparam.0)),
             WM_GETOBJECT => {
                 let result = self.access.answer(self.hwnd, wparam, lparam)?;
                 self.update_access();
@@ -399,7 +404,7 @@ impl Main {
     fn activated(&mut self, part: Part) {
         match part {
             // The window gets out of the way of the capture.
-            Part::Capture => unsafe {
+            Part::Capture | Part::FirstCapture => unsafe {
                 let _ = PostMessageW(Some(self.owner), crate::CAPTURE, WPARAM(0), LPARAM(0));
                 let _ = PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
             },
@@ -497,6 +502,9 @@ impl Main {
         self.pages.refocus();
         self.direction = if page > self.page { 1.0 } else { -1.0 };
         self.page = page;
+        if page == Page::Welcome {
+            self.pages.greet();
+        }
         self.transition = Animation::new(0.0, 1.0, motion::NORMAL, Easing::DECELERATE);
         self.invalidate();
     }

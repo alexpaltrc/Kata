@@ -96,6 +96,8 @@ pub fn high_contrast() -> bool {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub light: bool,
+    /// Whether a contrast theme is on, whose system colors replace Kata's own.
+    pub contrast: bool,
     /// Behind everything: transparent, so Mica shows, unless a contrast theme is on.
     pub background: D2D1_COLOR_F,
     pub text: D2D1_COLOR_F,
@@ -140,6 +142,7 @@ impl Palette {
         if light {
             Self {
                 light,
+                contrast: false,
                 background: color(0x000000, 0.0),
                 text: color(0x000000, 0.8956),
                 text_secondary: color(0x000000, 0.6063),
@@ -163,6 +166,7 @@ impl Palette {
         } else {
             Self {
                 light,
+                contrast: false,
                 background: color(0x000000, 0.0),
                 text: color(0xFFFFFF, 1.0),
                 text_secondary: color(0xFFFFFF, 0.786),
@@ -197,6 +201,7 @@ impl Palette {
         let none = faded(window, 0.0);
         Self {
             light: 0.2126 * window.r + 0.7152 * window.g + 0.0722 * window.b > 0.5,
+            contrast: true,
             background: window,
             text,
             text_secondary: text,

@@ -16,9 +16,9 @@ use windows::{
         },
         DirectWrite::{
             DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS, DWRITE_TRIMMING,
-            DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory,
-            IDWriteTextFormat, IDWriteTextLayout,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS,
+            DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
+            IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
         },
     },
     core::{BOOL, PCWSTR, Result, w},
@@ -91,8 +91,8 @@ impl Area {
 
 /// Draws shapes and text in DIPs on a Direct2D context that's drawing a frame.
 pub struct Painter<'a> {
-    context: &'a ID2D1DeviceContext,
-    brush: &'a ID2D1SolidColorBrush,
+    pub(crate) context: &'a ID2D1DeviceContext,
+    pub(crate) brush: &'a ID2D1SolidColorBrush,
     pub palette: &'a Palette,
     scale: f32,
 }
@@ -144,6 +144,13 @@ impl<'a> Painter<'a> {
     /// inside another layer.
     pub fn layer(&self, opacity: f32, offset: f32, draw: impl FnOnce()) {
         let moved = Matrix3x2::translation(self.snap(offset), 0.0);
+        self.transformed(opacity, moved, draw);
+    }
+
+    /// Draws what `draw` paints at `opacity`, moved `offset` DIPs down, even inside
+    /// another layer.
+    pub fn lowered(&self, opacity: f32, offset: f32, draw: impl FnOnce()) {
+        let moved = Matrix3x2::translation(0.0, self.snap(offset));
         self.transformed(opacity, moved, draw);
     }
 
@@ -308,7 +315,7 @@ impl<'a> Painter<'a> {
 
     /// Blue, violet, pink and orange, the same whatever the accent: luminous over
     /// dark themes, and deeper over light ones, where light tones fade.
-    fn signature(&self) -> [u32; 4] {
+    pub(crate) fn signature(&self) -> [u32; 4] {
         if self.palette.light {
             [0x4C7DFF, 0x9A5CFF, 0xFF4FA0, 0xFF8A3D]
         } else {
@@ -317,7 +324,7 @@ impl<'a> Painter<'a> {
     }
 
     /// Paints `stops` evenly from `from` to `to`, and the ends' colors beyond.
-    fn gradient(
+    pub(crate) fn gradient(
         &self,
         stops: &[D2D1_GRADIENT_STOP],
         from: Vector2,
@@ -548,7 +555,7 @@ fn layer() -> D2D1_LAYER_PARAMETERS1 {
     }
 }
 
-fn rounded(area: Area, radius: f32) -> D2D1_ROUNDED_RECT {
+pub(crate) fn rounded(area: Area, radius: f32) -> D2D1_ROUNDED_RECT {
     D2D1_ROUNDED_RECT {
         rect: area.rect(),
         radiusX: radius,
@@ -557,7 +564,7 @@ fn rounded(area: Area, radius: f32) -> D2D1_ROUNDED_RECT {
 }
 
 /// From `area`'s top-left corner to its bottom-right.
-fn diagonal(area: Area) -> (Vector2, Vector2) {
+pub(crate) fn diagonal(area: Area) -> (Vector2, Vector2) {
     (
         Vector2::new(area.left, area.top),
         Vector2::new(area.right(), area.bottom()),
@@ -593,6 +600,22 @@ impl Fonts {
     /// Text in controls and settings.
     pub fn label(&self, text: &str) -> Result<Label> {
         self.layout(text, &self.body, f32::MAX)
+    }
+
+    /// A page's title, as large and bold as Windows' own.
+    pub fn title(&self, text: &str) -> Result<Label> {
+        let title = unsafe {
+            self.dwrite.CreateTextFormat(
+                w!("Segoe UI Variable Display"),
+                None,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                28.0,
+                w!(""),
+            )?
+        };
+        self.layout(text, &title, f32::MAX)
     }
 
     /// Small text, as in title bars and hints.

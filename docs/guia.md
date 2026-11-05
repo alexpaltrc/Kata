@@ -113,6 +113,8 @@ mostrar siempre.
   capturas**, **Ajustes** y **Salir**.
 - **Ventana principal:** el botón **Nuevo recorte**, el atajo debajo y un acceso a Ajustes. Al
   pulsar Nuevo recorte, la ventana se cierra para no salir en la captura.
+- **La primera vez:** la ventana abre con un saludo de Kata y el botón **Toma tu primera
+  captura**. Tras esa primera captura, abre como siempre.
 
 ## Ajustes
 

@@ -6,6 +6,11 @@ use kata_editor::{BLUR_LEVELS, STEP_SIZES};
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
 
 pub struct Strings {
+    /// The welcome, on first opening Kata: who it is, what it costs, and the
+    /// invitation to a first capture.
+    pub greeting: &'static str,
+    pub free: &'static str,
+    pub first_capture: &'static str,
     pub new_capture: &'static str,
     pub open_captures: &'static str,
     pub settings: &'static str,
@@ -66,6 +71,9 @@ impl Strings {
 }
 
 static SPANISH: Strings = Strings {
+    greeting: "Hola, soy Kata",
+    free: "Gratis y sin límites",
+    first_capture: "Toma tu primera captura",
     new_capture: "Nuevo recorte",
     open_captures: "Abrir capturas",
     settings: "Ajustes",
@@ -106,6 +114,9 @@ static SPANISH: Strings = Strings {
 };
 
 static ENGLISH: Strings = Strings {
+    greeting: "Hi, I'm Kata",
+    free: "Free, with no limits",
+    first_capture: "Take your first capture",
     new_capture: "New capture",
     open_captures: "Open captures",
     settings: "Settings",

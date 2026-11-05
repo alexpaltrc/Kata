@@ -1111,7 +1111,7 @@ impl Editor {
             taken: Cell::new(false),
         });
         self.flight = card.is_some().then(|| Flight::Out {
-            glint: Animation::new(0.0, 1.0, FLIGHT, name::SWEEP),
+            glint: Animation::new(0.0, 1.0, FLIGHT, Easing::SWEEP),
             handover: handover.clone(),
         });
         self.carrying = Some((file, card, handover));

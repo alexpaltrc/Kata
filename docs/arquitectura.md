@@ -10,6 +10,7 @@ Kata dibuja sus propios controles con el estilo Fluent de Windows 11, sobre Dire
 - **Son pocos controles:** botón (de acento, estándar y de icono), slider por niveles, interruptor, barra de herramientas con iconos, campo de atajo, icono de información con su globo y lienzo. Los iconos de las herramientas son figuras propias, dibujadas como geometría de Direct2D, así que se ven nítidos a cualquier escala. Hacerlos es abarcable.
 - **La barra de herramientas** flota centrada abajo. Al elegir una herramienta, un resalte se desliza hasta ella, estirándose en el camino, y su icono se rellena; la cápsula de sus niveles se desliza a su nuevo ancho, o se hunde y se desvanece si la herramienta no tiene. Con el ajuste de los nombres, cada uno va debajo de su icono; sin él, aparece en un globo al dejar el cursor quieto, igual que el de «i». Dentro de la cápsula de una herramienta puede ir otra barra, más compacta y sin cápsula propia: la de las Formas, para elegir rectángulo, elipse o flecha.
 - **El globo de información** aparece cuando el cursor se queda quieto sobre el icono «i», tras el tiempo que Windows fija para eso (`TrackMouseEvent` con `TME_HOVER`), como los globos nativos. Así no parpadea al cruzar el icono, y esperar no cuesta ni un cuadro.
+- **El logo de la bienvenida** (`crates/ui/src/logo.rs`) es geometría de Direct2D con las medidas del icono, no una imagen: así puede dibujarse solo. Cada cuadro arma el tramo ya trazado de cada esquina (recta, curva y recta), y el centro crece con un resorte. En contraste alto se dibuja entero, en los colores del sistema.
 - **Rendimiento:** no carga ningún framework, por lo que arranca al instante y gasta muy poca memoria.
 - **Control total del diseño:** cada animación, sombra y transición se ajusta al detalle. Las animaciones las ejecuta el compositor de Windows, así que siguen fluidas aunque la app esté ocupada.
 
@@ -63,6 +64,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 - **Impr Pant y Win + Mayús + S:** Windows se reserva `Alt` y `Win + Impr Pant`, y `Win + Mayús + S` es suyo, así que `RegisterHotKey` no basta. Con el ajuste encendido, un gancho de teclado de bajo nivel (`crates/app/src/screen_keys.rs`), en un hilo propio, se queda con esas teclas antes que Windows; cualquier otra tecla pasa al instante. Si `Win` o `Alt` siguen pulsadas, toca una tecla sin uso para que al soltarlas no se abra Inicio ni un menú. Se descartó declarar el protocolo `ms-screenclip:`: obligaba a elegir Kata en Configuración, no cubría `Alt` ni `Win + Impr Pant` y abría un segundo `Kata.exe` en cada captura.
 - **Iniciar con Windows:** la `StartupTask` del paquete. Windows abre Kata sin argumentos; Kata pregunta cómo la abrieron y, si fue al iniciar sesión, espera en la bandeja sin ventanas. Si se apaga en los ajustes de Windows, solo se vuelve a encender ahí. Sin instalar, Kata no inicia con Windows.
 - **Una sola instancia:** abrir Kata otra vez le pide a la que ya corre que muestre su ventana.
+- **Bienvenida:** el valor `Welcomed` se escribe al terminar la primera captura. Mientras no existe, la ventana principal abre con la bienvenida.
 
 ## Sonido
 
@@ -89,5 +91,6 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 | Cuadro de la animación del Foco (captura 4K) | < 16 ms | 11 ms (peor caso: sobre toda la captura, 12 núcleos) |
 | Activar «Desenfocar alrededor» (captura 4K) | < 50 ms | 15 ms (una vez; luego solo lo que cambia) |
 | Mover un desenfoque bajo «Desenfocar alrededor» (captura 4K) | < 16 ms | 7 ms por cuadro |
+| Cuadro de la bienvenida | < 16 ms | 0,17 ms (solo repinta durante sus 2,35 s) |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
 | PNG frente al de Windows | Nunca mayor | 18 % menor de media en las pruebas; con fotos, hasta 0,5 % mayor |

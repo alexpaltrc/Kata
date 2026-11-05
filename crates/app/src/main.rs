@@ -252,6 +252,7 @@ impl App {
         let Some((area, image)) = overlay::select(&shot) else {
             return;
         };
+        settings::welcome_done();
         let capture = editor::Capture {
             image,
             area: area.offset(shot.origin.0, shot.origin.1),

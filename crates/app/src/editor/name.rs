@@ -42,8 +42,7 @@ const GLINT: Duration = Duration::from_millis(1400);
 const PAUSE: f32 = 0.35;
 const SETTLE: f32 = 0.1;
 const BAND: f32 = 96.0;
-/// The glint sweeps across evenly, easing in and out.
-pub const SWEEP: Easing = Easing::new(0.4, 0.0, 0.6, 1.0);
+
 /// How wide the box opens, room allowing.
 const WIDTH: f32 = 400.0;
 /// The least room the name has in the title bar.
@@ -529,7 +528,7 @@ impl Control for Name {
 
 /// A glint that crosses the name after a pause, `pause` long in the band's travel.
 fn glint(pause: f32) -> Animation {
-    Animation::new(-pause, 1.0, GLINT, SWEEP)
+    Animation::new(-pause, 1.0, GLINT, Easing::SWEEP)
 }
 
 /// How often the caret blinks, in milliseconds, if it does.

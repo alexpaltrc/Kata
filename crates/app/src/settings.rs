@@ -91,6 +91,18 @@ impl EditorSettings {
     }
 }
 
+/// Whether Kata has taken its first capture: until then, it opens with a welcome.
+pub fn welcomed() -> bool {
+    read(w!("Welcomed"), 0) != 0
+}
+
+/// Remembers that Kata has taken its first capture.
+pub fn welcome_done() {
+    if !welcomed() {
+        write(w!("Welcomed"), 1);
+    }
+}
+
 fn read(name: PCWSTR, default: usize) -> usize {
     registry::read_dword(KEY, name).map_or(default, |value| value as usize)
 }
