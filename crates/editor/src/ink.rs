@@ -45,6 +45,21 @@ impl Ink {
         outside: impl Fn((f32, f32)) -> f32,
         white: impl Fn((f32, f32)) -> f32,
     ) {
+        let stride = image.stride();
+        self.paint_rows(image.pixels_mut(), 0, stride, area, outside, white);
+    }
+
+    /// Inks a mark as `paint` does, into `rows`: an image's rows from `top` on,
+    /// `stride` bytes each, which `area` lies inside.
+    pub fn paint_rows(
+        &self,
+        rows: &mut [u8],
+        top: i32,
+        stride: usize,
+        area: Rect,
+        outside: impl Fn((f32, f32)) -> f32,
+        white: impl Fn((f32, f32)) -> f32,
+    ) {
         for y in area.top..area.bottom {
             for x in area.left..area.right {
                 let point = (x as f32 + 0.5, y as f32 + 0.5);
@@ -56,8 +71,8 @@ impl Ink {
                 let orange = (0.5 - distance - self.edge).clamp(0.0, 1.0);
                 let ink = if orange > 0.0 { white(point) } else { 0.0 };
 
-                let at = image.offset(x, y);
-                let pixel = &mut image.pixels_mut()[at..at + 3];
+                let at = (y - top) as usize * stride + x as usize * Image::BYTES_PER_PIXEL;
+                let pixel = &mut rows[at..at + 3];
                 for (channel, value) in pixel.iter_mut().enumerate() {
                     let mut color = f32::from(*value) * keep;
                     color += (255.0 - color) * edge;

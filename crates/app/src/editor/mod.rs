@@ -17,8 +17,8 @@ use std::{
 };
 
 use kata_editor::{
-    Blur, Document, Edits, FOCUS_CORNER, Figure, Focus, Form, Image, Rect, Renderer, STEP_SIZES,
-    Shape, Spot, Step, ZOOMS,
+    Blur, Document, Edits, Figure, Focus, Form, Image, Rect, Renderer, STEP_SIZES, Shape, Spot,
+    Step, ZOOMS,
 };
 use kata_ui::{
     Graphics,
@@ -974,6 +974,7 @@ impl Editor {
                     rect,
                     level,
                     blur: self.toolbar.around(),
+                    frame: self.toolbar.frame(),
                 });
                 self.zoom = Animation::idle(1.0);
                 Shape::Focus
@@ -1021,6 +1022,7 @@ impl Editor {
                 if let Some(focus) = self.edits.focus {
                     self.toolbar.set_zoom_level(focus.level);
                     self.toolbar.set_around(focus.blur);
+                    self.toolbar.set_frame(focus.frame);
                 }
             }
             Some(Shape::Step(_)) => self.toolbar.select_tool(Tool::Steps),
@@ -1077,6 +1079,11 @@ impl Editor {
                     focus.blur = self.toolbar.around();
                 }
             }
+            (Part::Frame, Some(Shape::Focus)) => {
+                if let Some(focus) = &mut self.edits.focus {
+                    focus.frame = self.toolbar.frame();
+                }
+            }
             (Part::Form, Some(Shape::Figure(index))) => {
                 if let Some(figure) = self.edits.figures.get_mut(index) {
                     figure.form = self.toolbar.form();
@@ -1099,7 +1106,7 @@ impl Editor {
     fn activated(&mut self, part: Part) {
         match part {
             Part::Tools => self.tool_changed(),
-            Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form => {
+            Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form | Part::Frame => {
                 self.option_changed(part)
             }
             Part::Name => self.start_naming(),
@@ -1638,7 +1645,10 @@ impl Editor {
     fn radius(&self, shape: Shape) -> f32 {
         match shape {
             Shape::Blur(_) => 0.0,
-            Shape::Focus => FOCUS_CORNER * self.capture_scale * self.view.zoom,
+            Shape::Focus => self.edits.focus.map_or(0.0, |focus| {
+                let corner = focus.spot().corner(self.bounds(), self.capture_scale);
+                corner * self.view.zoom
+            }),
             Shape::Figure(index) => self
                 .edits
                 .figures

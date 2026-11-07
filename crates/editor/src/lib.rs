@@ -15,8 +15,9 @@ mod png;
 mod render;
 
 pub use document::{
-    BLUR_LEVELS, Blur, Document, Edits, Figure, Focus, Form, STEP_SIZES, Shape, Spot, Step, ZOOMS,
+    BLUR_LEVELS, Blur, Document, Edits, Figure, Focus, Form, Frame, STEP_SIZES, Shape, Spot, Step,
+    ZOOMS,
 };
 pub use geometry::Rect;
 pub use image::Image;
-pub use render::{FOCUS_CORNER, Renderer};
+pub use render::Renderer;

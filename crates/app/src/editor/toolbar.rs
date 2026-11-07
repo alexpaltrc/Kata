@@ -4,7 +4,7 @@
 
 use std::{iter, mem, time::Instant};
 
-use kata_editor::{Form, Shape, ZOOMS};
+use kata_editor::{Form, Frame, Shape, ZOOMS};
 use kata_ui::{
     Graphics,
     access::Element,
@@ -101,7 +101,7 @@ impl Tool {
     fn options(self) -> &'static [Part] {
         match self {
             Self::Blur => &[Part::Blur],
-            Self::Focus => &[Part::Zoom, Part::Around],
+            Self::Focus => &[Part::Frame, Part::Zoom, Part::Around],
             Self::Steps => &[Part::StepSize],
             Self::Shapes => &[Part::Form],
         }
@@ -110,6 +110,8 @@ impl Tool {
 
 /// The shapes' forms, in their picker's order.
 const FORMS: [Form; 3] = [Form::Rectangle, Form::Ellipse, Form::Arrow];
+/// The focus's frames, in their picker's order.
+const FRAMES: [Frame; 3] = [Frame::Soft, Frame::Rectangle, Frame::Ellipse];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
@@ -119,6 +121,7 @@ pub enum Part {
     Around,
     StepSize,
     Form,
+    Frame,
     Name,
     Folder,
 }
@@ -167,6 +170,7 @@ pub struct Toolbar {
     around: Setting,
     step_size: Setting,
     forms: Dock,
+    frames: Dock,
     name: Name,
     folder: IconButton,
     /// That the capture saved itself, which the folder button says the first few
@@ -237,6 +241,11 @@ impl Toolbar {
             item(icons::ellipse(graphics, Dock::ICON)?, strings.forms[1])?,
             item(icons::arrow(graphics, Dock::ICON)?, strings.forms[2])?,
         ];
+        let frames = vec![
+            item(icons::soft(graphics, Dock::ICON)?, strings.frames[0])?,
+            item(icons::rectangle(graphics, Dock::ICON)?, strings.frames[1])?,
+            item(icons::ellipse(graphics, Dock::ICON)?, strings.frames[2])?,
+        ];
         let droplet = || icons::blur(graphics, SETTING_ICON).map(|(outlined, _)| outlined);
         let tool = Tool::at(settings.tool);
         let mut toolbar = Self {
@@ -258,6 +267,7 @@ impl Toolbar {
                 Slider::new(strings.step_size, step_sizes, settings.step_size),
             ),
             forms: Dock::compact(forms, settings.form),
+            frames: Dock::compact(frames, settings.frame),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             saved: None,
@@ -284,6 +294,7 @@ impl Toolbar {
             around: self.around.slider.value(),
             step_size: self.step_size.slider.value(),
             form: self.forms.selected(),
+            frame: self.frames.selected(),
         }
     }
 
@@ -321,7 +332,14 @@ impl Toolbar {
             .place(dock, height - BOTTOM - self.tools.height(), bounds);
         let middle = self.options_top() + OPTIONS / 2.0;
         for tool in Tool::ALL {
-            let mut left = self.options_area(tool).left + OPTIONS_PADDING;
+            // A picker leads, with its own room around it.
+            let area = self.options_area(tool);
+            let mut left = area.left;
+            if let Some(picker) = self.picker_mut(tool) {
+                picker.place(left, area.top, bounds);
+                left += picker.width();
+            }
+            left += OPTIONS_PADDING;
             for &part in tool.options() {
                 if let Some(setting) = self.setting_mut(part) {
                     setting.place(left, middle);
@@ -329,8 +347,6 @@ impl Toolbar {
                 }
             }
         }
-        let forms = self.options_area(Tool::Shapes);
-        self.forms.place(forms.left, forms.top, bounds);
     }
 
     pub fn part_at(&self, point: Point) -> Option<Part> {
@@ -372,6 +388,7 @@ impl Toolbar {
             Part::Around => &mut self.around.slider,
             Part::StepSize => &mut self.step_size.slider,
             Part::Form => &mut self.forms,
+            Part::Frame => &mut self.frames,
             Part::Name => &mut self.name,
             Part::Folder => &mut self.folder,
         }
@@ -396,15 +413,20 @@ impl Toolbar {
         changed
     }
 
-    /// Whether resting the pointer where it is would show a tool's or a form's name.
+    /// Whether resting the pointer where it is would show a tool's name, or a form's or
+    /// a frame's.
     pub fn awaits_rest(&self) -> bool {
-        self.tools.awaits_rest() || self.forms.awaits_rest()
+        self.tools.awaits_rest() || self.picker(self.tool()).is_some_and(Dock::awaits_rest)
     }
 
-    /// The pointer rested at `point`. Returns whether that shows a tool's or a form's
-    /// name.
+    /// The pointer rested at `point`. Returns whether that shows a tool's name, or a
+    /// form's or a frame's.
     pub fn rest(&mut self, point: Point) -> bool {
-        self.tools.rest(point) || (self.tool() == Tool::Shapes && self.forms.rest(point))
+        let tool = self.tool();
+        self.tools.rest(point)
+            || self
+                .picker_mut(tool)
+                .is_some_and(|picker| picker.rest(point))
     }
 
     /// Moves the keyboard focus to the next control, or the previous one if `back`.
@@ -448,6 +470,7 @@ impl Toolbar {
         let tips = self.options_top() - (STACK + HINT) * self.hint.value(now);
         self.tools.draw_tip(painter, tips, now);
         self.forms.draw_tip(painter, tips, now);
+        self.frames.draw_tip(painter, tips, now);
         self.draw_told(painter, now);
     }
 
@@ -531,6 +554,17 @@ impl Toolbar {
     pub fn set_form(&mut self, form: Form) {
         if let Some(index) = FORMS.iter().position(|&each| each == form) {
             self.forms.select(index);
+        }
+    }
+
+    /// How a new focus is framed.
+    pub fn frame(&self) -> Frame {
+        FRAMES[self.frames.selected()]
+    }
+
+    pub fn set_frame(&mut self, frame: Frame) {
+        if let Some(index) = FRAMES.iter().position(|&each| each == frame) {
+            self.frames.select(index);
         }
     }
 
@@ -711,17 +745,33 @@ impl Toolbar {
     }
 
     fn options_width(&self, tool: Tool) -> f32 {
-        // The forms fill the capsule, with their own room around them.
-        if tool == Tool::Shapes {
-            return self.forms.width();
-        }
-        let options = tool.options();
-        let settings: f32 = options
-            .iter()
+        // A picker brings its own room around it.
+        let picker = self.picker(tool).map_or(0.0, Dock::width);
+        let settings: Vec<&Setting> = (tool.options().iter())
             .filter_map(|&part| self.setting(part))
-            .map(Setting::width)
-            .sum();
-        settings + (options.len() - 1) as f32 * GAP + 2.0 * OPTIONS_PADDING
+            .collect();
+        if settings.is_empty() {
+            return picker;
+        }
+        let widths: f32 = settings.iter().map(|setting| setting.width()).sum();
+        picker + widths + (settings.len() - 1) as f32 * GAP + 2.0 * OPTIONS_PADDING
+    }
+
+    /// The icons `tool`'s options lead with, to pick what it adds.
+    fn picker(&self, tool: Tool) -> Option<&Dock> {
+        match tool {
+            Tool::Focus => Some(&self.frames),
+            Tool::Shapes => Some(&self.forms),
+            Tool::Blur | Tool::Steps => None,
+        }
+    }
+
+    fn picker_mut(&mut self, tool: Tool) -> Option<&mut Dock> {
+        match tool {
+            Tool::Focus => Some(&mut self.frames),
+            Tool::Shapes => Some(&mut self.forms),
+            Tool::Blur | Tool::Steps => None,
+        }
     }
 
     /// Where `tool`'s options show, once the capsule has glided to them.
@@ -747,6 +797,7 @@ impl Toolbar {
             Part::Around => &self.around.slider,
             Part::StepSize => &self.step_size.slider,
             Part::Form => &self.forms,
+            Part::Frame => &self.frames,
             Part::Name => &self.name,
             Part::Folder => &self.folder,
         }

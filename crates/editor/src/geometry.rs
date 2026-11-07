@@ -133,6 +133,19 @@ pub(crate) fn center(rect: Rect) -> (f32, f32) {
     )
 }
 
+/// How far `point` lies outside the ellipse around `center` with `radii`; negative
+/// inside. Exact on the ellipse and close beside it, which is all an edge needs.
+pub(crate) fn ellipse(point: (f32, f32), center: (f32, f32), radii: (f32, f32)) -> f32 {
+    let (x, y) = (point.0 - center.0, point.1 - center.1);
+    let k0 = ((x / radii.0).powi(2) + (y / radii.1).powi(2)).sqrt();
+    let k1 = ((x / radii.0.powi(2)).powi(2) + (y / radii.1.powi(2)).powi(2)).sqrt();
+    if k1 > 0.0 {
+        k0 * (k0 - 1.0) / k1
+    } else {
+        -radii.0.min(radii.1)
+    }
+}
+
 /// How far apart two points are. Points fall between pixels: a pixel's center is half
 /// a pixel in.
 pub(crate) fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {

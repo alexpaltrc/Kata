@@ -1,4 +1,5 @@
 use crate::figure::{self, LINE, Trace};
+use crate::geometry::{center, ellipse};
 use crate::{Image, Rect, marker::STEP_SIZE};
 
 /// How strongly each blur level hides what's under it: Soft, Medium, Strong.
@@ -10,12 +11,24 @@ pub const STEP_SIZES: [f32; 4] = [0.75, 1.0, 1.35, 1.8];
 /// The least a usual marker spans of the capture's shorter side, so it still reads once
 /// a big capture shrinks to fit a page.
 const STEP_SHARE: f32 = 0.036;
+/// A soft focus's corner radius at 100 %.
+const FOCUS_CORNER: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Blur {
     pub rect: Rect,
     /// Below `BLUR_LEVELS`.
     pub level: usize,
+}
+
+/// How a focus's lit area is framed: softly, its corners rounded, or by a line of
+/// Kata's ink around a rectangle or an ellipse.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Frame {
+    #[default]
+    Soft,
+    Rectangle,
+    Ellipse,
 }
 
 /// The one area that stays lit while the rest of the image darkens, and blurs if
@@ -27,6 +40,7 @@ pub struct Focus {
     pub level: usize,
     /// The blur level around it, if it blurs what's around.
     pub blur: Option<usize>,
+    pub frame: Frame,
 }
 
 impl Focus {
@@ -35,17 +49,20 @@ impl Focus {
             rect: self.rect,
             zoom: ZOOMS[self.level],
             blur: self.blur,
+            frame: self.frame,
         }
     }
 }
 
-/// A focus as drawn: the area it lights, how much it magnifies it and how it blurs
-/// what's around. The zoom is free so it can animate between levels.
+/// A focus as drawn: the area it lights, how much it magnifies it, how it blurs
+/// what's around and how it's framed. The zoom is free so it can animate between
+/// levels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spot {
     pub rect: Rect,
     pub zoom: f32,
     pub blur: Option<usize>,
+    pub frame: Frame,
 }
 
 impl Spot {
@@ -62,6 +79,41 @@ impl Spot {
         Rect::new(left, top, right, bottom)
     }
 
+    /// Whether pixel `x`, `y` is in the lit area: in its ellipse, when it's one.
+    pub fn covers(&self, x: i32, y: i32, bounds: Rect) -> bool {
+        let lit = self.lit(bounds);
+        let point = (x as f32 + 0.5, y as f32 + 0.5);
+        lit.contains(x, y)
+            && (self.frame != Frame::Ellipse || ellipse(point, center(lit), radii(lit)) <= 0.0)
+    }
+
+    /// The line of Kata's ink around a framed focus, as thick as a figure's on a
+    /// capture of `bounds` taken at display `scale`. Its outer edge is the lit area's,
+    /// so that edge hides under it.
+    pub fn border(&self, bounds: Rect, scale: f32) -> Option<Figure> {
+        let form = match self.frame {
+            Frame::Soft => return None,
+            Frame::Rectangle => Form::Rectangle,
+            Frame::Ellipse => Form::Ellipse,
+        };
+        let lit = self.lit(bounds);
+        Some(Figure {
+            form,
+            from: (lit.left, lit.top),
+            to: (lit.right - 1, lit.bottom - 1),
+            line: Figure::line(bounds, scale),
+        })
+    }
+
+    /// The radius of the lit area's corners, in pixels: as round as its border's, and
+    /// none for an ellipse.
+    pub fn corner(&self, bounds: Rect, scale: f32) -> f32 {
+        match self.border(bounds, scale) {
+            Some(border) => border.corner(),
+            None => FOCUS_CORNER * scale,
+        }
+    }
+
     /// The area that, magnified by `zoom`, fills `lit`.
     pub fn source(lit: Rect, zoom: f32) -> Rect {
         let shrink = |start: i32, grown: i32| {
@@ -73,6 +125,11 @@ impl Spot {
         let (top, bottom) = shrink(lit.top, lit.height());
         Rect::new(left, top, right, bottom)
     }
+}
+
+/// Half the width and height of `rect`.
+pub(crate) fn radii(rect: Rect) -> (f32, f32) {
+    (rect.width() as f32 / 2.0, rect.height() as f32 / 2.0)
 }
 
 /// A numbered marker that shows the order to follow. Steps count from 1, in the
@@ -214,7 +271,10 @@ impl Edits {
             .rev()
             .filter(|&index| self.figures[index].touches(x, y, reach))
             .map(Shape::Figure);
-        let focus = Some(Shape::Focus).filter(under);
+        let focus = self
+            .focus
+            .filter(|focus| focus.spot().covers(x, y, bounds))
+            .map(|_| Shape::Focus);
         let blurs = (0..self.blurs.len()).rev().map(Shape::Blur).filter(under);
         steps.chain(figures).chain(focus).chain(blurs).next()
     }
@@ -387,6 +447,7 @@ mod tests {
             rect,
             zoom,
             blur: None,
+            frame: Frame::Soft,
         };
         assert_eq!(
             spot(Rect::new(40, 40, 60, 60), 2.0).lit(bounds),
@@ -417,6 +478,7 @@ mod tests {
                 rect: Rect::new(40, 40, 50, 50),
                 level: 3,
                 blur: None,
+                frame: Frame::Soft,
             }),
             figures: Vec::new(),
             steps: vec![Step {
@@ -432,6 +494,49 @@ mod tests {
     }
 
     #[test]
+    fn an_ellipse_focus_is_reached_only_inside_its_ellipse() {
+        let bounds = Rect::new(0, 0, 100, 100);
+        let mut edits = Edits {
+            focus: Some(Focus {
+                rect: Rect::new(20, 20, 80, 60),
+                level: 0,
+                blur: None,
+                frame: Frame::Ellipse,
+            }),
+            ..Edits::default()
+        };
+        assert_eq!(edits.shape_at(50, 21, 0.0, bounds), Some(Shape::Focus));
+        assert_eq!(edits.shape_at(21, 21, 0.0, bounds), None);
+        if let Some(focus) = &mut edits.focus {
+            focus.frame = Frame::Rectangle;
+        }
+        assert_eq!(edits.shape_at(21, 21, 0.0, bounds), Some(Shape::Focus));
+    }
+
+    #[test]
+    fn a_framed_focus_is_bordered_along_its_edge() {
+        let bounds = Rect::new(0, 0, 400, 300);
+        let spot = |frame| Spot {
+            rect: Rect::new(40, 30, 200, 130),
+            zoom: 1.0,
+            blur: None,
+            frame,
+        };
+        assert_eq!(spot(Frame::Soft).border(bounds, 1.0), None);
+        for frame in [Frame::Rectangle, Frame::Ellipse] {
+            let border = spot(frame).border(bounds, 1.0).unwrap();
+            assert_eq!(border.rect(), spot(frame).lit(bounds));
+            assert_eq!(border.line, Figure::line(bounds, 1.0));
+        }
+        // Its corners are as round as its border's, and an ellipse has none.
+        let rectangle = spot(Frame::Rectangle);
+        let border = rectangle.border(bounds, 1.0).unwrap();
+        assert_eq!(rectangle.corner(bounds, 1.0), border.corner());
+        assert_eq!(spot(Frame::Ellipse).corner(bounds, 1.0), 0.0);
+        assert_eq!(spot(Frame::Soft).corner(bounds, 2.0), FOCUS_CORNER * 2.0);
+    }
+
+    #[test]
     fn reshaping_a_focus_lights_the_new_outline() {
         let bounds = Rect::new(0, 0, 200, 200);
         let mut edits = Edits {
@@ -440,6 +545,7 @@ mod tests {
                 rect: Rect::new(10, 10, 30, 30),
                 level: 2,
                 blur: Some(1),
+                frame: Frame::Soft,
             }),
             figures: Vec::new(),
             steps: Vec::new(),
@@ -468,6 +574,7 @@ mod tests {
             rect: Rect::new(0, 0, 10, 10),
             level: 0,
             blur: None,
+            frame: Frame::Soft,
         });
         edits.remove(Shape::Blur(3));
         edits.remove(Shape::Focus);
@@ -577,6 +684,7 @@ mod tests {
             rect,
             zoom: 1.5,
             blur: None,
+            frame: Frame::Soft,
         }
         .lit(Rect::new(0, 0, 200, 200));
         assert_eq!(Spot::source(lit, 1.5), rect);

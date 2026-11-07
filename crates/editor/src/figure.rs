@@ -1,8 +1,9 @@
 //! Draws the figures: rectangles, ellipses and arrows, as lines of Kata's ink.
 
 use std::f32::consts::FRAC_1_SQRT_2;
+use std::thread;
 
-use crate::geometry::{RoundedRect, center, segment};
+use crate::geometry::{RoundedRect, center, ellipse, segment};
 use crate::ink::Ink;
 use crate::{Figure, Form, Image, Rect};
 
@@ -22,6 +23,8 @@ const HEAD_SHARE: f32 = 0.4;
 const SMALLEST_HEAD: f32 = 0.6;
 /// The rows an arrow is inked in at once.
 const BAND: i32 = 64;
+/// The fewest rows worth a core of their own.
+const CORE_ROWS: usize = 32;
 
 /// Everything that changes when a figure turns from `old` into `new`: the lines and
 /// shadows of both. While a figure is dragged the two mostly overlap, so each
@@ -39,16 +42,37 @@ pub fn change(old: Option<&Figure>, new: Option<&Figure>) -> Vec<Rect> {
     change
 }
 
-/// Draws `figure` over what `image` shows, only inside `area`.
-pub fn draw(image: &mut Image, figure: &Figure, area: Rect) {
+/// Draws `figure` over what `image` shows, only inside `area`, in bands of rows inked
+/// at once on `cores` cores.
+pub fn draw(image: &mut Image, figure: &Figure, area: Rect, cores: usize) {
     let trace = Trace::new(figure);
-    for part in trace.parts() {
-        if let Some(part) = part.intersect(&area) {
-            trace
-                .ink
-                .paint(image, part, |point| trace.outside(point), |_| 0.0);
+    let parts: Vec<Rect> = (trace.parts().iter())
+        .filter_map(|part| part.intersect(&area))
+        .collect();
+    let Some(all) = parts.iter().copied().reduce(|all, part| all.union(&part)) else {
+        return;
+    };
+    let stride = image.stride();
+    let band = (all.height() as usize).div_ceil(cores).max(CORE_ROWS);
+    let rows = all.top as usize * stride..all.bottom as usize * stride;
+    let (trace, parts) = (&trace, &parts);
+    thread::scope(|scope| {
+        for (n, rows) in image.pixels_mut()[rows]
+            .chunks_mut(band * stride)
+            .enumerate()
+        {
+            let top = all.top + (n * band) as i32;
+            let band = Rect::new(all.left, top, all.right, top + (rows.len() / stride) as i32);
+            scope.spawn(move || {
+                for part in parts.iter().filter_map(|part| part.intersect(&band)) {
+                    for span in trace.spans(part) {
+                        let outside = |point| trace.outside(point);
+                        (trace.ink).paint_rows(rows, top, stride, span, outside, |_| 0.0);
+                    }
+                }
+            });
         }
-    }
+    });
 }
 
 /// A figure's line, ready to measure.
@@ -171,6 +195,46 @@ impl Trace {
             }
         }
     }
+
+    /// The pixels of `part` the ink can reach. Around an ellipse, row by row, only the
+    /// ring along its line: a frame around its hollow still holds far more.
+    fn spans(&self, part: Rect) -> Vec<Rect> {
+        let Path::Ellipse(center, radii) = self.path else {
+            return vec![part];
+        };
+        // Scaled by `k` around its center, the ellipse lies `(k - 1)` times its
+        // smaller radius or more from it, as an edge measures, so the ink stays
+        // between these two.
+        let reach = (self.half + self.ink.margin() as f32) / radii.0.min(radii.1);
+        // How far from the center a ring of scale `k` spans at row `y`, if it does.
+        let half = |k: f32, y: i32| {
+            let (across, down) = (radii.0 * k, radii.1 * k);
+            let dy = (y as f32 + 0.5 - center.1) / down;
+            (k > 0.0 && dy.abs() < 1.0).then(|| across * (1.0 - dy * dy).sqrt())
+        };
+        let mut spans = Vec::new();
+        for y in part.top..part.bottom {
+            let Some(outer) = half(1.0 + reach, y) else {
+                continue;
+            };
+            // A pixel more on each side, past rounding.
+            let left = |at: f32| (at - 0.5).floor() as i32;
+            let right = |at: f32| (at + 0.5).ceil() as i32;
+            let (start, end) = (left(center.0 - outer), right(center.0 + outer));
+            let row = |start: i32, end: i32| {
+                let span = Rect::new(start, y, end, y + 1);
+                span.intersect(&part)
+            };
+            match half(1.0 - reach, y) {
+                Some(inner) if right(center.0 - inner) < left(center.0 + inner) => {
+                    spans.extend(row(start, right(center.0 - inner)));
+                    spans.extend(row(left(center.0 + inner), end));
+                }
+                _ => spans.extend(row(start, end)),
+            }
+        }
+        spans
+    }
 }
 
 /// A rectangle's outer edge, its corners rounded.
@@ -231,19 +295,6 @@ fn triangle(point: (f32, f32), corners: [(f32, f32); 3]) -> f32 {
     if inside { -distance } else { distance }
 }
 
-/// How far `point` lies outside the ellipse around `center` with `radii`; negative
-/// inside. Exact on the ellipse and close beside it, which is all a line needs.
-fn ellipse(point: (f32, f32), center: (f32, f32), radii: (f32, f32)) -> f32 {
-    let (x, y) = (point.0 - center.0, point.1 - center.1);
-    let k0 = ((x / radii.0).powi(2) + (y / radii.1).powi(2)).sqrt();
-    let k1 = ((x / radii.0.powi(2)).powi(2) + (y / radii.1.powi(2)).powi(2)).sqrt();
-    if k1 > 0.0 {
-        k0 * (k0 - 1.0) / k1
-    } else {
-        -radii.0.min(radii.1)
-    }
-}
-
 /// The columns the part of line `a` to `b` between rows `top` and `bottom` spans.
 fn span((a, b): ((f32, f32), (f32, f32)), top: f32, bottom: f32) -> Option<(f32, f32)> {
     let (low, high) = if a.1 <= b.1 { (a, b) } else { (b, a) };
@@ -270,4 +321,42 @@ fn frame(outer: Rect, hollow: Rect) -> Vec<Rect> {
         Rect::new(hollow.right, hollow.top, outer.right, hollow.bottom),
         Rect::new(outer.left, hollow.bottom, outer.right, outer.bottom),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ellipse_inked_along_its_ring_alone_looks_the_same() {
+        let (width, height) = (400, 240);
+        let pixels = (0..width * height * 4).map(|at| (at * 37 % 251) as u8);
+        let image = Image::new(width, height, pixels.collect());
+        let bounds = image.bounds();
+        for (from, to, line) in [
+            ((20, 30), (380, 150), 6),
+            ((50, 40), (90, 64), 12),
+            ((10, 10), (16, 200), 4),
+            ((200, 100), (203, 102), 8),
+        ] {
+            let figure = Figure {
+                form: Form::Ellipse,
+                from,
+                to,
+                line,
+            };
+            let mut ringed = image.clone();
+            draw(&mut ringed, &figure, bounds, 4);
+            let mut whole = image.clone();
+            let trace = Trace::new(&figure);
+            for part in trace
+                .parts()
+                .iter()
+                .filter_map(|part| part.intersect(&bounds))
+            {
+                (trace.ink).paint(&mut whole, part, |point| trace.outside(point), |_| 0.0);
+            }
+            assert!(ringed == whole, "{figure:?}");
+        }
+    }
 }

@@ -46,7 +46,9 @@ mostrar siempre.
 1. **Desenfocar:** se arrastra para tapar uno o varios rectángulos. Intensidad: Suave, Medio o
    Fuerte. El texto desenfocado no se puede recuperar.
 2. **Foco:** se arrastra sobre un área para resaltarla y oscurecer el resto. Hay un solo foco: uno
-   nuevo reemplaza al anterior. Ampliación: 100 %, 125 %, 150 % o 200 %. Con la gota de al lado,
+   nuevo reemplaza al anterior. Los iconos del principio eligen su forma: **suave**, sin borde, o
+   **rectángulo** y **elipse**, con la línea naranja de las Formas. Ampliación: 100 %, 125 %, 150 %
+   o 200 %. Con la gota de al lado,
    **desenfoca también lo de alrededor**, con los mismos niveles de Desenfocar.
 3. **Pasos:** cada clic pone el número siguiente, en un círculo naranja. Si se borra uno, los
    demás se renumeran. Su tamaño se ajusta solo a la captura; al lado está el **tamaño**

@@ -6,8 +6,9 @@ use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::thread;
 
-use crate::geometry::{RoundedRect, center};
-use crate::{BLUR_LEVELS, Blur, Figure, Image, Rect, Spot, Step, figure, marker};
+use crate::document::radii;
+use crate::geometry::{RoundedRect, center, ellipse};
+use crate::{BLUR_LEVELS, Blur, Figure, Frame, Image, Rect, Spot, Step, figure, marker};
 
 /// How far each blur level spreads every pixel, in pixels at 100 % scale: the
 /// standard deviation of the Gaussian blur it follows.
@@ -25,8 +26,6 @@ const GRAIN: f32 = 3.0;
 const GRAIN_RUN: usize = 4096;
 /// How much light the image keeps around the focus.
 const FOCUS_LIGHT: f32 = 0.5;
-/// The lit area's corner radius at 100 %.
-pub const FOCUS_CORNER: f32 = 8.0;
 /// A magnified focus floats over the image: its shadow's reach and drop at 100 %,
 /// and its darkness.
 const SHADOW_REACH: f32 = 24.0;
@@ -228,7 +227,8 @@ impl Renderer {
         changed
     }
 
-    /// Everything a focus changes besides the dimming: its lit area and shadow.
+    /// Everything a focus changes besides the dimming: its lit area, its shadow and its
+    /// border.
     fn footprint(&self, spot: Spot) -> Rect {
         let bounds = self.base.bounds();
         let reach = if spot.zoom > 1.0 {
@@ -237,18 +237,25 @@ impl Renderer {
             0
         };
         let lit = spot.lit(bounds).inflate(reach + 1);
-        lit.intersect(&bounds).unwrap_or_default()
+        let border = spot.border(bounds, self.scale);
+        let ink = figure::change(None, border.as_ref());
+        let all = ink.iter().fold(lit, |all, part| all.union(part));
+        all.intersect(&bounds).unwrap_or_default()
     }
 
-    /// Redraws `area` of the output: `base` in the focus's light, with the figures and
-    /// then the steps on top.
+    /// Redraws `area` of the output: `base` in the focus's light, with its border, the
+    /// figures and then the steps on top.
     fn compose(&mut self, area: Rect) {
-        let Some(area) = area.intersect(&self.base.bounds()) else {
+        let bounds = self.base.bounds();
+        let Some(area) = area.intersect(&bounds) else {
             return;
         };
         self.light(area);
+        if let Some(border) = self.focus.and_then(|spot| spot.border(bounds, self.scale)) {
+            figure::draw(&mut self.output, &border, area, self.cores);
+        }
         for figure in &self.figures {
-            figure::draw(&mut self.output, figure, area);
+            figure::draw(&mut self.output, figure, area, self.cores);
         }
         for (at, step) in self.steps.iter().enumerate() {
             marker::draw(&mut self.output, step.rect, at + 1, area);
@@ -290,11 +297,9 @@ impl Renderer {
 struct Light {
     /// Where the magnified area shows.
     lit: Rect,
-    shape: RoundedRect,
+    edge: Edge,
     /// The shadow under a magnified area, and its reach.
-    shadow: Option<(RoundedRect, f32)>,
-    /// The rows clear of the corners, where all of `lit` is fully lit.
-    solid: Range<i32>,
+    shadow: Option<(Edge, f32)>,
     /// Where each column and row of `lit` reads from.
     columns: Vec<Tap>,
     rows: Vec<Tap>,
@@ -303,21 +308,21 @@ struct Light {
 impl Light {
     fn new(spot: Spot, bounds: Rect, scale: f32) -> Self {
         let lit = spot.lit(bounds);
-        let shape = RoundedRect::new(lit, FOCUS_CORNER * scale);
-        let corner = shape.radius.ceil() as i32;
+        let edge = |rect: Rect| match spot.frame {
+            Frame::Ellipse => Edge::Oval(center(rect), radii(rect)),
+            Frame::Soft | Frame::Rectangle => {
+                Edge::Round(RoundedRect::new(rect, spot.corner(bounds, scale)))
+            }
+        };
         let shadow = (spot.zoom > 1.0).then(|| {
             let dropped = lit.offset(0, (SHADOW_DROP * scale).round() as i32);
-            (
-                RoundedRect::new(dropped, FOCUS_CORNER * scale),
-                SHADOW_REACH * scale,
-            )
+            (edge(dropped), SHADOW_REACH * scale)
         });
         let (source, target) = (center(spot.rect), center(lit));
         Self {
             lit,
-            shape,
+            edge: edge(lit),
             shadow,
-            solid: lit.top + corner..lit.bottom - corner,
             columns: taps(
                 lit.left..lit.right,
                 target.0,
@@ -358,10 +363,11 @@ impl Light {
         } else {
             0..0
         };
-        let solid = if self.solid.contains(&y) {
-            column(self.lit.left)..column(self.lit.right)
-        } else {
+        let inner = self.inner(y);
+        let solid = if inner.is_empty() {
             near.end..near.end
+        } else {
+            column(inner.start)..column(inner.end)
         };
         dim(&from[..near.start], &mut to[..near.start]);
         dim(&from[near.end..], &mut to[near.end..]);
@@ -370,6 +376,37 @@ impl Light {
         }
         let left = area.left + solid.start as i32;
         self.lens(base, left, y, &mut to[solid]);
+    }
+
+    /// The columns of row `y` fully inside the lit area.
+    fn inner(&self, y: i32) -> Range<i32> {
+        let lit = self.lit;
+        if !(lit.top..lit.bottom).contains(&y) {
+            return 0..0;
+        }
+        let (left, right) = match &self.edge {
+            Edge::Round(shape) => {
+                let corner = shape.radius.ceil() as i32;
+                let clear = (lit.top + corner..lit.bottom - corner).contains(&y);
+                let inset = if clear { 0 } else { corner };
+                (lit.left + inset, lit.right - inset)
+            }
+            Edge::Oval(center, radii) => {
+                // Inside this smaller ellipse, every pixel lies half a pixel in or more,
+                // so it's fully lit.
+                let shrink = 1.0 - 0.5 / radii.0.min(radii.1);
+                let (across, down) = (radii.0 * shrink, radii.1 * shrink);
+                let dy = y as f32 + 0.5 - center.1;
+                if shrink <= 0.0 || dy.abs() >= down {
+                    return 0..0;
+                }
+                let half = across * (1.0 - (dy / down).powi(2)).sqrt();
+                let left = (center.0 - half - 0.5).ceil() as i32;
+                let right = (center.0 + half - 0.5).floor() as i32 + 1;
+                (left.max(lit.left), right.min(lit.right))
+            }
+        };
+        left..right.max(left)
     }
 
     /// Fills `to` with the magnified pixels of row `y`, from column `left` on, all
@@ -408,7 +445,7 @@ impl Light {
             keep *= 1.0 - SHADOW_DARKNESS * fade * fade;
         }
         let coverage = if self.lit.contains(x, y) {
-            (0.5 - self.shape.distance(point)).clamp(0.0, 1.0)
+            (0.5 - self.edge.distance(point)).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -421,6 +458,23 @@ impl Light {
             (outside + (f32::from(inside[0][channel]) - outside) * coverage).round() as u8
         };
         [blend(0), blend(1), blend(2), u8::MAX]
+    }
+}
+
+/// The edge of a lit area or of its shadow.
+enum Edge {
+    Round(RoundedRect),
+    /// An ellipse's center and radii.
+    Oval((f32, f32), (f32, f32)),
+}
+
+impl Edge {
+    /// How far `point` lies outside the edge; negative inside.
+    fn distance(&self, point: (f32, f32)) -> f32 {
+        match self {
+            Self::Round(shape) => shape.distance(point),
+            Self::Oval(center, radii) => ellipse(point, *center, *radii),
+        }
     }
 }
 
@@ -808,6 +862,7 @@ mod tests {
             rect: Rect::new(10, 10, 50, 40),
             zoom: 1.0,
             blur: None,
+            frame: Frame::Soft,
         };
         renderer.update(&image, &[], Some(focus), &[], &[]);
         let output = renderer.output();
@@ -824,6 +879,7 @@ mod tests {
             rect: Rect::new(10, 10, 50, 40),
             zoom: 1.0,
             blur: Some(0),
+            frame: Frame::Soft,
         };
         renderer.update(&image, &[], Some(focus), &[], &[]);
         let output = renderer.output();
@@ -846,6 +902,7 @@ mod tests {
             rect: Rect::new(24, 16, 40, 32),
             zoom: ZOOMS[3],
             blur: None,
+            frame: Frame::Soft,
         };
         renderer.update(&image, &[], Some(focus), &[], &[]);
         // The lit area spans columns 16..48 around the same center, and each column
@@ -858,6 +915,78 @@ mod tests {
     }
 
     #[test]
+    fn a_framed_focus_is_edged_in_ink() {
+        let white = [255; 4].repeat(100 * 100);
+        let image = Image::new(100, 100, white);
+        for frame in [Frame::Rectangle, Frame::Ellipse] {
+            let mut renderer = Renderer::new(&image, 1.0);
+            let focus = Spot {
+                rect: Rect::new(10, 10, 90, 70),
+                zoom: 1.0,
+                blur: None,
+                frame,
+            };
+            renderer.update(&image, &[], Some(focus), &[], &[]);
+            let output = renderer.output();
+            // Across the left side: the edge, the orange, the edge, and the lit area;
+            // and away from it, the dimmed image. An ellipse curves, so its edges
+            // take a hint of orange.
+            let white = |x| pixel(output, x, 40).iter().all(|&v| v >= 252);
+            assert!(white(10) && white(15), "{frame:?}");
+            assert_eq!(pixel(output, 12, 40), [34, 90, 236, 255], "{frame:?}");
+            assert_eq!(pixel(output, 50, 40), [255; 4], "{frame:?}");
+            assert_eq!(pixel(output, 2, 40), [128, 128, 128, 255], "{frame:?}");
+        }
+    }
+
+    #[test]
+    fn an_ellipse_focus_leaves_its_corners_dim() {
+        let image = stripes();
+        let mut renderer = Renderer::new(&image, 1.0);
+        let focus = Spot {
+            rect: Rect::new(4, 4, 60, 44),
+            zoom: 1.0,
+            blur: None,
+            frame: Frame::Ellipse,
+        };
+        renderer.update(&image, &[], Some(focus), &[], &[]);
+        let output = renderer.output();
+        assert_eq!(pixel(output, 5, 5), [128, 128, 128, 255]);
+        assert_eq!(pixel(output, 32, 24), pixel(&image, 32, 24));
+        assert_eq!(pixel(output, 33, 24), pixel(&image, 33, 24));
+    }
+
+    #[test]
+    fn what_is_drawn_whole_is_fully_inside() {
+        let bounds = Rect::new(0, 0, 200, 200);
+        let rects = [
+            Rect::new(20, 20, 120, 80),
+            Rect::new(50, 10, 53, 90),
+            Rect::new(10, 50, 190, 52),
+        ];
+        for rect in rects {
+            for frame in [Frame::Soft, Frame::Rectangle, Frame::Ellipse] {
+                for zoom in [1.0, 1.5] {
+                    let spot = Spot {
+                        rect,
+                        zoom,
+                        blur: None,
+                        frame,
+                    };
+                    let light = Light::new(spot, bounds, 1.25);
+                    for y in bounds.top - 1..=bounds.bottom {
+                        for x in light.inner(y) {
+                            let point = (x as f32 + 0.5, y as f32 + 0.5);
+                            let distance = light.edge.distance(point);
+                            assert!(distance <= -0.5 + 1e-4, "{spot:?} {x},{y}: {distance}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn redrawing_only_changes_matches_drawing_from_scratch() {
         let image = stripes();
         let mark = |left, top| Step {
@@ -867,6 +996,7 @@ mod tests {
             rect: Rect::new(20, 20, 36, 36),
             zoom,
             blur: Some(level),
+            frame: Frame::Soft,
         };
         let figure = |form, from, to| Figure {
             form,
@@ -880,8 +1010,8 @@ mod tests {
             figure(Form::Arrow, (60, 40), (24, 12)),
         );
         // Each frame's blurs, focus, figures and steps.
-        type Frame<'a> = (&'a [Blur], Option<Spot>, &'a [Figure], &'a [Step]);
-        let frames: [Frame; 10] = [
+        type Scene<'a> = (&'a [Blur], Option<Spot>, &'a [Figure], &'a [Step]);
+        let frames: [Scene; 10] = [
             (
                 &[blur(Rect::new(0, 0, 20, 20))],
                 None,
@@ -897,6 +1027,7 @@ mod tests {
                     rect: Rect::new(20, 20, 40, 40),
                     zoom: 1.5,
                     blur: None,
+                    frame: Frame::Ellipse,
                 }),
                 &[square, arrow],
                 &[mark(30, 4), mark(2, 30)],
@@ -907,6 +1038,7 @@ mod tests {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 2.0,
                     blur: None,
+                    frame: Frame::Rectangle,
                 }),
                 &[ring, arrow],
                 &[mark(2, 30)],
@@ -920,6 +1052,7 @@ mod tests {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 1.0,
                     blur: None,
+                    frame: Frame::Ellipse,
                 }),
                 &[figure(Form::Arrow, (8, 40), (8, 40)), ring],
                 &[mark(2, 30), mark(40, 30)],
