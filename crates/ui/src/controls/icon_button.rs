@@ -1,4 +1,5 @@
-//! A subtle button that shows only a glyph, such as a title bar's back button.
+//! A subtle button that shows a glyph, such as a title bar's back button, and maybe
+//! what it does after it.
 
 use std::time::Instant;
 
@@ -9,15 +10,31 @@ use crate::{
 };
 
 const RADIUS: f32 = 4.0;
+/// Inside a button that says what it does: the room at each end, and between the
+/// glyph and its words.
+const PADDING: f32 = 8.0;
+const GAP: f32 = 6.0;
+
+/// How the button sits where it's placed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fit {
+    /// On its own, with rounded corners.
+    Alone,
+    /// Filling its part of the title bar edge to edge, square, as the caption
+    /// buttons beside it do.
+    Bleeds,
+    /// Round at both ends, inside a capsule.
+    Round,
+}
 
 pub struct IconButton {
     glyph: Label,
+    /// What it does, after the glyph, when it says so.
+    label: Option<Label>,
     /// What assistive technologies call it, as the glyph says nothing to them.
     name: String,
     area: Area,
-    /// Whether it fills its part of the title bar edge to edge, square, as the
-    /// caption buttons do.
-    bleeds: bool,
+    fit: Fit,
     hovered: bool,
     pressed: bool,
 }
@@ -30,28 +47,63 @@ impl IconButton {
     pub fn new(glyph: Label, name: &str) -> Self {
         Self {
             glyph,
+            label: None,
             name: name.to_owned(),
             area: Area::default(),
-            bleeds: false,
+            fit: Fit::Alone,
             hovered: false,
             pressed: false,
         }
     }
 
+    /// Says what it does, in `label`, after the glyph.
+    pub fn labeled(glyph: Label, label: Label) -> Self {
+        Self {
+            name: label.text.clone(),
+            label: Some(label),
+            ..Self::new(glyph, "")
+        }
+    }
+
+    pub fn width(&self) -> f32 {
+        match &self.label {
+            Some(label) => PADDING + self.glyph.width + GAP + label.width + PADDING,
+            None => Self::WIDTH,
+        }
+    }
+
     pub fn place(&mut self, left: f32, top: f32) {
-        self.area = Area::new(left, top, Self::WIDTH, Self::HEIGHT);
-        self.bleeds = false;
+        self.area = Area::new(left, top, self.width(), Self::HEIGHT);
+        self.fit = Fit::Alone;
     }
 
     /// Fills `area` of the title bar edge to edge, square, as the caption buttons
     /// beside it do.
     pub fn bleed(&mut self, area: Area) {
         self.area = area;
-        self.bleeds = true;
+        self.fit = Fit::Bleeds;
+    }
+
+    /// Places it `height` DIPs tall and round at both ends, inside a capsule.
+    pub fn round(&mut self, left: f32, top: f32, height: f32) {
+        self.area = Area::new(left, top, self.width(), height);
+        self.fit = Fit::Round;
     }
 
     pub fn area(&self) -> Area {
         self.area
+    }
+
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    fn radius(&self) -> f32 {
+        match self.fit {
+            Fit::Alone => RADIUS,
+            Fit::Bleeds => 0.0,
+            Fit::Round => self.area.height / 2.0,
+        }
     }
 }
 
@@ -83,8 +135,8 @@ impl Control for IconButton {
 
     fn focus_area(&self) -> (Area, f32) {
         // Inside an edge-to-edge button, as the window's edge would cut a ring around it.
-        let inset = if self.bleeds { -4.0 } else { 0.0 };
-        (self.area.inflate(inset), RADIUS)
+        let inset = if self.fit == Fit::Bleeds { -4.0 } else { 0.0 };
+        (self.area.inflate(inset), self.radius())
     }
 
     fn act(&mut self, action: Action) -> bool {
@@ -111,10 +163,19 @@ impl Control for IconButton {
             (Default::default(), palette.text)
         };
         let area = painter.align(self.area);
-        let radius = if self.bleeds { 0.0 } else { RADIUS };
-        painter.fill(area, radius, fill);
-        let left = area.left + (area.width - self.glyph.width) / 2.0;
-        painter.text(&self.glyph, left, area.middle(), ink);
+        painter.fill(area, self.radius(), fill);
+        match &self.label {
+            Some(label) => {
+                let left = area.left + PADDING;
+                painter.text(&self.glyph, left, area.middle(), ink);
+                let left = left + self.glyph.width + GAP;
+                painter.text(label, left, area.middle(), ink);
+            }
+            None => {
+                let left = area.left + (area.width - self.glyph.width) / 2.0;
+                painter.text(&self.glyph, left, area.middle(), ink);
+            }
+        }
     }
 
     fn is_animating(&self, _now: Instant) -> bool {

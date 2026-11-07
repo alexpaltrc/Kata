@@ -68,11 +68,10 @@ impl Gpu {
         Ok(Self { surface, image })
     }
 
-    /// The card the capture shrinks into to carry it away, as a picture `scale`
-    /// pixels to the DIP.
-    pub fn card(&self, palette: &Palette, scale: f32) -> Result<Picture> {
-        let size = unsafe { self.image.GetPixelSize() };
-        let size = (size.width as f32 / scale, size.height as f32 / scale);
+    /// The card the `kept` part of the capture shrinks into to carry it away, as a
+    /// picture `scale` pixels to the DIP.
+    pub fn card(&self, palette: &Palette, scale: f32, kept: Rect) -> Result<Picture> {
+        let size = (kept.width() as f32 / scale, kept.height() as f32 / scale);
         let held = Pose::held(size, (0.0, 0.0));
         let (width, height) = (held.area().width, held.area().height);
         let (sin, cos) = LEAN.to_radians().sin_cos();
@@ -87,7 +86,7 @@ impl Gpu {
             pixels.1 as f32 / scale / 2.0 - center.1,
         );
         let drawn = self.surface.picture(palette, scale, pixels, |painter| {
-            card::draw(painter, &self.image, Pose::held(size, pointer), None);
+            card::draw(painter, &self.image, kept, Pose::held(size, pointer), None);
         })?;
         Ok(Picture {
             pixels: drawn,
@@ -122,12 +121,12 @@ impl Gpu {
 }
 
 /// What the capture shows in: a window of `window` DIPs, each `scale` pixels wide,
-/// for an image of `image` pixels, with the toolbar taking `bottom` DIPs at the
-/// bottom.
+/// for the `image` pixels kept of the capture, with the toolbar taking `bottom` DIPs
+/// at the bottom.
 #[derive(Clone, Copy)]
 pub struct Frame {
     pub window: (f32, f32),
-    pub image: (u32, u32),
+    pub image: Rect,
     pub scale: f32,
     pub bottom: f32,
 }
@@ -138,8 +137,8 @@ impl Frame {
     pub fn fit(&self) -> View {
         let room = self.room();
         let zoom = (1.0 / self.scale)
-            .min(room.0 / self.image.0 as f32)
-            .min(room.1 / self.image.1 as f32)
+            .min(room.0 / self.image.width() as f32)
+            .min(room.1 / self.image.height() as f32)
             .max(1e-3);
         self.place(View {
             left: 0.0,
@@ -160,6 +159,18 @@ impl Frame {
         })
     }
 
+    /// What `view` shows of what's kept in the room, to the nearest pixel edges: what
+    /// cropping to the view keeps.
+    pub fn in_view(&self, view: View) -> Option<Rect> {
+        let room = self.room();
+        let start = (MARGIN, TITLE_BAR + MARGIN);
+        let (left, top) = view.edge(start, self.image);
+        let end = (start.0 + room.0, start.1 + room.1);
+        let (right, bottom) = view.edge(end, self.image);
+        let rect = Rect::new(left, top, right, bottom);
+        (!rect.is_empty()).then_some(rect)
+    }
+
     /// The room for the capture, inside the margins and above the toolbar.
     fn room(&self) -> (f32, f32) {
         (
@@ -168,22 +179,33 @@ impl Frame {
         )
     }
 
-    /// `view`, centered along each side the capture fits, and filling the room along
-    /// each side it doesn't.
+    /// `view`, with what's kept centered along each side it fits, and filling the
+    /// room along each side it doesn't.
     fn place(&self, view: View) -> View {
         let room = self.room();
         let snap = |value: f32| (value * self.scale).round() / self.scale;
-        let place = |at: f32, start: f32, room: f32, pixels: u32| {
-            let size = pixels as f32 * view.zoom;
-            snap(if size <= room {
+        // Where the capture's edge goes, at `at` before, for what's kept from pixel
+        // `first` to `last` to show from `start` across `room`.
+        let place = |at: f32, start: f32, room: f32, first: i32, last: i32| {
+            let size = (last - first) as f32 * view.zoom;
+            let skipped = first as f32 * view.zoom;
+            let kept = if size <= room {
                 start + (room - size) / 2.0
             } else {
-                at.clamp(start + room - size, start)
-            })
+                (at + skipped).clamp(start + room - size, start)
+            };
+            snap(kept) - skipped
         };
+        let image = self.image;
         View {
-            left: place(view.left, MARGIN, room.0, self.image.0),
-            top: place(view.top, TITLE_BAR + MARGIN, room.1, self.image.1),
+            left: place(view.left, MARGIN, room.0, image.left, image.right),
+            top: place(
+                view.top,
+                TITLE_BAR + MARGIN,
+                room.1,
+                image.top,
+                image.bottom,
+            ),
             zoom: view.zoom,
         }
     }
@@ -202,7 +224,7 @@ pub struct View {
 impl View {
     /// The view `progress` of the way to `to`. A capture pixel both show in the same
     /// place stays there all the way.
-    fn toward(self, to: Self, progress: f32) -> Self {
+    pub fn toward(self, to: Self, progress: f32) -> Self {
         let mix = |from: f32, to: f32| from + (to - from) * progress;
         Self {
             left: mix(self.left, to.left),
@@ -218,6 +240,16 @@ impl View {
             self.top + rect.top as f32 * self.zoom,
             rect.width() as f32 * self.zoom,
             rect.height() as f32 * self.zoom,
+        )
+    }
+
+    /// Where `part`, in capture pixels and fractions of them, shows.
+    pub fn span(&self, part: Area) -> Area {
+        Area::new(
+            self.left + part.left * self.zoom,
+            self.top + part.top * self.zoom,
+            part.width * self.zoom,
+            part.height * self.zoom,
         )
     }
 
@@ -360,7 +392,7 @@ mod tests {
     /// A 1000 x 500 window at 100 %, for a capture twice as big.
     const FRAME: Frame = Frame {
         window: (1000.0, 500.0),
-        image: (1904, 856),
+        image: Rect::new(0, 0, 1904, 856),
         scale: 1.0,
         bottom: 124.0,
     };
@@ -387,5 +419,41 @@ mod tests {
         let zoomed = FRAME.zoom(FRAME.fit(), 4.0, (0.0, TITLE_BAR));
         let capture = zoomed.area(Rect::new(0, 0, 1904, 856));
         assert_eq!((capture.left, capture.top), (MARGIN, TITLE_BAR + MARGIN));
+    }
+
+    #[test]
+    fn a_cropped_capture_fits_and_centers_what_it_kept() {
+        let kept = Rect::new(300, 200, 700, 400);
+        let frame = Frame {
+            image: kept,
+            ..FRAME
+        };
+        let fit = frame.fit();
+        assert_eq!(fit.zoom, 1.0);
+        let shown = fit.area(kept);
+        let room = frame.room();
+        assert_eq!(shown.left, MARGIN + (room.0 - 400.0) / 2.0);
+        assert_eq!(shown.top, TITLE_BAR + MARGIN + (room.1 - 200.0) / 2.0);
+        let zoomed = frame.zoom(fit, 4.0, (0.0, TITLE_BAR));
+        let shown = zoomed.area(kept);
+        assert_eq!((shown.left, shown.top), (MARGIN, TITLE_BAR + MARGIN));
+    }
+
+    #[test]
+    fn cropping_to_the_view_keeps_what_fills_the_room() {
+        let fit = FRAME.fit();
+        assert_eq!(FRAME.in_view(fit), Some(FRAME.image));
+        let zoomed = FRAME.zoom(fit, 4.0, (0.0, TITLE_BAR));
+        let kept = FRAME.in_view(zoomed).unwrap();
+        let room = FRAME.room();
+        assert_eq!((kept.left, kept.top), (0, 0));
+        let shown = zoomed.area(kept);
+        assert!((shown.width - room.0).abs() <= zoomed.zoom / 2.0);
+        assert!((shown.height - room.1).abs() <= zoomed.zoom / 2.0);
+        let frame = Frame {
+            image: kept,
+            ..FRAME
+        };
+        assert_eq!(frame.in_view(frame.fit()), Some(kept));
     }
 }

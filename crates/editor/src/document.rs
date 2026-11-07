@@ -234,6 +234,8 @@ pub struct Edits {
     pub focus: Option<Focus>,
     pub figures: Vec<Figure>,
     pub steps: Vec<Step>,
+    /// The part of the image kept, once it's cropped.
+    pub crop: Option<Rect>,
 }
 
 /// One thing the user drew: a blur, a figure or a step, by its place in `Edits`, or
@@ -247,6 +249,24 @@ pub enum Shape {
 }
 
 impl Edits {
+    /// The part of an image of `bounds` that's kept: all of it, unless it's cropped.
+    pub fn kept(&self, bounds: Rect) -> Rect {
+        self.crop
+            .and_then(|crop| crop.intersect(&bounds))
+            .unwrap_or(bounds)
+    }
+
+    /// Keeps only `rect` of an image of `bounds`, and lets go of the shapes left
+    /// wholly outside it, so the steps left count from 1 again.
+    pub fn crop_to(&mut self, rect: Rect, bounds: Rect) {
+        let inside = |outline: Rect| outline.intersect(&rect).is_some();
+        self.blurs.retain(|blur| inside(blur.rect));
+        self.focus = self.focus.filter(|focus| inside(focus.spot().lit(bounds)));
+        self.figures.retain(|figure| inside(figure.rect()));
+        self.steps.retain(|step| inside(step.rect));
+        self.crop = Some(rect);
+    }
+
     /// The area `shape` covers on an image of `bounds`, or `None` when it's gone.
     pub fn outline(&self, shape: Shape, bounds: Rect) -> Option<Rect> {
         match shape {
@@ -403,8 +423,7 @@ mod tests {
                 level: 1,
             }],
             focus: None,
-            figures: Vec::new(),
-            steps: Vec::new(),
+            ..Edits::default()
         }
     }
 
@@ -480,10 +499,10 @@ mod tests {
                 blur: None,
                 frame: Frame::Soft,
             }),
-            figures: Vec::new(),
             steps: vec![Step {
                 rect: Rect::new(44, 44, 60, 60),
             }],
+            ..Edits::default()
         };
         assert_eq!(edits.shape_at(10, 10, 0.0, bounds), Some(Shape::Blur(0)));
         assert_eq!(edits.shape_at(30, 30, 0.0, bounds), Some(Shape::Blur(1)));
@@ -547,8 +566,7 @@ mod tests {
                 blur: Some(1),
                 frame: Frame::Soft,
             }),
-            figures: Vec::new(),
-            steps: Vec::new(),
+            ..Edits::default()
         };
         let outline = Rect::new(100, 60, 160, 120);
         edits.reshape(Shape::Focus, outline, bounds);
@@ -598,6 +616,30 @@ mod tests {
             edits.shape_at(45, 5, 0.0, Rect::new(0, 0, 100, 100)),
             Some(Shape::Step(1))
         );
+    }
+
+    #[test]
+    fn cropping_lets_go_of_what_it_leaves_out_and_undo_brings_it_back() {
+        let bounds = Rect::new(0, 0, 100, 100);
+        let step = |left| Step {
+            rect: Rect::new(left, 0, left + 10, 10),
+        };
+        let before = Edits {
+            steps: vec![step(0), step(45), step(80)],
+            ..blurred(60)
+        };
+        let mut document = document();
+        document.commit(before.clone());
+        let mut cropped = before.clone();
+        let kept = Rect::new(40, 0, 75, 50);
+        cropped.crop_to(kept, bounds);
+        assert_eq!(cropped.steps, [step(45)]);
+        assert_eq!(cropped.blurs, before.blurs);
+        assert_eq!(cropped.kept(bounds), kept);
+        assert_eq!(before.kept(bounds), bounds);
+        document.commit(cropped);
+        document.undo();
+        assert_eq!(document.edits(), &before);
     }
 
     #[test]

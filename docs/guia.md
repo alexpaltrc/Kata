@@ -67,6 +67,9 @@ mostrar siempre.
 - **Zoom:** la rueda del ratón acerca y aleja la captura hacia donde está el cursor. `Espacio` o
   `Ctrl + 0` la devuelven a su tamaño; mientras hay zoom, una pequeña píldora encima de la barra
   lo recuerda.
+- **Recortar:** con zoom, el botón **Recortar así** de esa píldora deja solo lo que se ve. Al pasar
+  el cursor, cuatro esquinas de colores marcan lo que se queda. `Ctrl + Z` lo devuelve todo,
+  también los pasos y formas que estaban fuera.
 - Kata recuerda la herramienta y sus niveles para la siguiente captura.
 
 ## Guardar y copiar, sin pensar

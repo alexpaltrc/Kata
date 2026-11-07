@@ -2,7 +2,7 @@
 //! shadows, its light and its edge, and crossed by a glint. The editor carries
 //! captures away as one, and the welcome's Ready shows the first capture as one.
 
-use kata_editor::Image;
+use kata_editor::{Image, Rect};
 use kata_ui::{
     paint::{Area, Painter, Point},
     theme::color,
@@ -135,10 +135,10 @@ impl Pose {
     }
 }
 
-/// Draws `image` as the card posed `pose`: the more lifted off, the farther its
-/// shadows fall and the more its light and edge show. A glint crosses it `glint` of
-/// the way, if any.
-pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, pose: Pose, glint: Option<f32>) {
+/// Draws the `kept` pixels of `image` as the card posed `pose`: the more lifted off,
+/// the farther its shadows fall and the more its light and edge show. A glint
+/// crosses it `glint` of the way, if any.
+pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, kept: Rect, pose: Pose, glint: Option<f32>) {
     let Pose {
         area,
         lean,
@@ -150,7 +150,7 @@ pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, pose: Pose, glint: Option<f
             let shadow = color(0x000000, dark * lift);
             painter.cast(area, radius, blur * lift, down * lift, shadow);
         }
-        painter.clip_rounded(area, radius, || painter.bitmap(image, area));
+        painter.clip_rounded(area, radius, || painter.bitmap(image, part(kept), area));
         painter.sheen(area, radius, lift);
         if let Some(glint) = glint {
             let band = GLINT_BAND * area.width;
@@ -159,6 +159,16 @@ pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, pose: Pose, glint: Option<f
         }
         painter.rim(area, radius, RIM, lift);
     });
+}
+
+/// The `rect` of a bitmap's pixels, as `Painter::bitmap` takes it.
+pub fn part(rect: Rect) -> Area {
+    Area::new(
+        rect.left as f32,
+        rect.top as f32,
+        rect.width() as f32,
+        rect.height() as f32,
+    )
 }
 
 /// `image`, copied to the graphics card that `context` draws on.

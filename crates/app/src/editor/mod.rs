@@ -3,12 +3,14 @@
 //! change reaches the clipboard and the capture's file.
 
 mod canvas;
+mod crop;
 mod hints;
 mod icons;
 mod name;
 mod toolbar;
 
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     mem,
     path::PathBuf,
@@ -26,7 +28,7 @@ use kata_ui::{
     controls::{Action, Control},
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
-    theme::{Palette, faded},
+    theme::{Palette, color, faded},
     window::{self, WorkArea},
 };
 use windows::{
@@ -73,6 +75,7 @@ use crate::{
     strings::strings,
 };
 use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
+use crop::{Corners, Cropping};
 use toolbar::{Part, Tool, Toolbar};
 
 /// The title bar's height, in DIPs. Saving sits in it.
@@ -172,6 +175,7 @@ unsafe fn create(
         due: false,
     };
     let chip = fonts.icon('\u{E711}', 10.0)?;
+    let corners = Corners::new(graphics)?;
     let palette = Palette::current();
     let min = min_size(&toolbar);
     let image = (capture.image.width() as f32, capture.image.height() as f32);
@@ -226,6 +230,10 @@ unsafe fn create(
             chip,
             view: View::default(),
             glide: Glide::rest(View::default()),
+            cropping: None,
+            zooms: Vec::new(),
+            corners,
+            marks: Animation::idle(0.0),
             gpu: Some(gpu),
             selected: None,
             hovered: None,
@@ -411,6 +419,15 @@ struct Editor {
     /// Where the capture shows, and where it's heading as it zooms.
     view: View,
     glide: Glide,
+    /// The capture being cut to the part in view, or back, while it shows.
+    cropping: Option<Cropping>,
+    /// The views each crop still in the history started from, to zoom back to as
+    /// it's undone.
+    zooms: Vec<View>,
+    /// The corners of what cropping keeps, and how much they show as the crop
+    /// button is hovered.
+    corners: Corners,
+    marks: Animation,
     /// Made again after the graphics device goes away.
     gpu: Option<Gpu>,
     selected: Option<Shape>,
@@ -525,7 +542,7 @@ impl Editor {
                 }
                 if let Some(owner) = self.hand_back {
                     self.render_document();
-                    let thumbnail = Box::into_raw(Box::new(Thumbnail::of(self.renderer.output())));
+                    let thumbnail = Box::into_raw(Box::new(Thumbnail::of(&self.delivered())));
                     let posted = unsafe {
                         PostMessageW(
                             Some(owner),
@@ -621,6 +638,7 @@ impl Editor {
     }
 
     fn glide_to(&mut self, view: View) {
+        self.settle();
         self.glide = self.glide.retarget(view, Instant::now());
         self.toolbar.hint_zoom(view.zoom > self.frame().fit().zoom);
         self.invalidate();
@@ -660,6 +678,7 @@ impl Editor {
     }
 
     fn press(&mut self, point: Point) {
+        self.settle();
         self.end_rehearsal();
         // Getting to work first leaves the rehearsal to the pointer going over the name.
         let _ = unsafe { KillTimer(Some(self.hwnd), REHEARSE_TIMER) };
@@ -694,7 +713,7 @@ impl Editor {
                     grab: self.view.pixel(point),
                 }
             } else {
-                let Some(outline) = self.edits.outline(shape, bounds) else {
+                let Some(outline) = self.edits.outline(shape, self.whole()) else {
                     return;
                 };
                 let corners =
@@ -708,7 +727,7 @@ impl Editor {
             // A click places the next step there, and dragging carries it along.
             let grab = self.view.edge(point, bounds);
             let shape = self.add(point);
-            let Some(outline) = self.edits.outline(shape, bounds) else {
+            let Some(outline) = self.edits.outline(shape, self.whole()) else {
                 return;
             };
             Gesture::Move {
@@ -765,7 +784,7 @@ impl Editor {
                 }
                 let grabbed = on
                     .filter(|&shape| !self.fills(shape))
-                    .and_then(|shape| Some((shape, self.edits.outline(shape, bounds)?)));
+                    .and_then(|shape| Some((shape, self.edits.outline(shape, self.whole())?)));
                 self.gesture = Some(match grabbed {
                     Some((shape, outline)) => Gesture::Move {
                         shape,
@@ -928,7 +947,7 @@ impl Editor {
             VK_S if ctrl => self.save(),
             VK_C if ctrl => {
                 self.render_document();
-                export::copy(self.hwnd, self.renderer.output());
+                export::copy(self.hwnd, &self.delivered());
             }
             // The rest go to the control with the keyboard focus.
             _ => {
@@ -1050,7 +1069,7 @@ impl Editor {
 
     /// How wide the steps are at `size`, an index into `STEP_SIZES`.
     fn step_side(&self, size: usize) -> i32 {
-        Step::side(self.bounds(), self.capture_scale, size)
+        Step::side(self.whole(), self.capture_scale, size)
     }
 
     /// Gives the selected shape an option's new value. The steps all take the new size.
@@ -1058,7 +1077,7 @@ impl Editor {
         match (part, self.selected) {
             (Part::StepSize, _) => {
                 let side = self.step_side(self.toolbar.step_size());
-                self.edits.resize_steps(side, self.bounds());
+                self.edits.resize_steps(side, self.whole());
             }
             (Part::Blur, Some(Shape::Blur(index))) => {
                 if let Some(blur) = self.edits.blurs.get_mut(index) {
@@ -1109,6 +1128,7 @@ impl Editor {
             Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form | Part::Frame => {
                 self.option_changed(part)
             }
+            Part::Crop => self.crop(),
             Part::Name => self.start_naming(),
             Part::Folder => {
                 settings::hinted(Hint::Saved, true);
@@ -1202,7 +1222,7 @@ impl Editor {
         self.toolbar.control(Part::Name).cancel();
         let _ = unsafe { ReleaseCapture() };
         let card = self.gpu.as_ref().and_then(|gpu| {
-            gpu.card(&self.palette, self.scale)
+            gpu.card(&self.palette, self.scale, self.bounds())
                 .inspect_err(|error| report("drag", error))
                 .ok()
         });
@@ -1310,10 +1330,11 @@ impl Editor {
     }
 
     /// Whether something already moves, which a signal waits for: a gesture, a
-    /// card, the zoom or another signal.
+    /// card, the zoom, a crop or another signal.
     fn is_busy(&self, now: Instant) -> bool {
         self.gesture.is_some()
             || self.flight.is_some()
+            || self.cropping.is_some()
             || self.saved.is_some_and(|clock| clock.is_running(now))
             || self.glide.is_running(now)
             || self.view.zoom > self.frame().fit().zoom
@@ -1326,22 +1347,93 @@ impl Editor {
         }
     }
 
-    /// Moves through the document's history.
+    /// Moves through the document's history. A crop it undoes or makes again plays
+    /// out as cropping does.
     fn step(&mut self, step: fn(&mut Document) -> bool) {
+        self.settle();
+        let (kept, start, shapes) = (self.bounds(), self.view, self.edits.clone());
         if step(&mut self.document) {
             self.selected = None;
             self.sync();
             self.unpublished = true;
+            if self.bounds() != kept {
+                self.recrop(kept, start, shapes);
+            }
+        }
+    }
+
+    /// Crops the capture to the part in view, as the crop button asks. With all of it
+    /// in view, the zoom just fits it back.
+    fn crop(&mut self) {
+        self.settle();
+        let kept = self.bounds();
+        let Some(rect) = self.frame().in_view(self.glide.target()) else {
+            return;
+        };
+        if rect == kept {
+            return self.glide_to(self.frame().fit());
+        }
+        let shapes = self.edits.clone();
+        self.edits.crop_to(rect, self.whole());
+        (self.selected, self.hovered) = (None, None);
+        self.commit();
+        self.recrop(kept, self.view, shapes);
+    }
+
+    /// Plays the capture going from keeping `kept` to what it keeps now, from the view
+    /// at `start`: zooming out to cut it and gliding what stays into place, or zooming
+    /// back to where it was before as a crop is undone. `shapes`, those from before,
+    /// show until the cut closes or opens.
+    fn recrop(&mut self, kept: Rect, start: View, shapes: Edits) {
+        let now_kept = self.bounds();
+        let undoing = now_kept.intersect(&kept) == Some(kept);
+        let frame = self.frame();
+        let end = if undoing {
+            let back = self.zooms.pop();
+            back.map_or_else(|| frame.fit(), |view| frame.zoom(view, 1.0, (0.0, 0.0)))
+        } else {
+            self.zooms.push(self.glide.target());
+            frame.fit()
+        };
+        let sizes = if undoing {
+            (now_kept, kept)
+        } else {
+            (kept, now_kept)
+        };
+        let wide = Frame {
+            image: sizes.0,
+            ..frame
+        }
+        .fit();
+        let marked = self.marks.value(Instant::now());
+        self.cropping = Some(Cropping::new(
+            sizes,
+            undoing,
+            [start, wide, end],
+            marked,
+            shapes,
+        ));
+        self.marks = Animation::idle(0.0);
+        self.glide = Glide::rest(end);
+        self.toolbar.hint_zoom(false);
+        self.invalidate();
+    }
+
+    /// Lands the crop playing out, if one is, where it ends.
+    fn settle(&mut self) {
+        if self.cropping.take().is_some() {
+            self.view = self.glide.target();
+            self.toolbar
+                .hint_zoom(self.view.zoom > self.frame().fit().zoom);
         }
     }
 
     /// Shows the document's edits again, and nothing more.
     fn sync(&mut self) {
         self.edits = self.document.edits().clone();
-        let bounds = self.bounds();
         let selected = self
             .selected
-            .filter(|&shape| self.edits.outline(shape, bounds).is_some());
+            .filter(|&shape| self.edits.outline(shape, self.whole()).is_some());
         self.select(selected);
         // The steps all share a size, which the slider shows.
         if let Some(step) = self.edits.steps.first() {
@@ -1368,8 +1460,10 @@ impl Editor {
     /// Puts the document on the clipboard and in its file.
     fn publish(&mut self) {
         self.render_document();
-        export::copy(self.hwnd, self.renderer.output());
-        self.output.save(self.renderer.output().clone());
+        let image = self.delivered();
+        export::copy(self.hwnd, &image);
+        let image = image.into_owned();
+        self.output.save(image);
         self.unpublished = false;
         self.hints.due = self.hints.saved.is_some();
     }
@@ -1399,6 +1493,20 @@ impl Editor {
         }
     }
 
+    /// The document as it's delivered, once rendered: only what it keeps.
+    fn delivered(&self) -> Cow<'_, Image> {
+        let output = self.renderer.output();
+        match self
+            .document
+            .edits()
+            .crop
+            .and_then(|crop| output.crop(crop))
+        {
+            Some(cropped) => Cow::Owned(cropped),
+            None => Cow::Borrowed(output),
+        }
+    }
+
     fn paint(&mut self) {
         let _ = unsafe { ValidateRect(Some(self.hwnd), None) };
         let now = Instant::now();
@@ -1410,7 +1518,17 @@ impl Editor {
         if landed {
             self.flight = None;
         }
-        let view = self.glide.at(now);
+        if self
+            .cropping
+            .as_ref()
+            .is_some_and(|cropping| !cropping.is_running(now))
+        {
+            self.settle();
+        }
+        let view = match &self.cropping {
+            Some(cropping) => cropping.view(now),
+            None => self.glide.at(now),
+        };
         if view != self.view {
             self.view = view;
             // The capture moved under the pointer.
@@ -1419,17 +1537,27 @@ impl Editor {
                 self.set_cursor();
             }
         }
+        // The corners of what cropping keeps show as the crop button is hovered.
+        let marks = if self.toolbar.previews_crop() {
+            1.0
+        } else {
+            0.0
+        };
+        self.marks = self.marks.retarget(marks, motion::FAST, Easing::DECELERATE);
         let zoom = self.zoom.value(now);
-        let spot = self.edits.focus.map(|focus| Spot {
+        let edits = (self.cropping.as_ref())
+            .and_then(|cropping| cropping.shapes(now))
+            .unwrap_or(&self.edits);
+        let spot = edits.focus.map(|focus| Spot {
             zoom,
             ..focus.spot()
         });
         let changed = self.renderer.update(
             self.document.image(),
-            &self.edits.blurs,
+            &edits.blurs,
             spot,
-            &self.edits.figures,
-            &self.edits.steps,
+            &edits.figures,
+            &edits.steps,
         );
         self.stale.extend(changed);
         let fresh = self.gpu.is_none();
@@ -1454,10 +1582,17 @@ impl Editor {
             || self.lift.is_running(now)
             || self.card(now).is_some()
             || self.saved.is_some_and(|clock| clock.is_running(now))
+            || self.cropping.is_some()
+            || self.marks.is_running(now)
         {
             self.invalidate();
         }
-        if self.unpublished && self.gesture.is_none() && !self.zoom.is_running(now) {
+        // Saving waits for the zoom and the crop to land, so they never stutter.
+        if self.unpublished
+            && self.gesture.is_none()
+            && self.cropping.is_none()
+            && !self.zoom.is_running(now)
+        {
             self.publish();
         }
         self.show_saved(now);
@@ -1484,13 +1619,20 @@ impl Editor {
             let capture = self.view.area(self.bounds());
             let center = (capture.left + capture.width / 2.0, capture.middle());
             painter.clip(canvas, || {
-                painter.grown(1.0 - FADE * lift, 1.0 - SINK * lift, center, || {
-                    self.draw_capture(painter, image, now);
-                });
+                painter.grown(
+                    1.0 - FADE * lift,
+                    1.0 - SINK * lift,
+                    center,
+                    || match &self.cropping {
+                        Some(cropping) => self.draw_cropping(painter, image, cropping, now),
+                        None => self.draw_capture(painter, image, now),
+                    },
+                );
+                self.draw_corners(painter, now);
             });
             self.toolbar.draw(painter, now);
             if let Some((pose, glint)) = self.card(now) {
-                card::draw(painter, image, pose, glint);
+                card::draw(painter, image, self.bounds(), pose, glint);
             }
         })
     }
@@ -1547,8 +1689,9 @@ impl Editor {
 
     /// The capture with its frame, and the outlines, handles and chip over it.
     fn draw_capture(&self, painter: &Painter, image: &ID2D1Bitmap1, now: Instant) {
-        let capture = self.view.area(self.bounds());
-        painter.bitmap(image, capture);
+        let bounds = self.bounds();
+        let capture = self.view.area(bounds);
+        painter.bitmap(image, card::part(bounds), capture);
         let border = painter.pixel();
         painter.stroke(
             capture.inflate(border),
@@ -1582,6 +1725,47 @@ impl Editor {
         }
     }
 
+    /// The capture as it's cropped, or as a crop is undone: only the part showing,
+    /// with what's cut away dimmed.
+    fn draw_cropping(
+        &self,
+        painter: &Painter,
+        image: &ID2D1Bitmap1,
+        cropping: &Cropping,
+        now: Instant,
+    ) {
+        let (large, small) = (cropping.large(), cropping.small());
+        let shown = painter.align(self.view.span(cropping.shown(now)));
+        painter.clip(shown, || {
+            let whole = self.view.area(large);
+            painter.bitmap(image, card::part(large), whole);
+            // Dimming it all, then showing what stays over it, leaves no seams.
+            let dim = cropping.dim(now);
+            if dim > 0.0 {
+                painter.fill(whole, 0.0, color(0x000000, dim));
+                painter.bitmap(image, card::part(small), self.view.area(small));
+            }
+        });
+        let border = painter.pixel();
+        painter.stroke(shown.inflate(border), 0.0, border, self.palette.card_stroke);
+    }
+
+    /// The corners of what cropping keeps: as it crops, or as the crop button is
+    /// hovered.
+    fn draw_corners(&self, painter: &Painter, now: Instant) {
+        let (kept, shown) = match &self.cropping {
+            Some(cropping) => (Some(cropping.small()), cropping.marks(now)),
+            None => {
+                let shown = self.marks.value(now);
+                let kept = (shown > 0.0).then(|| self.frame().in_view(self.view));
+                (kept.flatten(), shown)
+            }
+        };
+        if let Some(kept) = kept {
+            self.corners.draw(painter, self.view.area(kept), shown);
+        }
+    }
+
     /// Follows the window's new size.
     fn resized(&mut self) {
         self.size = window::client_size(self.hwnd);
@@ -1612,6 +1796,7 @@ impl Editor {
 
     /// Fits the capture in the window again, unzoomed, and places the toolbar.
     fn layout(&mut self) {
+        self.cropping = None;
         self.view = self.frame().fit();
         self.glide = Glide::rest(self.view);
         self.toolbar.hint_zoom(false);
@@ -1629,10 +1814,10 @@ impl Editor {
                         zoom,
                         ..focus.spot()
                     }
-                    .lit(self.bounds()),
+                    .lit(self.whole()),
                 )
             }
-            _ => self.edits.outline(shape, self.bounds()),
+            _ => self.edits.outline(shape, self.whole()),
         }
     }
 
@@ -1646,7 +1831,7 @@ impl Editor {
         match shape {
             Shape::Blur(_) => 0.0,
             Shape::Focus => self.edits.focus.map_or(0.0, |focus| {
-                let corner = focus.spot().corner(self.bounds(), self.capture_scale);
+                let corner = focus.spot().corner(self.whole(), self.capture_scale);
                 corner * self.view.zoom
             }),
             Shape::Figure(index) => self
@@ -1671,8 +1856,13 @@ impl Editor {
         let (x, y) = self.view.pixel(point);
         let tool = self.toolbar.tool();
         let reach = HANDLE_REACH / self.view.zoom;
+        // What a crop left out can't be reached, beyond a line's reach.
+        let reachable = self.bounds().inflate(reach.ceil() as i32);
+        if !reachable.contains(x, y) {
+            return None;
+        }
         self.edits
-            .shape_at(x, y, reach, self.bounds())
+            .shape_at(x, y, reach, self.whole())
             .filter(|&shape| tool != Tool::Steps || Tool::of(shape) == tool)
     }
 
@@ -1733,14 +1923,24 @@ impl Editor {
             .is_some_and(|center| canvas::chip_contains(center, point))
     }
 
-    /// Whether `shape` covers the whole capture. It has nowhere to move, so dragging
-    /// on it draws a new shape instead.
+    /// Whether `shape` covers all the capture keeps. It has nowhere to move, so
+    /// dragging on it draws a new shape instead.
     fn fills(&self, shape: Shape) -> bool {
         let bounds = self.bounds();
-        self.edits.outline(shape, bounds) == Some(bounds)
+        self.edits
+            .outline(shape, self.whole())
+            .and_then(|outline| outline.intersect(&bounds))
+            == Some(bounds)
     }
 
+    /// The part of the capture it keeps, where the shapes go: all of it, unless
+    /// it's cropped.
     fn bounds(&self) -> Rect {
+        self.edits.kept(self.whole())
+    }
+
+    /// The whole capture, as taken, which shapes are drawn and sized on.
+    fn whole(&self) -> Rect {
         self.document.image().bounds()
     }
 
@@ -1753,10 +1953,9 @@ impl Editor {
     }
 
     fn frame(&self) -> Frame {
-        let image = self.document.image();
         Frame {
             window: self.window(),
-            image: (image.width(), image.height()),
+            image: self.bounds(),
             scale: self.scale,
             bottom: self.toolbar.bottom(),
         }

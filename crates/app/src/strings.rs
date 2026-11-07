@@ -85,6 +85,8 @@ pub struct Strings {
     /// The space bar's name, on the hint that it resets the zoom, and what it does.
     pub space: &'static str,
     pub reset_zoom: &'static str,
+    /// The button beside it that crops the capture to the part in view.
+    pub crop: &'static str,
     /// What follows a number to make it a percentage.
     percent: &'static str,
     /// What parts a number's decimals from the rest.
@@ -174,6 +176,7 @@ static SPANISH: Strings = Strings {
     shift: "Mayús",
     space: "Espacio",
     reset_zoom: "Restablecer el zoom",
+    crop: "Recortar así",
     percent: "\u{a0}%",
     decimal: ",",
 };
@@ -236,6 +239,7 @@ static ENGLISH: Strings = Strings {
     shift: "Shift",
     space: "Space",
     reset_zoom: "Reset zoom",
+    crop: "Crop to view",
     percent: "%",
     decimal: ".",
 };

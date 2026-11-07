@@ -488,24 +488,29 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Stretches `bitmap` over `area`: pixel for pixel when they match, upright,
-    /// smoothly otherwise.
-    pub fn bitmap(&self, bitmap: &ID2D1Bitmap, area: Area) {
+    /// Stretches the `part` of `bitmap`, in its pixels, over `area`: pixel for pixel
+    /// when they match, upright, smoothly otherwise.
+    pub fn bitmap(&self, bitmap: &ID2D1Bitmap, part: Area, area: Area) {
         let mut on_screen = Matrix3x2::default();
         unsafe {
             self.context.GetTransform(&mut on_screen);
-            let size = bitmap.GetPixelSize();
             let exact = on_screen.M12 == 0.0
                 && on_screen.M21 == 0.0
-                && (area.width * on_screen.M11 - size.width as f32).abs() < 0.01
-                && (area.height * on_screen.M22 - size.height as f32).abs() < 0.01;
+                && (area.width * on_screen.M11 - part.width).abs() < 0.01
+                && (area.height * on_screen.M22 - part.height).abs() < 0.01;
             let interpolation = if exact {
                 D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
             } else {
                 D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC
             };
-            self.context
-                .DrawBitmap(bitmap, Some(&area.rect()), 1.0, interpolation, None, None);
+            self.context.DrawBitmap(
+                bitmap,
+                Some(&area.rect()),
+                1.0,
+                interpolation,
+                Some(&part.rect()),
+                None,
+            );
         }
     }
 

@@ -41,12 +41,16 @@ const SETTING_ICON: f32 = 16.0;
 const ICON_GAP: f32 = 8.0;
 /// Between two settings.
 const GAP: f32 = 20.0;
-/// The zoom hint's height, its keycap's, the room after its text, and how far
-/// it rises and grows as it shows.
+/// The zoom hint's height, its keycap's, the room after the key, and how far it
+/// rises and grows as it shows.
 const HINT: f32 = 32.0;
 const KEYCAP: f32 = 22.0;
 const KEY_PADDING: f32 = 8.0;
-const HINT_END: f32 = 14.0;
+/// The line between what the space bar does and the crop button: how tall, and the
+/// room before it and after it, where the button brings its own.
+const DIVIDER: f32 = 16.0;
+const BEFORE_DIVIDER: f32 = 12.0;
+const AFTER_DIVIDER: f32 = 4.0;
 const RISE: f32 = 8.0;
 const GROW: f32 = 0.1;
 /// The pill the folder button opens into, to name the folder the capture saved
@@ -122,6 +126,7 @@ pub enum Part {
     StepSize,
     Form,
     Frame,
+    Crop,
     Name,
     Folder,
 }
@@ -191,6 +196,8 @@ pub struct Toolbar {
     /// hidden, to 1, in full.
     space: Label,
     reset_zoom: Label,
+    /// The button that crops the capture to the part in view, beside the hint.
+    crop: IconButton,
     hint: Animation,
 }
 
@@ -279,6 +286,7 @@ impl Toolbar {
             width: Animation::idle(0.0),
             space: fonts.caption(strings.space)?,
             reset_zoom: fonts.caption(strings.reset_zoom)?,
+            crop: IconButton::labeled(fonts.icon('\u{E8C6}', 14.0)?, fonts.caption(strings.crop)?),
             hint: Animation::idle(0.0),
         };
         toolbar.width = Animation::idle(toolbar.options_width(tool));
@@ -347,6 +355,11 @@ impl Toolbar {
                 }
             }
         }
+        // The crop button ends the hint, as round as the keycap that starts it.
+        let hint = self.hint_area();
+        let inset = (HINT - KEYCAP) / 2.0;
+        let left = hint.right() - inset - self.crop.width();
+        self.crop.round(left, hint.top + inset, KEYCAP);
     }
 
     pub fn part_at(&self, point: Point) -> Option<Part> {
@@ -389,6 +402,7 @@ impl Toolbar {
             Part::StepSize => &mut self.step_size.slider,
             Part::Form => &mut self.forms,
             Part::Frame => &mut self.frames,
+            Part::Crop => &mut self.crop,
             Part::Name => &mut self.name,
             Part::Folder => &mut self.folder,
         }
@@ -397,12 +411,12 @@ impl Toolbar {
     /// Returns whether the toolbar's look changes.
     pub fn hover(&mut self, point: Option<Point>) -> bool {
         let parts = self.parts();
-        // The other tools' settings let go of the pointer.
-        for tool in Tool::ALL {
-            for part in tool.options() {
-                if !parts.contains(part) {
-                    self.control(*part).hover(None);
-                }
+        // The other tools' settings let go of the pointer, and the crop button too
+        // once the hint goes.
+        let parted = Tool::ALL.iter().flat_map(|tool| tool.options());
+        for &part in parted.chain(&[Part::Crop]) {
+            if !parts.contains(&part) {
+                self.control(part).hover(None);
             }
         }
         // Every control hears about the pointer, even after one changed.
@@ -453,19 +467,19 @@ impl Toolbar {
         self.draw_options(painter, now);
         let options = self.tool().options();
         for part in self.parts() {
-            if !options.contains(&part) {
-                if part == Part::Folder {
-                    self.draw_folder(painter, now);
-                } else {
-                    self.get(part).draw(painter, now);
-                }
+            match part {
+                _ if options.contains(&part) => {}
+                Part::Folder => self.draw_folder(painter, now),
+                // It shows with the hint, which draws it.
+                Part::Crop => {}
+                _ => self.get(part).draw(painter, now),
             }
         }
+        self.draw_hint(painter, now);
         if let Some(part) = self.focused() {
             let (area, radius) = self.get(part).focus_area();
             painter.focus(area, radius);
         }
-        self.draw_hint(painter, now);
         // The tools' names make room for the hint, above it.
         let tips = self.options_top() - (STACK + HINT) * self.hint.value(now);
         self.tools.draw_tip(painter, tips, now);
@@ -680,44 +694,56 @@ impl Toolbar {
         self.hint = self.hint.retarget(to, motion::NORMAL, easing);
     }
 
-    /// The zoom hint: a keycap and what the key does, in a pill that rises out of the
-    /// options and grows into place as it shows, and sinks back into them as it hides.
+    /// Whether the crop button is hovered or has the keyboard focus, so the corners
+    /// of what cropping keeps show.
+    pub fn previews_crop(&self) -> bool {
+        self.hint.target() > 0.0 && (self.crop.is_hovered() || self.focused() == Some(Part::Crop))
+    }
+
+    /// The zoom hint: a keycap and what the key does, then the crop button, in a pill
+    /// that rises out of the options and grows into place as it shows, and sinks back
+    /// into them as it hides.
     fn draw_hint(&self, painter: &Painter, now: Instant) {
         let shown = self.hint.value(now);
         let area = self.hint_area();
-        let area = Area {
-            top: area.top + RISE * (1.0 - shown),
-            ..area
-        };
         let base = (area.left + area.width / 2.0, area.bottom());
-        painter.grown(shown, 1.0 - GROW * (1.0 - shown), base, || {
-            let palette = painter.palette;
-            painter.flyout(area, HINT / 2.0);
-            let inset = (HINT - KEYCAP) / 2.0;
-            let key = painter.align(Area::new(
-                area.left + inset,
-                area.top + inset,
-                self.keycap_width(),
-                KEYCAP,
-            ));
-            painter.fill(key, KEYCAP / 2.0, palette.button);
-            painter.stroke(key, KEYCAP / 2.0, painter.border(), palette.control_stroke);
-            let left = key.left + (key.width - self.space.width) / 2.0;
-            painter.text(&self.space, left, key.middle(), palette.text);
-            let left = key.right() + KEY_PADDING;
-            painter.text(
-                &self.reset_zoom,
-                left,
-                area.middle(),
-                palette.text_secondary,
-            );
+        painter.lowered(1.0, RISE * (1.0 - shown), || {
+            painter.grown(shown, 1.0 - GROW * (1.0 - shown), base, || {
+                let palette = painter.palette;
+                painter.flyout(area, HINT / 2.0);
+                let inset = (HINT - KEYCAP) / 2.0;
+                let key = painter.align(Area::new(
+                    area.left + inset,
+                    area.top + inset,
+                    self.keycap_width(),
+                    KEYCAP,
+                ));
+                painter.fill(key, KEYCAP / 2.0, palette.button);
+                painter.stroke(key, KEYCAP / 2.0, painter.border(), palette.control_stroke);
+                let left = key.left + (key.width - self.space.width) / 2.0;
+                painter.text(&self.space, left, key.middle(), palette.text);
+                let left = key.right() + KEY_PADDING;
+                let ink = palette.text_secondary;
+                painter.text(&self.reset_zoom, left, area.middle(), ink);
+                let left = painter.snap(left + self.reset_zoom.width + BEFORE_DIVIDER);
+                let divider = Area::new(
+                    left,
+                    area.middle() - DIVIDER / 2.0,
+                    painter.pixel(),
+                    DIVIDER,
+                );
+                painter.fill(painter.align(divider), 0.0, palette.control_stroke);
+                self.crop.draw(painter, now);
+            });
         });
     }
 
     /// Where the zoom hint shows in full, centered above the options.
     fn hint_area(&self) -> Area {
         let inset = (HINT - KEYCAP) / 2.0;
-        let width = inset + self.keycap_width() + KEY_PADDING + self.reset_zoom.width + HINT_END;
+        let hint = inset + self.keycap_width() + KEY_PADDING + self.reset_zoom.width;
+        let divider = BEFORE_DIVIDER + 1.0 + AFTER_DIVIDER;
+        let width = hint + divider + self.crop.width() + inset;
         let left = (self.window.0 - width) / 2.0;
         Area::new(left, self.options_top() - STACK - HINT, width, HINT)
     }
@@ -781,10 +807,14 @@ impl Toolbar {
         Area::new(left, self.options_top(), width, OPTIONS)
     }
 
-    /// The parts on show: the dock, the chosen tool's settings and the title bar's.
+    /// The parts on show: the dock, the chosen tool's settings, the crop button while
+    /// the capture is zoomed, and the title bar's.
     fn parts(&self) -> Vec<Part> {
         let mut parts = vec![Part::Tools];
         parts.extend_from_slice(self.tool().options());
+        if self.hint.target() > 0.0 {
+            parts.push(Part::Crop);
+        }
         parts.extend([Part::Name, Part::Folder]);
         parts
     }
@@ -798,6 +828,7 @@ impl Toolbar {
             Part::StepSize => &self.step_size.slider,
             Part::Form => &self.forms,
             Part::Frame => &self.frames,
+            Part::Crop => &self.crop,
             Part::Name => &self.name,
             Part::Folder => &self.folder,
         }

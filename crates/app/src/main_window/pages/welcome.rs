@@ -225,7 +225,10 @@ impl Pages {
             let sweep = (time - CARD_GLINT) / CARD_GLINTING;
             let glint = (sweep > 0.0 && sweep < 1.0).then(|| Easing::SWEEP.apply(sweep));
             let opacity = Easing::DECELERATE.apply(2.0 * lifting);
-            painter.lowered(opacity, 0.0, || card::draw(painter, bitmap, pose, glint));
+            let kept = thumbnail.image.bounds();
+            painter.lowered(opacity, 0.0, || {
+                card::draw(painter, bitmap, kept, pose, glint)
+            });
         }
         let took = self.ready_top + CARD_SLOT + CARD_GAP + self.took.height / 2.0;
         self.rise(painter, TOOK, now, || {
