@@ -68,8 +68,6 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 
 Hasta la primera captura, la ventana principal abre con la bienvenida. El icono se dibuja solo: cada esquina se traza en un color de firma, una tras otra, y se calienta hasta el naranja de Kata pasando por los colores que siguen al suyo; luego se enciende el centro. Llegan «Hola, soy Kata» y «Gratis y sin límites», el botón **Toma tu primera captura** con el atajo debajo, y el destello cruza el saludo. Si se cierra sin capturar, vuelve a aparecer la próxima vez.
 
-En las primeras capturas, la silueta de una ventana se traza en los colores de firma, como el icono: nace en el punto más cercano al cursor y rodea la ventana en los dos sentidos hasta cerrarse. Si hay una ventana tapada por otra, traza esa, también por donde está tapada; al pasar el cursor por ella, la silueta se funde en el anillo blanco de la selección y la ventana sale completa. Si ninguna está tapada, traza la ventana bajo el cursor, encima de la selección, y se funde en su anillo blanco; con el cursor sobre el fondo, traza la ventana que más se ve, hasta que el cursor llega a ella. Arrastrar o `Esc` la apagan. Se repite hasta que se pasa el cursor por una ventana tapada, y como mucho en tres capturas. Con los efectos de animación apagados, la de la ventana bajo el cursor no aparece.
-
 En los primeros editores, tres señales, de una en una:
 
 - **El nombre.** «Ponle nombre» se escribe solo, letra a letra y con su cursor, y luego lo cruza el destello.

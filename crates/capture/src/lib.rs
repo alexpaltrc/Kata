@@ -59,7 +59,7 @@ pub struct Window {
     /// Where its frame's top-left corner lies, from `rect`'s.
     at: (i32, i32),
     /// How round its corners are, in pixels.
-    pub radius: f32,
+    radius: f32,
 }
 
 impl Window {

@@ -2,10 +2,7 @@
 //! to capture: hovering highlights the window or monitor under the pointer, a click
 //! takes it, and dragging selects any area. In a monitor's corners, the whole
 //! monitor is highlighted. A window partly covered by others shows whole while
-//! hovered, and is captured whole: the first few captures hint at it by tracing
-//! one's silhouette, or, with none covered, the silhouette of a window to take.
-
-mod silhouette;
+//! hovered, and is captured whole.
 
 use std::{
     cell::RefCell,
@@ -64,9 +61,7 @@ use windows::{
 };
 use windows_numerics::Vector2;
 
-use silhouette::{Drawn, Hint, Kind, Silhouette};
-
-use crate::{channel, report, settings};
+use crate::{channel, report};
 
 /// How dark the screen gets outside the selection.
 const DIM: f32 = 0.45;
@@ -227,8 +222,6 @@ struct Overlay<'a> {
     /// The covered window shown whole, and how visible: it fades in once Windows
     /// has drawn it, and out when the pointer leaves it.
     reveal: Option<(usize, Animation)>,
-    /// The hint that traces a window, in the first few captures.
-    silhouette: Option<Silhouette>,
 }
 
 enum Whole {
@@ -258,24 +251,11 @@ impl<'a> Overlay<'a> {
             sender,
             receiver,
             reveal: None,
-            silhouette: settings::hinting(settings::Hint::Window)
-                .then(|| Silhouette::pick(shot, pointer, window))
-                .flatten(),
         }
     }
 
     fn appear(&mut self, hwnd: HWND) {
         self.presence = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
-        if let Some(silhouette) = &mut self.silhouette {
-            silhouette.begin();
-            settings::hinted(settings::Hint::Window, false);
-            // Drawn whole ahead of time, a covered window shows the moment the pointer
-            // gets there.
-            if silhouette.kind == Kind::Covered {
-                let index = silhouette.index;
-                self.ask(hwnd, index);
-            }
-        }
         self.aim(hwnd, self.window);
         invalidate(hwnd);
     }
@@ -284,11 +264,6 @@ impl<'a> Overlay<'a> {
     /// for whole, and shown whole as soon as it's drawn.
     fn aim(&mut self, hwnd: HWND, window: Option<usize>) {
         self.window = window;
-        if let Some(silhouette) = &mut self.silhouette
-            && silhouette.follow(window)
-        {
-            settings::hinted(settings::Hint::Window, true);
-        }
         if let Some((shown, opacity)) = &mut self.reveal
             && Some(*shown) != window
         {
@@ -425,9 +400,6 @@ impl<'a> Overlay<'a> {
                     self.from = area;
                     self.to = area;
                     self.glide = Animation::idle(1.0);
-                    if let Some(silhouette) = &mut self.silhouette {
-                        silhouette.fade();
-                    }
                     self.aim(hwnd, None);
                     invalidate(hwnd);
                 }
@@ -495,10 +467,6 @@ impl<'a> Overlay<'a> {
             || self
                 .reveal
                 .is_some_and(|(_, opacity)| opacity.is_running(now))
-            || self
-                .silhouette
-                .as_ref()
-                .is_some_and(|silhouette| silhouette.is_running(now))
         {
             invalidate(hwnd);
         }
@@ -520,10 +488,6 @@ impl<'a> Overlay<'a> {
                     opacity: opacity.value(now) * presence,
                 })
             }),
-            silhouette: self
-                .silhouette
-                .as_ref()
-                .map(|silhouette| silhouette.at(now, presence)),
             selection,
             size: (self.to.width(), self.to.height()),
             area: self
@@ -580,8 +544,6 @@ struct Frame<'a> {
     presence: f32,
     /// A covered window shown whole, over the frozen screen.
     whole: Option<Reveal<'a>>,
-    /// The hint that traces a window.
-    silhouette: Option<Hint<'a>>,
     selection: Rect,
     /// The size the label reads: where the selection is heading.
     size: (i32, i32),
@@ -605,8 +567,6 @@ struct Canvas {
     screen: ID2D1Bitmap,
     /// The last window shown whole, by index.
     whole: Option<(usize, ID2D1Bitmap)>,
-    /// The hint's outline and colors, once it shows.
-    silhouette: Option<Drawn>,
     brush: ID2D1SolidColorBrush,
     typography: IDWriteTypography,
     /// The label's text format and the display scale it was made for.
@@ -649,7 +609,6 @@ impl Canvas {
                 bounds: image.bounds(),
                 screen,
                 whole: None,
-                silhouette: None,
                 brush,
                 typography,
                 label_format: None,
@@ -670,19 +629,6 @@ impl Canvas {
         } else {
             None
         };
-        // A hint that can't be drawn is left out: the capture goes on without it.
-        let silhouette = frame.silhouette.as_ref().filter(|hint| hint.opacity > 0.0);
-        if silhouette.is_some() && self.silhouette.is_none() {
-            self.silhouette = frame
-                .silhouette
-                .as_ref()
-                .and_then(|hint| hint.silhouette.prepare(&graphics.d2d, &self.target).ok());
-        }
-        // Tracing the selection, it draws its ring, and melts into it.
-        let over = silhouette
-            .filter(|hint| hint.silhouette.kind == Kind::Pointed && self.silhouette.is_some());
-        let ringed = over.map_or(presence, |hint| (presence - hint.opacity).max(0.0));
-        let over = over.is_some();
         let whole = match &frame.whole {
             Some(reveal) if reveal.opacity > 0.0 => {
                 if self
@@ -720,31 +666,20 @@ impl Canvas {
                 for band in around(self.bounds, selection) {
                     target.FillRectangle(&rect_f(band), brush);
                 }
-                let trace = || {
-                    if let (Some(hint), Some(drawn)) = (silhouette, &self.silhouette) {
-                        drawn.draw(&graphics.d2d, target, brush, hint);
-                    }
-                };
-                if !over {
-                    trace();
-                }
                 outline(
                     target,
                     brush,
                     shadow,
                     ring as f32,
-                    rgba(0.0, 0.0, 0.0, 0.3 * ringed),
+                    rgba(0.0, 0.0, 0.0, 0.3 * presence),
                 );
                 outline(
                     target,
                     brush,
                     white,
                     ring as f32,
-                    rgba(1.0, 1.0, 1.0, 0.9 * ringed),
+                    rgba(1.0, 1.0, 1.0, 0.9 * presence),
                 );
-                if over {
-                    trace();
-                }
                 label.draw(target, brush, presence);
             }
             target.EndDraw(None, None)

@@ -118,8 +118,6 @@ pub fn forget_welcome() {
 /// times at most.
 #[derive(Clone, Copy)]
 pub enum Hint {
-    /// In a capture, to point at a covered window.
-    Window,
     /// In the editor, to name the capture.
     Name,
     /// In the editor, that the capture saves itself, and where.
@@ -129,7 +127,7 @@ pub enum Hint {
 }
 
 impl Hint {
-    const ALL: [Self; 4] = [Self::Window, Self::Name, Self::Saved, Self::Drag];
+    const ALL: [Self; 3] = [Self::Name, Self::Saved, Self::Drag];
 
     /// How many times it shows, at most.
     const MOST: usize = 3;
@@ -137,7 +135,6 @@ impl Hint {
     /// The registry value counting the times it showed.
     fn value(self) -> PCWSTR {
         match self {
-            Self::Window => w!("Hints"),
             Self::Name => w!("NameHints"),
             Self::Saved => w!("SaveHints"),
             Self::Drag => w!("DragHints"),
