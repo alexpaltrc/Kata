@@ -4,6 +4,7 @@
 
 mod canvas;
 mod crop;
+mod dock;
 mod hints;
 mod icons;
 mod name;
@@ -15,6 +16,7 @@ use std::{
     mem,
     path::PathBuf,
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -70,7 +72,7 @@ use crate::{
     card::{self, Pose, Thumbnail},
     channel,
     export::{self, Handover, Output, Picture},
-    report,
+    import, report,
     settings::{self, EditorSettings, Hint},
     strings::strings,
 };
@@ -243,6 +245,8 @@ unsafe fn create(
             lift: Animation::idle(0.0),
             flight: None,
             carrying: None,
+            incoming: None,
+            landing: None,
             hints,
             saved: None,
             tracking: false,
@@ -258,6 +262,7 @@ unsafe fn create(
         }
         let state = Box::into_raw(Box::new(RefCell::new(editor)));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+        import::accept(hwnd, dock::DOCK);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
         Ok(hwnd)
@@ -286,10 +291,15 @@ unsafe extern "system" fn window_proc(
         if let Some((file, card, handover)) =
             state().and_then(|editor| editor.try_borrow_mut().ok()?.carrying.take())
         {
+            // The capture leaving can't come back in as another.
+            import::refuse(hwnd);
             let went = export::drag(hwnd, &file, card, handover);
             // The window may have closed meanwhile, its editor with it.
-            if let Some(mut editor) = state().and_then(|editor| editor.try_borrow_mut().ok()) {
-                editor.dropped(went);
+            if let Some(editor) = state() {
+                import::accept(hwnd, dock::DOCK);
+                if let Ok(mut editor) = editor.try_borrow_mut() {
+                    editor.dropped(went);
+                }
             }
         }
         handled.unwrap_or_else(|| DefWindowProcW(hwnd, message, wparam, lparam))
@@ -443,6 +453,10 @@ struct Editor {
     /// The file to drag away once the message at hand is handled, its card, and
     /// how the card gets to the pointer.
     carrying: Option<(PathBuf, Option<Picture>, Rc<Handover>)>,
+    /// Another capture dragged over the editor, and the captures moving to make room
+    /// as one docks, leaves or comes back.
+    incoming: Option<dock::Incoming>,
+    landing: Option<dock::Landing>,
     hints: Hints,
     /// The clock of the signal that the capture saved itself, while it shows.
     saved: Option<Animation>,
@@ -534,8 +548,10 @@ impl Editor {
                     self.invalidate();
                 }
             }
+            dock::DOCK => return Some(LRESULT(self.docking(wparam, lparam) as isize)),
             // The last changes still reach the clipboard, and the name the file.
             WM_DESTROY => {
+                import::refuse(self.hwnd);
                 self.finish_naming();
                 if self.unpublished {
                     self.publish();
@@ -1335,6 +1351,8 @@ impl Editor {
         self.gesture.is_some()
             || self.flight.is_some()
             || self.cropping.is_some()
+            || self.incoming.is_some()
+            || self.landing.is_some()
             || self.saved.is_some_and(|clock| clock.is_running(now))
             || self.glide.is_running(now)
             || self.view.zoom > self.frame().fit().zoom
@@ -1348,15 +1366,18 @@ impl Editor {
     }
 
     /// Moves through the document's history. A crop it undoes or makes again plays
-    /// out as cropping does.
+    /// out as cropping does, and a capture docked as docking does.
     fn step(&mut self, step: fn(&mut Document) -> bool) {
         self.settle();
         let (kept, start, shapes) = (self.bounds(), self.view, self.edits.clone());
+        let (image, before) = (self.document.image().clone(), self.before());
         if step(&mut self.document) {
             self.selected = None;
             self.sync();
             self.unpublished = true;
-            if self.bounds() != kept {
+            if !Arc::ptr_eq(&image, self.document.image()) {
+                self.land(before, None, None);
+            } else if self.bounds() != kept {
                 self.recrop(kept, start, shapes);
             }
         }
@@ -1419,8 +1440,9 @@ impl Editor {
         self.invalidate();
     }
 
-    /// Lands the crop playing out, if one is, where it ends.
+    /// Lands the crop or the captures playing out, if they are, where they end.
     fn settle(&mut self) {
+        self.landing = None;
         if self.cropping.take().is_some() {
             self.view = self.glide.target();
             self.toolbar
@@ -1518,6 +1540,7 @@ impl Editor {
         if landed {
             self.flight = None;
         }
+        self.docking_ended(now);
         if self
             .cropping
             .as_ref()
@@ -1584,13 +1607,16 @@ impl Editor {
             || self.saved.is_some_and(|clock| clock.is_running(now))
             || self.cropping.is_some()
             || self.marks.is_running(now)
+            || self.docking_moves(now)
         {
             self.invalidate();
         }
-        // Saving waits for the zoom and the crop to land, so they never stutter.
+        // Saving waits for the zoom, the crop and the captures to land, so they never
+        // stutter.
         if self.unpublished
             && self.gesture.is_none()
             && self.cropping.is_none()
+            && self.landing.is_none()
             && !self.zoom.is_running(now)
         {
             self.publish();
@@ -1619,21 +1645,21 @@ impl Editor {
             let capture = self.view.area(self.bounds());
             let center = (capture.left + capture.width / 2.0, capture.middle());
             painter.clip(canvas, || {
-                painter.grown(
-                    1.0 - FADE * lift,
-                    1.0 - SINK * lift,
-                    center,
-                    || match &self.cropping {
-                        Some(cropping) => self.draw_cropping(painter, image, cropping, now),
-                        None => self.draw_capture(painter, image, now),
-                    },
-                );
+                painter.grown(1.0 - FADE * lift, 1.0 - SINK * lift, center, || {
+                    match (&self.cropping, &self.landing) {
+                        (Some(cropping), _) => self.draw_cropping(painter, image, cropping, now),
+                        (None, Some(landing)) => self.draw_landing(painter, image, landing, now),
+                        (None, None) => self.draw_capture(painter, image, now),
+                    }
+                });
                 self.draw_corners(painter, now);
+                self.draw_zone(painter, now);
             });
             self.toolbar.draw(painter, now);
             if let Some((pose, glint)) = self.card(now) {
                 card::draw(painter, image, self.bounds(), pose, glint);
             }
+            self.draw_cards(painter, image, now);
         })
     }
 

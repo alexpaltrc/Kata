@@ -70,6 +70,10 @@ mostrar siempre.
 - **Recortar:** con zoom, el botón **Recortar así** de esa píldora deja solo lo que se ve. Al pasar
   el cursor, cuatro esquinas de colores marcan lo que se queda. `Ctrl + Z` lo devuelve todo,
   también los pasos y formas que estaban fuera.
+- **Juntar capturas:** arrastra otra captura desde el Explorador de archivos hasta el editor y
+  acércala al lado donde la quieres: esa mitad se ilumina, como al acomodar ventanas en Windows.
+  Suéltala y se pone ahí, a su tamaño real, sobre fondo blanco. Repítelo en otros lados para armar
+  la composición que quieras. `Ctrl + Z` la quita.
 - Kata recuerda la herramienta y sus niveles para la siguiente captura.
 
 ## Guardar y copiar, sin pensar

@@ -7,6 +7,7 @@ mod channel;
 mod editor;
 mod export;
 mod hotkey;
+mod import;
 mod main_window;
 mod overlay;
 mod registry;

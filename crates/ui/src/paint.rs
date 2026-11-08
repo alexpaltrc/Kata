@@ -79,6 +79,17 @@ impl Area {
         )
     }
 
+    /// The area `progress` of the way to `to`.
+    pub fn toward(self, to: Self, progress: f32) -> Self {
+        let mix = |from: f32, to: f32| from + (to - from) * progress;
+        Self::new(
+            mix(self.left, to.left),
+            mix(self.top, to.top),
+            mix(self.width, to.width),
+            mix(self.height, to.height),
+        )
+    }
+
     fn rect(&self) -> D2D_RECT_F {
         D2D_RECT_F {
             left: self.left,

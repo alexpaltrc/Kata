@@ -3,6 +3,7 @@
 //!
 //! Platform-independent by design, so it can be built and tested anywhere.
 
+mod collage;
 mod deflate;
 mod document;
 mod figure;
@@ -14,6 +15,7 @@ pub mod name;
 mod png;
 mod render;
 
+pub use collage::{Collage, Side, Slot};
 pub use document::{
     BLUR_LEVELS, Blur, Document, Edits, Figure, Focus, Form, Frame, STEP_SIZES, Shape, Spot, Step,
     ZOOMS,

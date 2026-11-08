@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::collage::{Collage, Side};
 use crate::figure::{self, LINE, Trace};
 use crate::geometry::{center, ellipse};
 use crate::{Image, Rect, marker::STEP_SIZE};
@@ -350,43 +353,168 @@ impl Edits {
             *step = Step::new(step.center(), side, bounds);
         }
     }
+
+    /// The same shapes where `carry` takes what's under each: it gives, for a pixel
+    /// of an image of `bounds`, how far it moves and the area it ends up in, which
+    /// a blur stays inside. Shapes it has no place for go, and nothing's cropped.
+    fn carried(
+        &self,
+        bounds: Rect,
+        carry: impl Fn((i32, i32)) -> Option<((i32, i32), Rect)>,
+    ) -> Self {
+        let middle = |rect: Rect| ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+        let blurs = self.blurs.iter().filter_map(|blur| {
+            let ((x, y), area) = carry(middle(blur.rect))?;
+            let rect = blur.rect.offset(x, y).intersect(&area)?;
+            Some(Blur { rect, ..*blur })
+        });
+        let focus = self.focus.and_then(|focus| {
+            let ((x, y), _) = carry(middle(focus.spot().lit(bounds)))?;
+            Some(Focus {
+                rect: focus.rect.offset(x, y),
+                ..focus
+            })
+        });
+        let figures = self.figures.iter().filter_map(|figure| {
+            let ((x, y), _) = carry(middle(figure.rect()))?;
+            Some(Figure {
+                from: (figure.from.0 + x, figure.from.1 + y),
+                to: (figure.to.0 + x, figure.to.1 + y),
+                ..*figure
+            })
+        });
+        let steps = self.steps.iter().filter_map(|step| {
+            let ((x, y), _) = carry(step.center())?;
+            Some(Step {
+                rect: step.rect.offset(x, y),
+            })
+        });
+        Self {
+            blurs: blurs.collect(),
+            focus,
+            figures: figures.collect(),
+            steps: steps.collect(),
+            crop: None,
+        }
+    }
 }
 
-/// A capture and its edits, with their undo history.
+/// One or more captures put together, their edits, and the history of both.
 pub struct Document {
-    image: Image,
+    /// Everything in one image, as shown.
+    image: Arc<Image>,
+    version: Version,
+    undo: Vec<Version>,
+    redo: Vec<Version>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Version {
+    collage: Collage,
     edits: Edits,
-    undo: Vec<Edits>,
-    redo: Vec<Edits>,
 }
 
 impl Document {
     pub fn new(image: Image) -> Self {
+        let image = Arc::new(image);
         Self {
+            version: Version {
+                collage: Collage::new(image.clone()),
+                edits: Edits::default(),
+            },
             image,
-            edits: Edits::default(),
             undo: Vec::new(),
             redo: Vec::new(),
         }
     }
 
-    /// The capture as taken.
-    pub fn image(&self) -> &Image {
+    /// The captures as taken, put together. Shared, so a new one is told apart from
+    /// the last by `Arc::ptr_eq`.
+    pub fn image(&self) -> &Arc<Image> {
         &self.image
     }
 
+    pub fn collage(&self) -> &Collage {
+        &self.version.collage
+    }
+
     pub fn edits(&self) -> &Edits {
-        &self.edits
+        &self.version.edits
+    }
+
+    /// Where each capture shows of what's kept, in the order `dock` counts them.
+    pub fn pieces(&self) -> Vec<Rect> {
+        let kept = self.version.edits.kept(self.image.bounds());
+        let slots = self.version.collage.slots();
+        slots
+            .iter()
+            .filter_map(|slot| slot.rect.intersect(&kept))
+            .collect()
+    }
+
+    /// The piece, counted as `pieces` counts them, whose own area holds pixel `x`, `y`
+    /// of what's kept: the white around it included.
+    pub fn piece_at(&self, x: i32, y: i32) -> Option<usize> {
+        let kept = self.version.edits.kept(self.image.bounds());
+        if !kept.contains(x, y) {
+            return None;
+        }
+        let slots = self.version.collage.slots();
+        slots
+            .iter()
+            .filter(|slot| slot.rect.intersect(&kept).is_some())
+            .position(|slot| slot.cell.contains(x, y))
     }
 
     /// Makes `edits` the current version. Returns whether anything changed.
     pub fn commit(&mut self, edits: Edits) -> bool {
-        if edits == self.edits {
+        if edits == self.version.edits {
             return false;
         }
-        self.undo.push(std::mem::replace(&mut self.edits, edits));
-        self.redo.clear();
+        let collage = self.version.collage.clone();
+        self.push(Version { collage, edits });
         true
+    }
+
+    /// The captures as they'd be with `image` docked against the `side` of the
+    /// `target`th of the `pieces`, or of them all with none, `gap` pixels apart. What's
+    /// cropped away goes for good.
+    pub fn docked(
+        &self,
+        image: Arc<Image>,
+        target: Option<usize>,
+        side: Side,
+        gap: i32,
+    ) -> Collage {
+        let Version { collage, edits } = &self.version;
+        let folded = match edits.crop {
+            Some(_) => collage.cropped(edits.kept(self.image.bounds())),
+            None => None,
+        };
+        (folded.as_ref())
+            .unwrap_or(collage)
+            .docked(image, target, side, gap)
+    }
+
+    /// Docks `image` as `docked` says, and every shape moves along with the capture
+    /// under it.
+    pub fn dock(&mut self, image: Arc<Image>, target: Option<usize>, side: Side, gap: i32) {
+        let docked = self.docked(image, target, side, gap);
+        let Version { collage, edits } = &self.version;
+        let kept = edits.kept(self.image.bounds());
+        let (before, after) = (collage.slots(), docked.slots());
+        let edits = edits.carried(self.image.bounds(), |(x, y)| {
+            let x = x.clamp(kept.left, kept.right - 1);
+            let y = y.clamp(kept.top, kept.bottom - 1);
+            let from = &before[collage.owner(x, y)];
+            let to = after.iter().find(|slot| slot.shows(&from.image))?;
+            let ((fx, fy), (tx, ty)) = (from.origin(), to.origin());
+            Some(((tx - fx, ty - fy), to.rect))
+        });
+        self.push(Version {
+            collage: docked,
+            edits,
+        });
     }
 
     /// Returns whether there was something to undo.
@@ -394,7 +522,8 @@ impl Document {
         let Some(previous) = self.undo.pop() else {
             return false;
         };
-        self.redo.push(std::mem::replace(&mut self.edits, previous));
+        let next = self.switch(previous);
+        self.redo.push(next);
         true
     }
 
@@ -403,8 +532,24 @@ impl Document {
         let Some(next) = self.redo.pop() else {
             return false;
         };
-        self.undo.push(std::mem::replace(&mut self.edits, next));
+        let previous = self.switch(next);
+        self.undo.push(previous);
         true
+    }
+
+    fn push(&mut self, version: Version) {
+        let previous = self.switch(version);
+        self.undo.push(previous);
+        self.redo.clear();
+    }
+
+    /// Makes `version` the current one and returns the one it was.
+    fn switch(&mut self, version: Version) -> Version {
+        let was = std::mem::replace(&mut self.version, version);
+        if was.collage != self.version.collage {
+            self.image = self.version.collage.compose();
+        }
+        was
     }
 }
 
@@ -450,6 +595,56 @@ mod tests {
         document.undo();
         document.commit(blurred(5));
         assert!(!document.redo());
+    }
+
+    fn plain(width: u32, height: u32, shade: u8) -> Image {
+        let pixels = [shade, shade, shade, 255].repeat((width * height) as usize);
+        Image::new(width, height, pixels)
+    }
+
+    #[test]
+    fn a_docked_capture_moves_the_shapes_along_and_undoes_whole() {
+        let mut document = Document::new(plain(40, 30, 10));
+        let first = document.image().clone();
+        let mut edits = blurred(2);
+        edits.steps.push(Step {
+            rect: Rect::new(30, 20, 36, 26),
+        });
+        document.commit(edits.clone());
+        // On the left, so the first capture and what's on it move right.
+        document.dock(Arc::new(plain(20, 10, 20)), Some(0), Side::Left, 4);
+        assert_eq!(document.image().bounds(), Rect::new(0, 0, 64, 30));
+        assert_eq!(
+            document.pieces(),
+            [Rect::new(0, 10, 20, 20), Rect::new(24, 0, 64, 30)]
+        );
+        // The white above and below the smaller capture is its own.
+        let at = |x, y| document.piece_at(x, y);
+        assert_eq!(
+            [at(5, 15), at(5, 2), at(30, 5), at(64, 5)],
+            [Some(0), Some(0), Some(1), None]
+        );
+        assert_eq!(document.edits().blurs[0].rect, Rect::new(26, 0, 36, 10));
+        assert_eq!(document.edits().steps[0].rect, Rect::new(54, 20, 60, 26));
+        assert!(document.undo());
+        assert!(Arc::ptr_eq(document.image(), &first));
+        assert_eq!(document.edits(), &edits);
+        assert!(document.redo());
+        assert_eq!(document.image().bounds(), Rect::new(0, 0, 64, 30));
+    }
+
+    #[test]
+    fn docking_lets_go_of_what_was_cropped_away() {
+        let mut document = Document::new(plain(40, 30, 10));
+        let mut edits = blurred(0);
+        edits.blurs[0].rect = Rect::new(5, 5, 25, 15);
+        edits.crop = Some(Rect::new(10, 0, 40, 30));
+        document.commit(edits);
+        document.dock(Arc::new(plain(20, 30, 20)), Some(0), Side::Right, 0);
+        assert_eq!(document.image().bounds(), Rect::new(0, 0, 50, 30));
+        assert_eq!(document.edits().crop, None);
+        // The blur keeps to what's left of its capture.
+        assert_eq!(document.edits().blurs[0].rect, Rect::new(0, 5, 15, 15));
     }
 
     #[test]

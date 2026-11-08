@@ -114,15 +114,11 @@ impl Pose {
     pub fn toward(self, to: Self, progress: f32) -> Self {
         let mix = |from: f32, to: f32| from + (to - from) * progress;
         Self {
-            area: Area::new(
-                mix(self.area.left, to.area.left),
-                mix(self.area.top, to.area.top),
-                mix(self.area.width, to.area.width),
-                mix(self.area.height, to.area.height),
-            ),
+            area: self.area.toward(to.area, progress),
             lean: mix(self.lean, to.lean),
-            radius: mix(self.radius, to.radius),
-            lift: mix(self.lift, to.lift),
+            // A spring past its mark leans the other way, but lifts no lower.
+            radius: mix(self.radius, to.radius).max(0.0),
+            lift: mix(self.lift, to.lift).max(0.0),
         }
     }
 

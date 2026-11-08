@@ -83,6 +83,21 @@ impl Renderer {
         }
     }
 
+    /// Starts over on `image`, another capture, with nothing drawn on it yet: the
+    /// next update draws every edit.
+    pub fn restart(&mut self, image: &Image) {
+        *self = Self {
+            base: image.clone(),
+            output: image.clone(),
+            blurs: Vec::new(),
+            focus: None,
+            haze: None,
+            figures: Vec::new(),
+            steps: Vec::new(),
+            ..*self
+        };
+    }
+
     pub fn output(&self) -> &Image {
         &self.output
     }
@@ -806,6 +821,31 @@ mod tests {
         let mut renderer = Renderer::new(&image, 1.0);
         assert!(renderer.update(&image, &[], None, &[], &[]).is_empty());
         assert_eq!(renderer.output(), &image);
+    }
+
+    #[test]
+    fn restarted_on_another_capture_it_draws_every_edit_again() {
+        let (first, second) = (Image::new(64, 48, [90; 4].repeat(64 * 48)), stripes());
+        let rect = Rect::new(8, 8, 40, 40);
+        let mut renderer = Renderer::new(&first, 1.0);
+        renderer.update(&first, &[blur(rect)], None, &[], &[]);
+        renderer.restart(&second);
+        assert_eq!(renderer.output(), &second);
+        assert_eq!(
+            renderer.update(&second, &[blur(rect)], None, &[], &[]),
+            [rect]
+        );
+        let output = renderer.output();
+        for y in 0..48 {
+            for x in 0..64 {
+                let shown = pixel(output, x, y);
+                if rect.contains(x, y) {
+                    assert!((80..=175).contains(&shown[0]), "{x},{y}: {shown:?}");
+                } else {
+                    assert_eq!(shown, pixel(&second, x, y), "{x},{y}");
+                }
+            }
+        }
     }
 
     #[test]

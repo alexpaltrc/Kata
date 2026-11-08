@@ -128,9 +128,9 @@ impl Cropping {
         let t = self.clock.value(now);
         let (large, small) = (card::part(self.large), card::part(self.small));
         if self.undoing {
-            between(small, large, along(t, BACK, OPEN, Easing::SWEEP))
+            small.toward(large, along(t, BACK, OPEN, Easing::SWEEP))
         } else {
-            between(large, small, along(t, CLOSE_AT, CLOSE, Easing::SWEEP))
+            large.toward(small, along(t, CLOSE_AT, CLOSE, Easing::SWEEP))
         }
     }
 
@@ -163,19 +163,8 @@ impl Cropping {
 }
 
 /// How far along `easing` a motion `length` seconds long from `start` is at `t`.
-fn along(t: f32, start: f32, length: f32, easing: Easing) -> f32 {
+pub fn along(t: f32, start: f32, length: f32, easing: Easing) -> f32 {
     easing.apply((t - start) / length)
-}
-
-/// The area `t` of the way from `a` to `b`.
-fn between(a: Area, b: Area, t: f32) -> Area {
-    let mix = |from: f32, to: f32| from + (to - from) * t;
-    Area::new(
-        mix(a.left, b.left),
-        mix(a.top, b.top),
-        mix(a.width, b.width),
-        mix(a.height, b.height),
-    )
 }
 
 /// The corners around what cropping keeps, each in a signature color, as the rim

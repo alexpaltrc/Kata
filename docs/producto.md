@@ -25,6 +25,7 @@ Reglas:
 - Un rectángulo que cubre toda la captura no tiene adónde moverse: arrastrar sobre él dibuja uno nuevo con la herramienta activa.
 - **Zoom:** la rueda del ratón acerca y aleja la captura, hacia donde está el cursor, nunca menos que lo que cabe en la ventana. `Espacio` o `Ctrl + 0` la devuelven a su tamaño. Mientras hay zoom, una píldora encima de la barra dice que `Espacio` lo restablece; surge de la barra al acercar y vuelve a ella al quitar el zoom. Al cambiar el tamaño de la ventana, la captura vuelve a caber.
 - **Recortar así:** en la misma píldora, tras una raya, un botón deja solo lo que se ve. Al pasar el cursor, cuatro esquinas con los colores del destello marcan lo que se queda. Al pulsarlo, la vista se aleja hasta mostrar la captura entera, con lo que sobra atenuado; los bordes se cierran sobre lo que queda, que se desliza a su sitio con un resorte, y las esquinas se abren y se apagan. Los pasos y formas que quedan del todo fuera se van con lo recortado, y los pasos que quedan se renumeran. `Ctrl + Z` lo devuelve todo, con el zoom de antes. Se guarda y se copia solo, como cualquier cambio.
+- **Juntar capturas:** se arrastra otra captura (una imagen desde el Explorador de archivos) sobre el editor, y viaja como tarjeta, inclinada, bajo el cursor. Junto al lado de una captura, esa mitad se ilumina con las esquinas del destello, como al acomodar ventanas en Windows. Al soltarla, la zona se encoge hasta su sitio, la tarjeta se endereza y se posa con un resorte, las demás capturas se hacen a un lado sobre un fondo blanco y las esquinas se abren y se apagan. Cada captura conserva su tamaño real; lo que sobra queda en blanco y la más pequeña se centra. Lados distintos arman cualquier composición, y los pasos y formas viajan con su captura. `Ctrl + Z` la quita con el mismo movimiento al revés. Se guarda y se copia sola, como cualquier cambio.
 - `1`, `2`, `3` y `4` cambian de herramienta. `Ctrl + Z` deshace; `Ctrl + Y` o `Ctrl + Mayús + Z` rehacen. `Ctrl + S` guarda, `Ctrl + C` copia y `Esc` quita la selección.
 - La herramienta y los niveles se recuerdan para la siguiente captura.
 
@@ -90,6 +91,8 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 - **Bienvenida (onboarding).** Sus cinco fases (hola, la primera captura, el editor, Lista y Premium) están hechas: ver [Bienvenida](#bienvenida). Falta que Alex las pruebe y conectar «Obtener Premium» con la compra en la Store.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
+- **Juntar capturas: lo que sigue.** Pegar con `Ctrl + V` una captura para juntarla, que la ventana crezca con la composición, y decidir si va en el Premium.
+- **Grabar video, a futuro.** Antes de decidir nada, analizar si Kata podría grabar la pantalla: qué permite Windows, si la app seguiría siendo igual de ligera y rápida, y si no la desvía de su enfoque (capturas para manuales). Con eso, Alex decide.
 - **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 
 ## Antes de vender
