@@ -502,6 +502,14 @@ impl<'a> Painter<'a> {
     /// Stretches the `part` of `bitmap`, in its pixels, over `area`: pixel for pixel
     /// when they match, upright, smoothly otherwise.
     pub fn bitmap(&self, bitmap: &ID2D1Bitmap, part: Area, area: Area) {
+        self.faded_bitmap(bitmap, part, area, 1.0);
+    }
+
+    /// The same, showing `opacity` as much.
+    pub fn faded_bitmap(&self, bitmap: &ID2D1Bitmap, part: Area, area: Area, opacity: f32) {
+        if opacity <= 0.0 {
+            return;
+        }
         let mut on_screen = Matrix3x2::default();
         unsafe {
             self.context.GetTransform(&mut on_screen);
@@ -517,7 +525,7 @@ impl<'a> Painter<'a> {
             self.context.DrawBitmap(
                 bitmap,
                 Some(&area.rect()),
-                1.0,
+                opacity.min(1.0),
                 interpolation,
                 Some(&part.rect()),
                 None,

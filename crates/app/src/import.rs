@@ -39,7 +39,7 @@ use crate::report;
 
 /// The most pixels a picture brought in takes across or down, as the graphics card
 /// takes them.
-pub const MOST_ACROSS: u32 = 16384;
+const MOST_ACROSS: u32 = 16384;
 
 /// A step of a drag over the window, in its message's `WPARAM`.
 #[derive(Clone, Copy, PartialEq, Eq)]

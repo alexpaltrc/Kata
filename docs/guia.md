@@ -72,8 +72,11 @@ mostrar siempre.
   también los pasos y formas que estaban fuera.
 - **Juntar capturas:** arrastra otra captura desde el Explorador de archivos hasta el editor y
   acércala al lado donde la quieres: esa mitad se ilumina, como al acomodar ventanas en Windows.
-  Suéltala y se pone ahí, a su tamaño real, sobre fondo blanco. Repítelo en otros lados para armar
-  la composición que quieras. `Ctrl + Z` la quita.
+  Suéltala y ocupa esa mitad; la composición mantiene el tamaño de la primera captura. Repítelo en
+  otros lados para armar la composición que quieras. `Ctrl + Z` la quita.
+- **Acomodar la composición:** arrastra la junta blanca entre dos capturas para repartir el
+  espacio. Haz doble clic en una captura para reencuadrarla: arrástrala, amplíala con la rueda del
+  ratón y pulsa Enter o haz clic fuera para terminar. `Ctrl + Z` deshace cada ajuste.
 - Kata recuerda la herramienta y sus niveles para la siguiente captura.
 
 ## Guardar y copiar, sin pensar

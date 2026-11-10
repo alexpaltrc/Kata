@@ -227,7 +227,7 @@ impl Pages {
             let opacity = Easing::DECELERATE.apply(2.0 * lifting);
             let kept = thumbnail.image.bounds();
             painter.lowered(opacity, 0.0, || {
-                card::draw(painter, bitmap, kept, pose, glint)
+                card::draw(painter, bitmap, card::part(kept), pose, glint)
             });
         }
         let took = self.ready_top + CARD_SLOT + CARD_GAP + self.took.height / 2.0;

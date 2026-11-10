@@ -15,7 +15,7 @@ pub mod name;
 mod png;
 mod render;
 
-pub use collage::{Collage, Side, Slot};
+pub use collage::{Collage, Divider, Placement, Side, Slot};
 pub use document::{
     BLUR_LEVELS, Blur, Document, Edits, Figure, Focus, Form, Frame, STEP_SIZES, Shape, Spot, Step,
     ZOOMS,

@@ -1,7 +1,7 @@
 //! Showing the capture: its place in the window, its copy on the graphics card, and
 //! the outlines, handles and chip drawn over it.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use kata_editor::{Image, Rect};
 use kata_ui::{
@@ -25,6 +25,7 @@ use super::{MARGIN, TITLE_BAR};
 use crate::{
     card::{self, LEAN, Pose, ROOM},
     export::Picture,
+    report,
 };
 
 /// The selected shape's outline width, in DIPs.
@@ -58,6 +59,8 @@ pub struct Gpu {
     pub surface: Surface,
     /// The edited capture.
     pub image: ID2D1Bitmap1,
+    /// The captures put together in it, each on its own, made as they're needed.
+    pieces: Vec<(Arc<Image>, ID2D1Bitmap1)>,
 }
 
 impl Gpu {
@@ -65,7 +68,37 @@ impl Gpu {
     pub fn new(graphics: &Graphics, hwnd: HWND, size: (u32, u32), image: &Image) -> Result<Self> {
         let surface = Surface::new(graphics, hwnd, size)?;
         let image = card::bitmap(surface.context(), image)?;
-        Ok(Self { surface, image })
+        Ok(Self {
+            surface,
+            image,
+            pieces: Vec::new(),
+        })
+    }
+
+    /// `image`'s own copy, one of the captures put together: made the first time it's
+    /// asked for, then kept.
+    pub fn piece(&mut self, image: &Arc<Image>) -> Option<ID2D1Bitmap1> {
+        if let Some((_, bitmap)) = self.pieces.iter().find(|(own, _)| Arc::ptr_eq(own, image)) {
+            return Some(bitmap.clone());
+        }
+        let bitmap = (card::bitmap(self.surface.context(), image))
+            .inspect_err(|error| report("piece", error))
+            .ok()?;
+        self.adopt(image.clone(), bitmap.clone());
+        Some(bitmap)
+    }
+
+    /// Keeps `bitmap` as `image`'s own copy.
+    pub fn adopt(&mut self, image: Arc<Image>, bitmap: ID2D1Bitmap1) {
+        if !self.pieces.iter().any(|(own, _)| Arc::ptr_eq(own, &image)) {
+            self.pieces.push((image, bitmap));
+        }
+    }
+
+    /// Lets go of the captures' own copies, once nothing moving needs them: each
+    /// takes as much memory on the graphics card as the image.
+    pub fn forget(&mut self) {
+        self.pieces = Vec::new();
     }
 
     /// The card the `kept` part of the capture shrinks into to carry it away, as a
@@ -86,7 +119,8 @@ impl Gpu {
             pixels.1 as f32 / scale / 2.0 - center.1,
         );
         let drawn = self.surface.picture(palette, scale, pixels, |painter| {
-            card::draw(painter, &self.image, kept, Pose::held(size, pointer), None);
+            let part = card::part(kept);
+            card::draw(painter, &self.image, part, Pose::held(size, pointer), None);
         })?;
         Ok(Picture {
             pixels: drawn,
@@ -261,12 +295,15 @@ impl View {
         )
     }
 
+    /// Where `point` is over the capture, in its pixels and fractions of them.
+    pub fn at(&self, (x, y): Point) -> (f32, f32) {
+        ((x - self.left) / self.zoom, (y - self.top) / self.zoom)
+    }
+
     /// The capture pixel under `point`.
-    pub fn pixel(&self, (x, y): Point) -> (i32, i32) {
-        (
-            ((x - self.left) / self.zoom).floor() as i32,
-            ((y - self.top) / self.zoom).floor() as i32,
-        )
+    pub fn pixel(&self, point: Point) -> (i32, i32) {
+        let (x, y) = self.at(point);
+        (x.floor() as i32, y.floor() as i32)
     }
 
     /// The edge between capture pixels nearest to `point`, inside `bounds`.

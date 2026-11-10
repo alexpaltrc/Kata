@@ -2,12 +2,14 @@
 //! in focus, numbers the steps to follow and points things out with shapes. Each
 //! change reaches the clipboard and the capture's file.
 
+mod arrange;
 mod canvas;
 mod crop;
 mod dock;
 mod hints;
 mod icons;
 mod name;
+mod reframe;
 mod toolbar;
 
 use std::{
@@ -21,8 +23,8 @@ use std::{
 };
 
 use kata_editor::{
-    Blur, Document, Edits, Figure, Focus, Form, Image, Rect, Renderer, STEP_SIZES, Shape, Spot,
-    Step, ZOOMS,
+    Blur, Collage, Document, Edits, Figure, Focus, Form, Image, Placement, Rect, Renderer,
+    STEP_SIZES, Shape, Spot, Step, ZOOMS,
 };
 use kata_ui::{
     Graphics,
@@ -54,14 +56,15 @@ use windows::{
             },
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
-                IDC_ARROW, IDC_CROSS, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENWSE,
-                KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW, SIZE_MINIMIZED,
-                SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor, SetForegroundWindow, SetTimer,
-                SetWindowLongPtrW, ShowWindow, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
-                WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
-                WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN,
-                WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCHITTEST,
-                WM_NCLBUTTONDOWN, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_TIMER,
+                IDC_ARROW, IDC_CROSS, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
+                IDC_SIZENWSE, IDC_SIZEWE, KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW,
+                PostMessageW, SIZE_MINIMIZED, SM_CXDRAG, SM_CYDRAG, SW_SHOW, SetCursor,
+                SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow, WHEEL_DELTA,
+                WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
+                WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_GETOBJECT,
+                WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+                WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_PAINT,
+                WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_TIMER,
             },
         },
     },
@@ -247,6 +250,11 @@ unsafe fn create(
             carrying: None,
             incoming: None,
             landing: None,
+            arranging: None,
+            grip: None,
+            reframing: None,
+            click: None,
+            placed: false,
             hints,
             saved: None,
             tracking: false,
@@ -372,6 +380,12 @@ enum Gesture {
     },
     /// Pressing the selected shape's remove chip.
     Remove,
+    /// Dragging the `index`th white between two captures, outermost first, whose
+    /// middle is `offset` pixels from the pointer.
+    Divide { index: usize, offset: f32 },
+    /// Dragging the capture being reframed, grabbed at `from` where it showed as
+    /// `start`.
+    Pan { from: Point, start: Placement },
 }
 
 /// How the card a dragged capture shrinks into flies in the window.
@@ -457,6 +471,16 @@ struct Editor {
     /// as one docks, leaves or comes back.
     incoming: Option<dock::Incoming>,
     landing: Option<dock::Landing>,
+    /// The captures as the white between two of them, dragged, leaves them, and the
+    /// grip on the white under the pointer.
+    arranging: Option<Collage>,
+    grip: Option<arrange::Grip>,
+    /// The capture being reframed, double-clicked, while it is or folds back.
+    reframing: Option<reframe::Reframing>,
+    /// When and where the last press was, to tell a double-click, and whether it
+    /// placed a step.
+    click: Option<(Instant, Point)>,
+    placed: bool,
     hints: Hints,
     /// The clock of the signal that the capture saved itself, while it shows.
     saved: Option<Animation>,
@@ -497,7 +521,12 @@ impl Editor {
                 }
             }
             WM_MOUSEWHEEL => self.wheel(wparam, lparam),
-            WM_LBUTTONDOWN => self.press(self.point(lparam)),
+            WM_LBUTTONDOWN => {
+                let point = self.point(lparam);
+                if !(self.clicked_twice(point) && self.double_click(point)) {
+                    self.press(point);
+                }
+            }
             WM_LBUTTONUP => self.release(self.point(lparam)),
             // Another window took the pointer.
             WM_CAPTURECHANGED => self.cancel(),
@@ -513,6 +542,7 @@ impl Editor {
                     let _ = unsafe { KillTimer(Some(self.hwnd), REHEARSE_TIMER) };
                 }
             }
+            WM_TIMER if wparam.0 == reframe::REFRAME_TIMER => self.wheel_rested(),
             WM_TIMER if wparam.0 == BLINK_TIMER => {
                 if !self.toolbar.name_mut().blink(Instant::now()) {
                     let _ = unsafe { KillTimer(Some(self.hwnd), BLINK_TIMER) };
@@ -553,6 +583,7 @@ impl Editor {
             WM_DESTROY => {
                 import::refuse(self.hwnd);
                 self.finish_naming();
+                self.keep_framing();
                 if self.unpublished {
                     self.publish();
                 }
@@ -614,6 +645,9 @@ impl Editor {
             IDC_IBEAM
         } else if self.toolbar.covers(point) || self.chip_at(point) {
             IDC_ARROW
+        } else if let Some(over) = self.over_framing(point) {
+            // The capture reframed drags anywhere in all of it.
+            if over { IDC_SIZEALL } else { IDC_ARROW }
         } else if let Some(handle) = self.handle_at(point) {
             // An arrow's ends go anywhere, and the top-left and bottom-right corners
             // pull along one diagonal.
@@ -623,6 +657,12 @@ impl Editor {
                 IDC_SIZENWSE
             } else {
                 IDC_SIZENESW
+            }
+        } else if let Some((_, divider)) = self.divider_at(point) {
+            if divider.across {
+                IDC_SIZEWE
+            } else {
+                IDC_SIZENS
             }
         } else if self.shape_at(point).is_some_and(|shape| !self.fills(shape)) {
             IDC_SIZEALL
@@ -647,6 +687,10 @@ impl Editor {
         let (x, y) = window::hit_position(self.hwnd, lparam);
         let at = (x as f32 / self.scale, y as f32 / self.scale);
         let notches = f32::from((wparam.0 >> 16) as u16 as i16) / WHEEL_DELTA as f32;
+        // The capture reframed zooms in its space instead.
+        if self.is_reframing() {
+            return self.wheel_framing(at, notches);
+        }
         let to = self
             .frame()
             .zoom(self.glide.target(), ZOOM_STEP.powf(notches), at);
@@ -685,10 +729,15 @@ impl Editor {
             self.rehearse();
         }
         let chip = point.is_some_and(|point| !self.toolbar.covers(point) && self.chip_at(point));
+        // The white between two captures, under the pointer, shows its grip instead.
+        let divider = point
+            .filter(|&point| !chip && !self.toolbar.covers(point))
+            .and_then(|point| self.divider_at(point));
+        let grip = self.show_grip(divider.map(|(index, _)| index));
         let shape = point
-            .filter(|_| !chip)
+            .filter(|_| !chip && divider.is_none() && !self.is_reframing())
             .and_then(|point| self.shape_at(point));
-        let changed = toolbar || chip != self.chip_hovered || shape != self.hovered;
+        let changed = toolbar || grip || chip != self.chip_hovered || shape != self.hovered;
         (self.chip_hovered, self.hovered) = (chip, shape);
         changed
     }
@@ -703,8 +752,18 @@ impl Editor {
             self.finish_naming();
         }
         self.toolbar.unfocus();
+        self.placed = false;
+        // The toolbar ends reframing, and does what it does.
+        if self.toolbar.covers(point) {
+            self.leave_reframing();
+        }
         let bounds = self.bounds();
-        let gesture = if let Some(part) = self.toolbar.part_at(point) {
+        let gesture = if self.is_reframing() {
+            match self.grab_framing(point) {
+                Some(gesture) => gesture,
+                None => return self.leave_reframing(),
+            }
+        } else if let Some(part) = self.toolbar.part_at(point) {
             if self.toolbar.control(part).press(point) {
                 self.option_changed(part);
             }
@@ -739,10 +798,13 @@ impl Editor {
                     anchor: corners[(handle + 2) % 4],
                 }
             }
+        } else if let Some((index, divider)) = self.divider_at(point) {
+            self.grab_divider(index, divider, point)
         } else if self.places_step(point) {
             // A click places the next step there, and dragging carries it along.
             let grab = self.view.edge(point, bounds);
             let shape = self.add(point);
+            self.placed = true;
             let Some(outline) = self.edits.outline(shape, self.whole()) else {
                 return;
             };
@@ -872,6 +934,8 @@ impl Editor {
                 let hovered = self.chip_at(point);
                 mem::replace(&mut self.chip_hovered, hovered) != hovered
             }
+            Gesture::Divide { index, offset } => self.divide(index, offset, point),
+            Gesture::Pan { from, start } => self.pan(from, start, point),
         }
     }
 
@@ -911,6 +975,8 @@ impl Editor {
                 self.remove_selected();
             }
             Gesture::Remove if self.chip_at(point) => self.remove_selected(),
+            Gesture::Divide { .. } => self.let_go_divider(true),
+            Gesture::Pan { from, .. } => self.let_go_framing(from, point),
             _ => {}
         }
         self.commit();
@@ -924,8 +990,11 @@ impl Editor {
         let Some(gesture) = self.gesture.take() else {
             return;
         };
-        if let Gesture::Control(part) = gesture {
-            self.toolbar.control(part).cancel();
+        match gesture {
+            Gesture::Control(part) => self.toolbar.control(part).cancel(),
+            Gesture::Divide { .. } => self.let_go_divider(false),
+            Gesture::Pan { .. } => self.cancel_pan(),
+            _ => {}
         }
         self.sync();
         self.invalidate();
@@ -944,6 +1013,10 @@ impl Editor {
         let (ctrl, shift) = (window::held(VK_CONTROL), window::held(VK_SHIFT));
         if self.toolbar.name().is_editing() {
             self.naming_key(key, ctrl, shift);
+            return true;
+        }
+        if self.is_reframing() && matches!(key, VK_ESCAPE | VK_RETURN) {
+            self.leave_reframing();
             return true;
         }
         match key {
@@ -1353,6 +1426,7 @@ impl Editor {
             || self.cropping.is_some()
             || self.incoming.is_some()
             || self.landing.is_some()
+            || self.reframing.is_some()
             || self.saved.is_some_and(|clock| clock.is_running(now))
             || self.glide.is_running(now)
             || self.view.zoom > self.frame().fit().zoom
@@ -1369,6 +1443,8 @@ impl Editor {
     /// out as cropping does, and a capture docked as docking does.
     fn step(&mut self, step: fn(&mut Document) -> bool) {
         self.settle();
+        // A framing not kept yet is the change to undo.
+        self.keep_framing();
         let (kept, start, shapes) = (self.bounds(), self.view, self.edits.clone());
         let (image, before) = (self.document.image().clone(), self.before());
         if step(&mut self.document) {
@@ -1376,8 +1452,11 @@ impl Editor {
             self.sync();
             self.unpublished = true;
             if !Arc::ptr_eq(&image, self.document.image()) {
-                self.land(before, None, None);
+                if !self.follow_framing(&before.collage) {
+                    self.land(before, None, None);
+                }
             } else if self.bounds() != kept {
+                self.reframing = None;
                 self.recrop(kept, start, shapes);
             }
         }
@@ -1541,6 +1620,8 @@ impl Editor {
             self.flight = None;
         }
         self.docking_ended(now);
+        self.grip_ended(now);
+        self.reframing_rests(now);
         if self
             .cropping
             .as_ref()
@@ -1608,6 +1689,8 @@ impl Editor {
             || self.cropping.is_some()
             || self.marks.is_running(now)
             || self.docking_moves(now)
+            || self.grip_moves(now)
+            || self.reframing_moves(now)
         {
             self.invalidate();
         }
@@ -1618,6 +1701,7 @@ impl Editor {
             && self.cropping.is_none()
             && self.landing.is_none()
             && !self.zoom.is_running(now)
+            && !self.reframing_moves(now)
         {
             self.publish();
         }
@@ -1635,7 +1719,9 @@ impl Editor {
     }
 
     fn draw(&self, gpu: &mut Gpu, now: Instant) -> Result<()> {
-        let Gpu { surface, image } = gpu;
+        let arranged = self.arranged(gpu);
+        let own = self.framing_own(gpu);
+        let Gpu { surface, image, .. } = gpu;
         surface.draw(&self.palette, self.scale, |painter| {
             let (width, height) = self.window();
             // A zoomed capture slides under the title bar, out of sight.
@@ -1646,18 +1732,21 @@ impl Editor {
             let center = (capture.left + capture.width / 2.0, capture.middle());
             painter.clip(canvas, || {
                 painter.grown(1.0 - FADE * lift, 1.0 - SINK * lift, center, || {
-                    match (&self.cropping, &self.landing) {
-                        (Some(cropping), _) => self.draw_cropping(painter, image, cropping, now),
-                        (None, Some(landing)) => self.draw_landing(painter, image, landing, now),
-                        (None, None) => self.draw_capture(painter, image, now),
+                    match (&self.cropping, &self.landing, &arranged) {
+                        (Some(cropping), ..) => self.draw_cropping(painter, image, cropping, now),
+                        (None, Some(landing), _) => self.draw_landing(painter, image, landing, now),
+                        (None, None, Some(pieces)) => self.draw_arranged(painter, image, pieces),
+                        (None, None, None) => self.draw_capture(painter, image, now),
                     }
+                    self.draw_reframing(painter, image, own.as_ref(), now);
+                    self.draw_grip(painter, now);
                 });
                 self.draw_corners(painter, now);
                 self.draw_zone(painter, now);
             });
             self.toolbar.draw(painter, now);
             if let Some((pose, glint)) = self.card(now) {
-                card::draw(painter, image, self.bounds(), pose, glint);
+                card::draw(painter, image, card::part(self.bounds()), pose, glint);
             }
             self.draw_cards(painter, image, now);
         })

@@ -131,10 +131,10 @@ impl Pose {
     }
 }
 
-/// Draws the `kept` pixels of `image` as the card posed `pose`: the more lifted off,
+/// Draws the `part` of `image`, in its pixels, as the card posed `pose`: the more lifted off,
 /// the farther its shadows fall and the more its light and edge show. A glint
 /// crosses it `glint` of the way, if any.
-pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, kept: Rect, pose: Pose, glint: Option<f32>) {
+pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, part: Area, pose: Pose, glint: Option<f32>) {
     let Pose {
         area,
         lean,
@@ -146,7 +146,7 @@ pub fn draw(painter: &Painter, image: &ID2D1Bitmap1, kept: Rect, pose: Pose, gli
             let shadow = color(0x000000, dark * lift);
             painter.cast(area, radius, blur * lift, down * lift, shadow);
         }
-        painter.clip_rounded(area, radius, || painter.bitmap(image, part(kept), area));
+        painter.clip_rounded(area, radius, || painter.bitmap(image, part, area));
         painter.sheen(area, radius, lift);
         if let Some(glint) = glint {
             let band = GLINT_BAND * area.width;
