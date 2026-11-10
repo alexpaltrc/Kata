@@ -12,6 +12,7 @@ mod image;
 mod ink;
 mod marker;
 pub mod name;
+mod parallel;
 mod png;
 mod render;
 

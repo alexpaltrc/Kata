@@ -90,7 +90,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 
 ## Pendiente
 
-- **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
+- **Compresión: lo que sigue.** Lo más prometedor del plan ya está hecho; las ideas que quedan, en [compresion.md](compresion.md#lo-que-sigue).
 - **Bienvenida (onboarding).** Sus cinco fases (hola, la primera captura, el editor, Lista y Premium) están hechas: ver [Bienvenida](#bienvenida). Falta que Alex las pruebe y conectar «Obtener Premium» con la compra en la Store.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
 - **Juntar capturas: lo que sigue.** Pegar con `Ctrl + V` una captura para juntarla, que la ventana crezca con la composición, y decidir si va en el Premium.

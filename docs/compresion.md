@@ -1,9 +1,9 @@
 # La compresión PNG de Kata
 
 Kata guarda cada captura como PNG con un compresor propio, escrito desde cero, **sin cambiar un
-solo píxel**. Frente al que trae Windows, en nuestro banco de 19 capturas los archivos pesan **18 %
-menos de media**. En el uso diario se gana menos: entre 5 y 8 % en ventanas, y con un fondo de
-pantalla que es una foto, 0,5 % más. El plan para ir mucho más lejos está al final.
+solo píxel**. Frente al que trae Windows, en el banco de pruebas los archivos pesan **34 % menos
+de media**: entre 17 y 46 % en ventanas, más de 50 % con pocos colores y entre 8 y 10 % cuando hay
+fotos. Ninguna captura sale más grande que con Windows.
 
 Este documento cuenta por qué lo hicimos, cómo funciona, qué probamos (también lo que no
 funcionó) y qué decidimos, con los números de cada experimento.
@@ -53,15 +53,26 @@ Un PNG guarda la imagen en tres pasos. Kata los hace así:
    rojo, verde y azul.
 2. **Volver repetitiva cada fila.** Una fila puede guardarse tal cual o como la diferencia con el
    píxel de la izquierda, el de arriba o una mezcla de ambos. Son cinco formas, llamadas filtros.
-   Kata prueba las cinco en cada fila y se queda con la que deja la fila más repetitiva.
+   Kata parte la captura en franjas de unas pocas filas y prueba cada franja de siete maneras:
+   con cada filtro, y eligiendo el filtro fila por fila con dos medidas distintas. Se queda con
+   la manera que de verdad pesa menos al comprimirla. Así el fondo de pantalla, la barra de
+   tareas y el texto reciben cada uno lo que les conviene.
 3. **Comprimir.** Primero busca repeticiones y las cambia por avisos cortos del tipo «repite los
    40 bytes que hubo hace 300». Luego le da códigos cortos a lo que más aparece y largos a lo raro,
-   como el código Morse le da un solo punto a la «E». A esto se le llama DEFLATE.
+   como el código Morse le da un solo punto a la «E». A esto se le llama DEFLATE. Kata no se
+   queda con la primera repetición que encuentra: calcula cuántos bits cuesta cada camino posible
+   y elige el más barato, tres veces seguidas, afinando los precios en cada vuelta. Y cambia de
+   códigos donde cambia la imagen.
+
+Todo esto usa todos los núcleos del procesador a la vez, en segundo plano.
 
 Al final, una prueba automática le pide al propio Windows que abra cada PNG de Kata y comprueba
 que cada píxel es idéntico al original.
 
-## Resultados
+## Resultados de la primera versión
+
+Los de esta sección son de la primera versión del compresor, con las 19 capturas reales de
+entonces. Los de ahora están en [Dónde quedó](#dónde-quedó).
 
 Medido con 19 capturas reales: ventanas, páginas, capturas de la Store y una foto con mucho ruido.
 
@@ -174,6 +185,128 @@ Calcular los cinco filtros píxel a píxel tardaba unos 60 ms en una captura de 
 Reescritos como cinco recorridos sencillos, uno por filtro, que el procesador ejecuta de corrido,
 bajaron a unos 13 ms. **Adoptado.**
 
+### 9. Un banco de pruebas permanente
+
+Las 19 capturas de los primeros experimentos eran reales y privadas, así que no viven en el repo.
+Ahora hay una prueba, `weighing_a_folder`, que pesa cada imagen de una carpeta con Windows y con
+Kata, comprueba que Windows lea la de Kata píxel a píxel y da la media, el peor caso y el tiempo:
+
+```
+$env:KATA_BENCH = "C:\ruta\a\la\carpeta"
+cargo test --release -p kata weighing_a_folder -- --ignored --nocapture
+```
+
+El banco de ahora son 10 capturas sintéticas, dibujadas con las fuentes y los fondos de pantalla
+de Windows: una ventana clara sobre un fondo de foto, un editor de código oscuro, una página de
+ajustes con degradado, el escritorio solo, un recorte pequeño, una hoja de cálculo, una página web
+larga con fotos, una ventana oscura en 4K, un diálogo de pocos colores y una captura editada con
+Foco y Desenfocar. Con ellas, la versión anterior ahorraba **26,7 % de media** (peor caso 2,3 %,
+7,2 % del peso total) en 978 ms. Todo lo que sigue se mide contra eso, en un equipo de 12 núcleos.
+
+### 10. Probar de verdad los filtros, por franjas
+
+En vez de estimar qué filtro conviene a cada fila, la captura se parte en franjas de unos 128 KB
+y cada una se filtra de siete maneras: los cinco filtros fijos, el filtro por fila con nuestra
+medida de pares y el filtro por fila con la regla habitual. Cada manera se comprime rápido (solo
+para pesarla) y la franja se queda con la más ligera. Las franjas se reparten entre los núcleos.
+
+Junto con el experimento 11: **28,5 % de media**, peor caso 2,9 %, en 605 ms. **Adoptado.**
+
+Variantes medidas, todas **descartadas**:
+
+| Variante | Media |
+|---|---|
+| Franjas de 64 KB | 33,6 % (frente a 33,8 %) |
+| Franjas de 32 KB | 33,5 % |
+| Franjas de 256 KB | 33,4 % |
+| Una sola manera para toda la captura | 33,4 %, y tarda un 65 % más |
+| Pesar cada franja viendo las filas de encima | 33,8 %: igual, con más código |
+| Cobrar un costo por cambiar de manera entre franjas | 33,6 % |
+
+### 11. Todos los núcleos
+
+Encontrar repeticiones solo necesita leer los bytes anteriores, que no cambian. Así que los datos
+se parten en tramos de 256 KB y cada núcleo lee uno, mirando hacia atrás en el tramo anterior
+como si lo hubiera leído él. No se pierde nada de compresión y el tiempo baja casi tanto como
+núcleos hay. Los tramos se procesan por tandas, tantos como núcleos, para no guardar en memoria
+más de lo necesario. **Adoptado.**
+
+### 12. El camino más barato en bits
+
+Hasta aquí, en cada punto se tomaba la repetición más larga. Pero la más larga no siempre es la
+más barata: a veces conviene una más corta y más cercana, o escribir los bytes tal cual. Ahora
+cada tramo se lee primero como antes, y con eso se le pone precio en bits a cada byte y a cada
+repetición. Luego se busca, entre todas las maneras de recorrer el tramo, la que suma menos bits.
+Con el resultado se afinan los precios y se repite.
+
+| Vueltas | Media | Peor caso | Tiempo |
+|---|---|---|---|
+| 0 (la repetición más larga) | 28,5 % | 2,9 % | 605 ms |
+| 1 | 32,8 % | 7,2 % | 1738 ms |
+| 2 | 33,3 % | 7,5 % | 2911 ms |
+
+Es la mejora más grande, también en fotos (de 2,9 a 7,5 %). Pero cada vuelta volvía a buscar las
+repeticiones. Buscándolas una sola vez y guardándolas para todas las vueltas:
+
+| Vueltas, con las repeticiones guardadas | Media | Tiempo |
+|---|---|---|
+| 1 | 31,5 % | 1474 ms |
+| 2 | 33,1 % | 1653 ms |
+| **3** | **33,5 %** | **1842 ms** |
+
+**Decisión:** tres vueltas. Las repeticiones de 128 bytes o más se toman enteras, sin mirar
+dentro: bajar ese umbral a 64 o a 32 ahorra tiempo, pero pierde hasta 2,5 puntos.
+
+### 13. Cuánto buscar, otra vez
+
+| Candidatos por posición | Media | Tiempo |
+|---|---|---|
+| 16 | 31,7 % | 1444 ms |
+| 32 | 32,6 % | 1951 ms |
+| **64** | **33,3 %** | **2911 ms** |
+| 128 (con tres vueltas) | 33,8 % | 2500 ms |
+
+Probamos también rendirse antes: dejar de buscar tras 8, 16 o 24 candidatos seguidos sin mejora.
+Ahorra tiempo, pero pierde lo mismo que buscar menos (31,3 a 32,6 %). **Descartado:** se queda en
+64. Lo que sí quedó es descartar cada candidato comparando cuatro bytes en vez de uno antes de
+medirlo: el mismo resultado, un 6 % más rápido.
+
+### 14. Bloques a medida
+
+Antes, cada bloque tenía 32 768 símbolos. Ahora los símbolos llegan en trozos pequeños, y un trozo
+se une al bloque en curso salvo que los dos pesen menos por separado, cada uno con sus códigos.
+Así los códigos cambian donde cambia la imagen.
+
+| Tamaño del trozo | Media | Total |
+|---|---|---|
+| 4096 símbolos | 32,5 % | 12,7 % |
+| 1024 | 32,8 % | 12,7 % |
+| 512 | 33,7 % | 13,6 % |
+| **256** | **33,8 %** | **13,8 %** |
+
+**Decisión:** 256. Además, un bloque tan pequeño que no paga sus propios códigos usa los códigos
+fijos de DEFLATE: en un recorte pequeño ahorra unas decenas de bytes.
+
+### Dónde quedó
+
+| Captura | Windows | Antes | Ahora | Ahorro | Tiempo |
+|---|---|---|---|---|---|
+| Editor de código oscuro (2560×1440) | 188 693 | 121 798 | 107 744 | 42,9 % | 115 ms |
+| Recorte pequeño (680×100) | 5 717 | 3 018 | 2 792 | 51,2 % | 5 ms |
+| Escritorio con foto (2560×1440) | 3 406 662 | 3 327 329 | 3 128 020 | 8,2 % | 595 ms |
+| Diálogo de pocos colores (480×320) | 10 426 | 4 532 | 4 233 | 59,4 % | 6 ms |
+| Captura editada (1920×1080) | 163 766 | 135 995 | 120 297 | 26,5 % | 113 ms |
+| Ajustes con degradado (1920×1080) | 69 737 | 62 092 | 54 038 | 22,5 % | 66 ms |
+| Hoja de cálculo (1600×900) | 74 223 | 39 256 | 34 383 | 53,7 % | 48 ms |
+| Página web larga con fotos (1920×2400) | 1 353 874 | 1 305 386 | 1 217 516 | 10,1 % | 364 ms |
+| Ventana oscura en 4K (3840×2160) | 330 364 | 196 632 | 176 653 | 46,5 % | 113 ms |
+| Ventana clara sobre foto (2560×1440) | 502 807 | 472 549 | 418 634 | 16,7 % | 244 ms |
+| **Media** | | 26,7 % | | **33,8 %** | |
+
+En bytes. El peor caso pasó de 2,3 a 8,2 %, y el ahorro sobre el peso total, de 7,2 a 13,8 %. El
+banco entero tarda 1670 ms, frente a 978 ms: 1,7 veces más, en segundo plano y con la captura ya
+en el portapapeles.
+
 ## Datos para nerds
 
 **El archivo:** firma PNG, `IHDR`, `PLTE` (solo con paleta), un único `IDAT` e `IEND`. Sin canal
@@ -183,96 +316,50 @@ alfa (las capturas son opacas), sin entrelazado y sin metadatos. Cada bloque lle
 el color del píxel anterior. Profundidad de 1, 2, 4 u 8 bits según el número de colores, con
 filas empaquetadas desde el bit más alto y sin filtro: los índices son nombres, no cantidades.
 
-**RGB:** 8 bits por canal. Cada fila prueba los cinco filtros (None, Sub, Up, Average, Paeth) y
-elige el que deja menos pares de bytes vecinos distintos. Para contarlos sin borrar nada entre
-filas, una tabla de 65 536 entradas guarda en qué fila se vio cada par.
+**RGB:** 8 bits por canal, en franjas de filas que suman unos 128 KB. Cada franja se filtra de
+siete maneras (None, Sub, Up, Average o Paeth en todas sus filas; o, fila por fila, el filtro que
+deja menos pares de bytes vecinos distintos, o el que deja los bytes más cerca de cero) y se queda
+con la que menos pesa tras una compresión rápida, de 8 candidatos por posición y sin afinar.
 
 **DEFLATE:**
 
 | Parámetro | Valor |
 |---|---|
 | Ventana | 32 KiB, el máximo de DEFLATE |
+| Tramos | De 256 KiB, uno por núcleo a la vez; cada uno ve los 32 KiB anteriores |
 | Búsqueda | Cadenas hash sobre 4 bytes, con una tabla de 2¹⁵ entradas |
-| Candidatos por posición | 64, o 16 si ya hay una repetición de 8 bytes o más |
-| Repetición que corta la búsqueda | 128 bytes |
-| Decisión con un byte de espera | Cada repetición espera un byte por si empieza otra más larga, salvo las de 32 bytes o más |
-| Bloques | Cada 32 768 símbolos, con códigos de Huffman dinámicos propios |
-| Códigos de Huffman | Óptimos con límite de longitud (*package-merge*): 15 bits, 7 para los códigos de longitudes |
+| Candidatos por posición | 64; se guarda, para cada largo, la repetición más cercana |
+| Repetición que se toma entera | 128 bytes o más |
+| Lectura | El camino de menos bits por el tramo, tres veces: la primera con los precios de tomar siempre la repetición más larga, y cada una con los de la anterior |
+| Precios | La entropía de cada símbolo, en 1/32 de bit, entre 1 y 15 bits |
+| Bloques | Trozos de 256 símbolos que se unen mientras pesen menos juntos; 262 144 símbolos como mucho |
+| Códigos de Huffman | Óptimos con límite de longitud (*package-merge*): 15 bits, 7 para los códigos de longitudes; o los fijos de DEFLATE si el bloque pesa menos con ellos |
 | Comparación de bytes | De 8 en 8, en palabras de 64 bits |
 | Envoltorio | zlib, con su suma Adler-32 |
 
-**Código:** [`crates/editor/src/png.rs`](../crates/editor/src/png.rs) y
-[`crates/editor/src/deflate.rs`](../crates/editor/src/deflate.rs). Unas 900 líneas de Rust puro,
-con pruebas, sin ninguna dependencia.
+**Código:** [`crates/editor/src/png.rs`](../crates/editor/src/png.rs),
+[`crates/editor/src/deflate.rs`](../crates/editor/src/deflate.rs) y
+[`crates/editor/src/parallel.rs`](../crates/editor/src/parallel.rs). Unas 1400 líneas de Rust
+puro, con pruebas, sin ninguna dependencia.
 
-## Plan para ir a fondo (pendiente)
+## Lo que sigue
 
-Hasta ahora fuimos prudentes: técnicas clásicas, bien medidas. Lo siguiente es más atrevido y
-experimental.
+Del plan para ir a fondo ya está hecho lo que más prometía: el banco permanente, probar los
+filtros de verdad, el camino más barato en bits, los bloques a medida y usar todos los núcleos.
+**Lo que no se puede cambiar** sigue igual: el archivo es un PNG normal, sin pérdida. Eso fija las
+herramientas: cinco filtros por fila y DEFLATE, que solo recuerda 32 KB hacia atrás. Quedan estas
+ideas, de más a menos prometedoras:
 
-**Metas:**
-
-- **Nunca más grande que Windows**, en ninguna captura, fotos incluidas.
-- **Ganar de verdad en el día a día:** más de 15 % en ventanas y páginas, no solo en el banco.
-- **Sin hacer esperar:** todo sigue en segundo plano, con la captura ya en el portapapeles.
-
-**Lo que no se puede cambiar.** El archivo sigue siendo un PNG normal. Eso fija las herramientas:
-cinco filtros por fila y DEFLATE, que solo recuerda 32 KB hacia atrás (en una captura de 2560 px de
-ancho, unas 4 filas). Lo que sí decidimos: el filtro de cada fila, cómo se describen las
-repeticiones, dónde empieza cada bloque y cómo se guardan los colores. Con fotos, el margen es
-pequeño para cualquier codificador: tienen ruido y casi nada se repite. Ganar mucho ahí exigiría
-otro formato, y eso ya lo descartamos.
-
-### Fase 0. Medir mejor
-
-- **Un banco de pruebas permanente:** una prueba en el repo que compara con Windows cada captura
-  de una carpeta, con un solo comando. Las capturas son privadas y el repo es público, así que
-  viven en `Kata Archivos`.
-- **Más variedad:** fondos de pantalla, pantalla completa con la barra de tareas, modo oscuro, 4K,
-  texto pequeño y capturas editadas con Desenfocar y Foco, que es lo que de verdad se guarda.
-
-### Fase 1. Nunca más grande
-
-- **Varias recetas a la vez:** comprimir la misma captura con 3 o 4 recetas en paralelo, una por
-  núcleo del procesador (filtros por pares, por la regla habitual o por entropía; con o sin
-  paleta), y quedarse con la más pequeña. Cuesta procesador, no espera.
-- **Filas de foto y filas de ventana:** nuestra medida de pares gana en ventanas, pero no en fotos.
-  Elegir la medida según el tipo de fila.
-
-### Fase 2. DEFLATE óptimo
-
-La que más promete, en todo tipo de capturas.
-
-- **Repeticiones por su costo real en bits:** en vez de quedarse con la más larga en cada punto,
-  buscar el camino más barato por todo el archivo, y repetirlo unas veces afinando los códigos.
-- **Bloques a medida:** cortar donde cambia la imagen (por ejemplo, donde el fondo de pantalla se
-  encuentra con la barra de tareas), para que cada bloque tenga sus propios códigos.
-
-### Fase 3. Filtros atrevidos
-
-- **Probar de verdad:** comprimir cada fila con los cinco filtros y quedarse con el que menos bits
-  cuesta, en vez de estimarlo.
-- **Pensar varias filas por delante:** el filtro de una fila cambia cuánto se le parecen las
-  siguientes. Buscar la mejor secuencia, no la mejor fila suelta.
-
-### Fase 4. Colores
-
-- **Escala de grises:** si todos los píxeles son grises, guardar un canal en vez de tres.
-- **Paleta ordenada** por uso o por qué colores van juntos, para que los índices formen patrones;
-  y paleta con filtros cuando convenga.
-
-### Fase 5. Ideas sin garantía
-
-Probablemente fallen, pero se miden:
-
-- **Buscar arriba primero:** en una captura, lo que más se repite suele estar justo encima.
-- **Entrelazado:** el PNG entrelazado casi siempre pesa más, pero cambia qué cabe en esos 32 KB.
-  En capturas muy anchas, quizá no.
-
-### Para pagar el tiempo
-
-- **Varios núcleos e instrucciones vectoriales** (SIMD) en los filtros y la búsqueda.
+- **Un buscador de repeticiones mejor.** Buscar más hondo sigue dando (128 candidatos: 33,8 %),
+  pero cuesta tiempo. Una estructura que encuentre la repetición más larga sin recorrer
+  candidatos uno a uno daría eso y más, por menos.
+- **Filtros fila por fila, probados de verdad.** Hoy se prueban por franjas. Probar cada fila con
+  lo que ya se eligió encima es más fino y más caro.
+- **Colores:** paleta con filtros cuando convenga, índices de 8 bits frente a empaquetados, y
+  grises con filtros frente a la paleta.
 - **Empezar antes:** comprimir mientras el editor está abierto, para que guardar sea instantáneo.
+- **Ideas sin garantía:** buscar primero en la fila de encima; el entrelazado en capturas muy
+  anchas.
 
 Cada experimento se mide con el banco y se anota en la bitácora, funcione o no. Una idea se queda
 solo si mejora la media sin dejar ninguna captura más grande que con Windows.

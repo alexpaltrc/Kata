@@ -782,6 +782,12 @@ mod tests {
             // Long repeats near and far, then noise that fills several blocks.
             image(700, 120, |x, y| noise(x % 97, y % 5)),
             image(300, 200, noise),
+            // Flat, patterned and noisy bands, enough for several spans on every core.
+            image(1300, 900, |x, y| match y / 150 % 3 {
+                0 => 0xF3_F3F3,
+                1 => noise(x % 61, y % 9),
+                _ => noise(x, y) & 0x07_0707 | (x / 3) << 16,
+            }),
         ];
         for image in cases {
             let (width, height) = (image.width(), image.height());

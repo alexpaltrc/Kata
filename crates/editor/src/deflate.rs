@@ -1,9 +1,16 @@
 //! DEFLATE compression (RFC 1951) inside a zlib stream (RFC 1950): how PNG stores
 //! its pixels.
 //!
-//! Repeats are found through hash chains, and each one is settled a byte late, in
-//! case a longer one starts there. Every block then gets Huffman codes of its own,
-//! the shortest that fit DEFLATE's limits, found by package-merge.
+//! The data is read in spans, as many at once as there are cores. Each span is
+//! first read the quick way, taking the longest repeat at every step. What that
+//! reading costs then prices each literal and each repeat, and the span is read
+//! again for the cheapest way through it. Blocks end where the data changes, each
+//! with Huffman codes of its own, the shortest that fit DEFLATE's limits, found by
+//! package-merge; a block too small to pay for its codes uses DEFLATE's fixed ones.
+
+use std::ops::Range;
+
+use crate::parallel;
 
 /// How far back a repeat can reach.
 const WINDOW: usize = 1 << 15;
@@ -11,18 +18,24 @@ const MIN_MATCH: usize = 3;
 const MAX_MATCH: usize = 258;
 /// Earlier positions a search tries before settling for the best so far.
 const MAX_CHAIN: usize = 64;
-/// A repeat this long ends the search.
+/// Earlier positions a search tries when the answer is only weighed.
+const QUICK_CHAIN: usize = 8;
+/// A repeat this long ends the search, and is taken whole.
 const NICE_MATCH: usize = 128;
-/// A repeat this long is taken at once, without trying the next byte.
-const LAZY_ENOUGH: usize = 32;
-/// While a repeat this long is held, the next byte gets a shorter search.
-const GOOD_MATCH: usize = 8;
 /// Positions are chained by their first four bytes: chaining by three finds more
 /// short repeats, which cost about as much as the bytes they replace.
 const HASHED: usize = 4;
 const HASH_BITS: u32 = 15;
-/// Literals and repeats gathered before a block is written.
-const BLOCK_TOKENS: usize = 1 << 15;
+/// Bytes read as one piece of work, priced by what they hold themselves.
+const SPAN: usize = 1 << 18;
+/// How many times a span is read again, each time priced by the reading before.
+const ROUNDS: usize = 3;
+/// Tokens weighed together when deciding where a block ends.
+const PIECE: usize = 1 << 8;
+/// The most tokens a block holds.
+const MOST_TOKENS: usize = 1 << 18;
+/// Prices count this many parts of a bit.
+const BIT: u32 = 32;
 /// No earlier position.
 const NONE: u32 = u32::MAX;
 
@@ -37,56 +50,186 @@ pub fn zlib(data: &[u8]) -> Vec<u8> {
     let mut bits = Bits::default();
     // DEFLATE with a 32 KiB window; the second byte makes the pair a multiple of 31.
     bits.out.extend_from_slice(&[0x78, 0x9C]);
-    deflate(data, &mut bits);
+    let mut blocks = Blocks::new(&mut bits);
+    let spans: Vec<Range<usize>> = (0..data.len())
+        .step_by(SPAN)
+        .map(|start| start..data.len().min(start + SPAN))
+        .collect();
+    // A wave at a time, so only as many spans as cores are ever held as tokens.
+    for wave in spans.chunks(parallel::width()) {
+        for tokens in parallel::each(wave.len(), |span| read(data, wave[span].clone())) {
+            blocks.feed(&tokens);
+        }
+    }
+    blocks.finish();
     let mut out = bits.finish();
     out.extend_from_slice(&adler32(data).to_be_bytes());
     out
 }
 
-fn deflate(data: &[u8], bits: &mut Bits) {
-    let mut chains = Chains::new(data);
-    let mut tokens = Vec::with_capacity(BLOCK_TOKENS + 2);
-    // A repeat found one byte back, held while this byte is tried for a longer one.
-    let mut held: Option<(usize, usize)> = None;
+/// Roughly how many bits `data` compresses to, found the quick way: enough to tell
+/// which of several ways of writing the same pixels compresses best.
+pub fn weigh(data: &[u8]) -> u64 {
+    let mut chains = Chains::new(data, 0..data.len());
+    let mut counts = Counts::default();
     let mut pos = 0;
     while pos < data.len() {
-        if tokens.len() >= BLOCK_TOKENS {
-            write_block(&tokens, false, bits);
-            tokens.clear();
+        let (length, distance) = chains.find(pos, QUICK_CHAIN);
+        if length < MIN_MATCH {
+            counts.add(Token::literal(data[pos]));
+            pos += 1;
+            continue;
         }
-        let chain = if held.is_some_and(|(length, _)| length >= GOOD_MATCH) {
-            MAX_CHAIN / 4
-        } else {
-            MAX_CHAIN
-        };
-        let found = chains.find(pos, chain);
-        if let Some((length, distance)) = held.take() {
-            if found.0 <= length {
-                tokens.push(Token::repeat(length, distance));
-                for skipped in pos + 1..pos - 1 + length {
+        counts.add(Token::repeat(length, distance));
+        for skipped in pos + 1..pos + length {
+            chains.insert(skipped);
+        }
+        pos += length;
+    }
+    counts.bits()
+}
+
+/// The tokens that write `span` of `data` in the fewest bits found. Its repeats are
+/// looked up once; then it's read by taking the longest at each step, and read
+/// again, each time for the cheapest way through at the prices of the reading
+/// before.
+fn read(data: &[u8], span: Range<usize>) -> Vec<Token> {
+    let repeats = Repeats::new(data, span.clone());
+    let mut counts = repeats.longest(data);
+    let mut best: Option<(u64, Vec<Token>)> = None;
+    for _ in 0..ROUNDS {
+        let tokens = repeats.cheapest(data, &Prices::new(&counts));
+        counts = Counts::of(&tokens);
+        let weight = counts.bits();
+        if best
+            .as_ref()
+            .is_some_and(|&(lightest, _)| lightest <= weight)
+        {
+            break;
+        }
+        best = Some((weight, tokens));
+    }
+    best.expect("a reading").1
+}
+
+/// The repeats that start at each byte of a span: for every length, the nearest
+/// earlier place that repeats that much.
+struct Repeats {
+    span: Range<usize>,
+    /// Where each byte's repeats start in `found`, and one past the last.
+    starts: Vec<u32>,
+    /// Lengths and distances, each repeat longer and farther than the one before.
+    found: Vec<(u16, u16)>,
+}
+
+impl Repeats {
+    fn new(data: &[u8], span: Range<usize>) -> Self {
+        let mut chains = Chains::new(data, span.clone());
+        let mut starts = Vec::with_capacity(span.len() + 1);
+        let mut found = Vec::new();
+        let mut pos = span.start;
+        while pos < span.end {
+            starts.push(found.len() as u32);
+            let mut most = 0;
+            chains.search(pos, MAX_CHAIN, |length, distance| {
+                found.push((length as u16, distance as u16));
+                most = length;
+            });
+            pos += 1;
+            if most >= NICE_MATCH {
+                // So long a repeat is taken whole: nothing inside it is looked up.
+                let whole = found.pop().expect("the longest");
+                found.truncate(starts[starts.len() - 1] as usize);
+                found.push(whole);
+                for skipped in pos..pos + most - 1 {
                     chains.insert(skipped);
+                    starts.push(found.len() as u32);
                 }
-                pos += length - 1;
-                continue;
+                pos += most - 1;
             }
-            tokens.push(Token::literal(data[pos - 1]));
         }
-        let (length, distance) = found;
-        if length >= LAZY_ENOUGH {
-            tokens.push(Token::repeat(length, distance));
-            for skipped in pos + 1..pos + length {
-                chains.insert(skipped);
-            }
-            pos += length;
-        } else if length >= MIN_MATCH {
-            held = Some(found);
-            pos += 1;
-        } else {
-            tokens.push(Token::literal(data[pos]));
-            pos += 1;
+        starts.push(found.len() as u32);
+        Self {
+            span,
+            starts,
+            found,
         }
     }
-    write_block(&tokens, true, bits);
+
+    /// The repeats that start `at` bytes into the span.
+    fn at(&self, at: usize) -> &[(u16, u16)] {
+        &self.found[self.starts[at] as usize..self.starts[at + 1] as usize]
+    }
+
+    /// What the span holds, read by taking the longest repeat at each step.
+    fn longest(&self, data: &[u8]) -> Counts {
+        let mut counts = Counts::default();
+        let mut at = 0;
+        while at < self.span.len() {
+            let token = match self.at(at).last() {
+                Some(&(length, distance)) => Token { length, distance },
+                None => Token::literal(data[self.span.start + at]),
+            };
+            counts.add(token);
+            at += token.span();
+        }
+        counts
+    }
+
+    /// The span read the cheapest way at `prices`: of all the literals and repeats
+    /// that lead to each byte, the ones that get there in the fewest bits.
+    fn cheapest(&self, data: &[u8], prices: &Prices) -> Vec<Token> {
+        let len = self.span.len();
+        // The lowest price that reaches each byte, and the token that reaches it so.
+        let mut cost = vec![u32::MAX; len + 1];
+        let mut step = vec![Token::literal(0); len + 1];
+        cost[0] = 0;
+        let mut at = 0;
+        while at < len {
+            let here = cost[at];
+            let mut reach = |to: usize, price: u32, token: Token| {
+                if price < cost[to] {
+                    cost[to] = price;
+                    step[to] = token;
+                }
+            };
+            let byte = data[self.span.start + at];
+            reach(
+                at + 1,
+                here + prices.literals[usize::from(byte)],
+                Token::literal(byte),
+            );
+            let repeats = self.at(at);
+            if let [(length, distance)] = *repeats
+                && usize::from(length) >= NICE_MATCH
+            {
+                let price = here + prices.lengths[usize::from(length)] + prices.distance(distance);
+                reach(at + usize::from(length), price, Token { length, distance });
+                at += usize::from(length);
+                continue;
+            }
+            // Each length goes to the nearest place that repeats that much.
+            let mut length = MIN_MATCH as u16;
+            for &(most, distance) in repeats {
+                let far = here + prices.distance(distance);
+                while length <= most {
+                    let price = far + prices.lengths[usize::from(length)];
+                    reach(at + usize::from(length), price, Token { length, distance });
+                    length += 1;
+                }
+            }
+            at += 1;
+        }
+
+        let mut tokens = Vec::new();
+        let mut at = len;
+        while at > 0 {
+            tokens.push(step[at]);
+            at -= step[at].span();
+        }
+        tokens.reverse();
+        tokens
+    }
 }
 
 /// A literal byte (`distance` 0), or a repeat of `length` bytes from `distance` back.
@@ -110,11 +253,136 @@ impl Token {
             distance: distance as u16,
         }
     }
+
+    /// How many bytes it writes.
+    fn span(self) -> usize {
+        if self.distance == 0 {
+            1
+        } else {
+            usize::from(self.length)
+        }
+    }
+}
+
+/// How often each symbol of a block's two alphabets is used.
+#[derive(Clone)]
+struct Counts {
+    literals: [u32; 286],
+    distances: [u32; 30],
+}
+
+impl Default for Counts {
+    fn default() -> Self {
+        Self {
+            literals: [0; 286],
+            distances: [0; 30],
+        }
+    }
+}
+
+impl Counts {
+    fn of(tokens: &[Token]) -> Self {
+        let mut counts = Self::default();
+        for &token in tokens {
+            counts.add(token);
+        }
+        counts
+    }
+
+    fn add(&mut self, token: Token) {
+        if token.distance == 0 {
+            self.literals[usize::from(token.length)] += 1;
+        } else {
+            self.literals[257 + length_symbol(token.length).0] += 1;
+            self.distances[distance_symbol(token.distance).0] += 1;
+        }
+    }
+
+    /// These and `other` together.
+    fn with(&self, other: &Self) -> Self {
+        let mut both = self.clone();
+        for (count, more) in both.literals.iter_mut().zip(other.literals) {
+            *count += more;
+        }
+        for (count, more) in both.distances.iter_mut().zip(other.distances) {
+            *count += more;
+        }
+        both
+    }
+
+    /// Roughly the bits a block of these takes: each symbol at the price its share
+    /// earns it, never under a bit, plus the extra bits and the codes themselves.
+    fn bits(&self) -> u64 {
+        fn priced(counts: &[u32], extra: impl Fn(usize) -> u32) -> f32 {
+            let total = counts.iter().sum::<u32>() as f32;
+            let symbols = counts.iter().enumerate().filter(|&(_, &count)| count > 0);
+            symbols
+                .map(|(symbol, &count)| {
+                    let count = count as f32;
+                    // About four bits say how long each symbol's code is.
+                    4.0 + count * ((total / count).log2().max(1.0) + extra(symbol) as f32)
+                })
+                .sum()
+        }
+        let literals = priced(&self.literals, |symbol| match symbol {
+            265..285 => (symbol as u32 - 261) / 4,
+            _ => 0,
+        });
+        let distances = priced(&self.distances, |symbol| {
+            (symbol as u32).saturating_sub(2) / 2
+        });
+        74 + (literals + distances) as u64
+    }
+}
+
+/// What each literal and each repeat costs, in `BIT`s, going by how often a reading
+/// used them.
+struct Prices {
+    literals: [u32; 256],
+    /// By length, extra bits included.
+    lengths: [u32; MAX_MATCH + 1],
+    /// By distance symbol, extra bits included.
+    distances: [u32; 30],
+}
+
+impl Prices {
+    fn new(counts: &Counts) -> Self {
+        fn price(count: u32, total: f32) -> u32 {
+            // A symbol never seen costs as if it had been seen half a time.
+            let share = (count as f32).max(0.5) / total.max(1.0);
+            (BIT as f32 * -share.log2()).clamp(BIT as f32, 15.0 * BIT as f32) as u32
+        }
+        let total = counts.literals.iter().sum::<u32>() as f32;
+        let far = counts.distances.iter().sum::<u32>() as f32;
+        let mut prices = Self {
+            literals: [0; 256],
+            lengths: [0; MAX_MATCH + 1],
+            distances: [0; 30],
+        };
+        for (literal, &count) in prices.literals.iter_mut().zip(&counts.literals) {
+            *literal = price(count, total);
+        }
+        for length in MIN_MATCH..=MAX_MATCH {
+            let (symbol, extra_bits, _) = length_symbol(length as u16);
+            prices.lengths[length] = price(counts.literals[257 + symbol], total) + BIT * extra_bits;
+        }
+        for (symbol, distance) in prices.distances.iter_mut().enumerate() {
+            let extra_bits = (symbol as u32).saturating_sub(2) / 2;
+            *distance = price(counts.distances[symbol], far) + BIT * extra_bits;
+        }
+        prices
+    }
+
+    fn distance(&self, distance: u16) -> u32 {
+        self.distances[distance_symbol(distance).0]
+    }
 }
 
 /// Every earlier position, chained by the hash of the bytes starting there.
 struct Chains<'a> {
     data: &'a [u8],
+    /// Where repeats have to end.
+    end: usize,
     /// The latest position with each hash.
     head: Vec<u32>,
     /// The position before each one with the same hash, within the window.
@@ -122,12 +390,18 @@ struct Chains<'a> {
 }
 
 impl<'a> Chains<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self {
+    /// The chains to read `span` with: what comes just before it is already in.
+    fn new(data: &'a [u8], span: Range<usize>) -> Self {
+        let mut chains = Self {
             data,
+            end: span.end,
             head: vec![NONE; 1 << HASH_BITS],
             prev: vec![NONE; WINDOW],
+        };
+        for pos in span.start.saturating_sub(WINDOW)..span.start {
+            chains.insert(pos);
         }
+        chains
     }
 
     fn hash(&self, pos: usize) -> usize {
@@ -151,14 +425,24 @@ impl<'a> Chains<'a> {
     /// The longest earlier repeat of what starts at `pos`, as `(length, distance)`,
     /// or a length of 0. Adds `pos` for later searches.
     fn find(&mut self, pos: usize, chain: usize) -> (usize, usize) {
+        let mut best = (0, 0);
+        self.search(pos, chain, |length, distance| best = (length, distance));
+        best
+    }
+
+    /// Tries the earlier positions chained to `pos`, nearest first, and calls
+    /// `longer` with each repeat that beats those before it, as length and distance.
+    /// Adds `pos` for later searches.
+    fn search(&mut self, pos: usize, chain: usize, mut longer: impl FnMut(usize, usize)) {
         let data = self.data;
-        let max = (data.len() - pos).min(MAX_MATCH);
+        let max = (self.end - pos).min(MAX_MATCH);
         if max < HASHED {
-            return (0, 0);
+            return;
         }
         let hash = self.hash(pos);
         let nice = max.min(NICE_MATCH);
-        let mut best = (0, 0);
+        let word = |at: usize| u32::from_le_bytes(data[at..at + HASHED].try_into().unwrap());
+        let mut best = MIN_MATCH - 1;
         let mut candidate = self.head[hash];
         for _ in 0..chain {
             if candidate == NONE {
@@ -169,11 +453,15 @@ impl<'a> Chains<'a> {
             if distance > WINDOW {
                 break;
             }
-            // Only a repeat that reaches past the best so far can beat it.
-            if data[start + best.0] == data[pos + best.0] {
+            // Only a repeat that reaches past the best so far can beat it: its four
+            // bytes up to there have to be the same.
+            let tail = best - (HASHED - 1).min(best);
+            if word(start + tail) == word(pos + tail) {
                 let length = match_length(data, start, pos, max);
-                if length > best.0 {
-                    best = (length, distance);
+                if length > best {
+                    best = length;
+
+                    longer(length, distance);
                     if length >= nice {
                         break;
                     }
@@ -182,7 +470,6 @@ impl<'a> Chains<'a> {
             candidate = self.prev[start % WINDOW];
         }
         self.link(pos, hash);
-        if best.0 >= MIN_MATCH { best } else { (0, 0) }
     }
 }
 
@@ -203,74 +490,236 @@ fn match_length(data: &[u8], earlier: usize, pos: usize, max: usize) -> usize {
     length
 }
 
-/// Writes `tokens` as one block with Huffman codes made for it.
+/// Tokens on their way to the stream, cut into blocks where what they hold changes.
+struct Blocks<'a> {
+    bits: &'a mut Bits,
+    /// The block being gathered, with its counts and their weight.
+    block: Vec<Token>,
+    counts: Counts,
+    weight: u64,
+}
+
+impl<'a> Blocks<'a> {
+    fn new(bits: &'a mut Bits) -> Self {
+        Self {
+            bits,
+            block: Vec::new(),
+            counts: Counts::default(),
+            weight: 0,
+        }
+    }
+
+    /// Adds `tokens`, a piece at a time: a piece joins the block unless the two
+    /// weigh less apart, each with codes of its own.
+    fn feed(&mut self, tokens: &[Token]) {
+        for piece in tokens.chunks(PIECE) {
+            let counts = Counts::of(piece);
+            let apart = counts.bits();
+            let joined = self.counts.with(&counts);
+            let together = joined.bits();
+            let full = self.block.len() + piece.len() > MOST_TOKENS;
+            if !self.block.is_empty() && (full || together > self.weight + apart) {
+                write_block(&self.block, false, self.bits);
+                self.block.clear();
+                (self.counts, self.weight) = (counts, apart);
+            } else {
+                (self.counts, self.weight) = (joined, together);
+            }
+            self.block.extend_from_slice(piece);
+        }
+    }
+
+    fn finish(self) {
+        write_block(&self.block, true, self.bits);
+    }
+}
+
+/// Writes `tokens` as one block, with Huffman codes made for it or with DEFLATE's
+/// fixed ones, whichever takes fewer bits.
 fn write_block(tokens: &[Token], last: bool, bits: &mut Bits) {
-    let mut literal_counts = [0; 286];
-    let mut distance_counts = [0; 30];
-    literal_counts[END_OF_BLOCK] = 1;
-    for token in tokens {
-        if token.distance == 0 {
-            literal_counts[usize::from(token.length)] += 1;
-        } else {
-            literal_counts[257 + length_symbol(token.length).0] += 1;
-            distance_counts[distance_symbol(token.distance).0] += 1;
-        }
-    }
-    let literals = Code::new(&literal_counts, 15);
-    let distances = Code::new(&distance_counts, 15);
-
-    // Both codes' lengths, trimmed of unused symbols at the end, are run-length
-    // encoded with a code of their own.
-    let literal_len = used(&literals.lengths).max(257);
-    let distance_len = used(&distances.lengths).max(1);
-    let lengths: Vec<u8> = literals.lengths[..literal_len]
-        .iter()
-        .chain(&distances.lengths[..distance_len])
-        .copied()
-        .collect();
-    let runs = runs(&lengths);
-    let mut run_counts = [0; 19];
-    for &(symbol, _) in &runs {
-        run_counts[usize::from(symbol)] += 1;
-    }
-    let run_code = Code::new(&run_counts, 7);
-    let order_len = CODE_LENGTH_ORDER
-        .iter()
-        .rposition(|&symbol| run_code.lengths[symbol] != 0)
-        .map_or(0, |last| last + 1)
-        .max(4);
-
+    let mut counts = Counts::of(tokens);
+    counts.literals[END_OF_BLOCK] = 1;
+    let own = Codes::fitted(&counts);
+    let header = Header::new(&own);
+    let fixed = Codes::fixed();
     bits.put(u32::from(last), 1);
-    bits.put(2, 2);
-    bits.put((literal_len - 257) as u32, 5);
-    bits.put((distance_len - 1) as u32, 5);
-    bits.put((order_len - 4) as u32, 4);
-    for &symbol in &CODE_LENGTH_ORDER[..order_len] {
-        bits.put(u32::from(run_code.lengths[symbol]), 3);
+    if header.bits() + own.bits(&counts) < fixed.bits(&counts) {
+        bits.put(2, 2);
+        header.put(bits);
+        own.put(tokens, bits);
+    } else {
+        bits.put(1, 2);
+        fixed.put(tokens, bits);
     }
-    for (symbol, extra) in runs {
-        run_code.put(bits, usize::from(symbol));
-        match symbol {
-            16 => bits.put(u32::from(extra), 2),
-            17 => bits.put(u32::from(extra), 3),
-            18 => bits.put(u32::from(extra), 7),
-            _ => {}
+}
+
+/// The two codes of a block: one for literals and lengths, one for distances.
+struct Codes {
+    literals: Code,
+    distances: Code,
+}
+
+impl Codes {
+    /// The codes that write symbols seen `counts` times in the fewest bits.
+    fn fitted(counts: &Counts) -> Self {
+        Self {
+            literals: Code::new(code_lengths(&counts.literals, 15)),
+            distances: Code::new(code_lengths(&counts.distances, 15)),
         }
     }
 
-    for token in tokens {
-        if token.distance == 0 {
-            literals.put(bits, usize::from(token.length));
-        } else {
-            let (symbol, extra_bits, extra) = length_symbol(token.length);
-            literals.put(bits, 257 + symbol);
-            bits.put(extra, extra_bits);
-            let (symbol, extra_bits, extra) = distance_symbol(token.distance);
-            distances.put(bits, symbol);
-            bits.put(extra, extra_bits);
+    /// The codes DEFLATE has ready, which no block has to spell out.
+    fn fixed() -> Self {
+        let literals = (0..288).map(|symbol| match symbol {
+            0..144 => 8,
+            144..256 => 9,
+            256..280 => 7,
+            _ => 8,
+        });
+        Self {
+            literals: Code::new(literals.collect()),
+            distances: Code::new(vec![5; 30]),
         }
     }
-    literals.put(bits, END_OF_BLOCK);
+
+    /// The bits symbols seen `counts` times take, leaving out the extra bits, which
+    /// are the same with any code.
+    fn bits(&self, counts: &Counts) -> u64 {
+        let bits = |counts: &[u32], code: &Code| -> u64 {
+            let lengths = counts.iter().zip(&code.lengths);
+            lengths
+                .map(|(&count, &length)| u64::from(count) * u64::from(length))
+                .sum()
+        };
+        bits(&counts.literals, &self.literals) + bits(&counts.distances, &self.distances)
+    }
+
+    /// Writes `tokens`, then the end of the block.
+    fn put(&self, tokens: &[Token], bits: &mut Bits) {
+        for token in tokens {
+            if token.distance == 0 {
+                self.literals.put(bits, usize::from(token.length));
+            } else {
+                let (symbol, extra_bits, extra) = length_symbol(token.length);
+                self.literals.put(bits, 257 + symbol);
+                bits.put(extra, extra_bits);
+                let (symbol, extra_bits, extra) = distance_symbol(token.distance);
+                self.distances.put(bits, symbol);
+                bits.put(extra, extra_bits);
+            }
+        }
+        self.literals.put(bits, END_OF_BLOCK);
+    }
+}
+
+/// How a block spells out its codes: both codes' lengths, trimmed of unused symbols
+/// at the end, run-length encoded with a code of their own.
+struct Header {
+    literal_len: usize,
+    distance_len: usize,
+    order_len: usize,
+    run_code: Code,
+    runs: Vec<(u8, u8)>,
+}
+
+impl Header {
+    fn new(codes: &Codes) -> Self {
+        let literal_len = used(&codes.literals.lengths).max(257);
+        let distance_len = used(&codes.distances.lengths).max(1);
+        let lengths: Vec<u8> = codes.literals.lengths[..literal_len]
+            .iter()
+            .chain(&codes.distances.lengths[..distance_len])
+            .copied()
+            .collect();
+        let runs = runs(&lengths);
+        let mut run_counts = [0; 19];
+        for &(symbol, _) in &runs {
+            run_counts[usize::from(symbol)] += 1;
+        }
+        let run_code = Code::new(code_lengths(&run_counts, 7));
+        let order_len = CODE_LENGTH_ORDER
+            .iter()
+            .rposition(|&symbol| run_code.lengths[symbol] != 0)
+            .map_or(0, |last| last + 1)
+            .max(4);
+        Self {
+            literal_len,
+            distance_len,
+            order_len,
+            run_code,
+            runs,
+        }
+    }
+
+    fn bits(&self) -> u64 {
+        let runs = self.runs.iter().map(|&(symbol, _)| {
+            u64::from(self.run_code.lengths[usize::from(symbol)]) + u64::from(run_extra(symbol))
+        });
+        14 + 3 * self.order_len as u64 + runs.sum::<u64>()
+    }
+
+    fn put(&self, bits: &mut Bits) {
+        bits.put((self.literal_len - 257) as u32, 5);
+        bits.put((self.distance_len - 1) as u32, 5);
+        bits.put((self.order_len - 4) as u32, 4);
+        for &symbol in &CODE_LENGTH_ORDER[..self.order_len] {
+            bits.put(u32::from(self.run_code.lengths[symbol]), 3);
+        }
+        for &(symbol, extra) in &self.runs {
+            self.run_code.put(bits, usize::from(symbol));
+            bits.put(u32::from(extra), run_extra(symbol));
+        }
+    }
+}
+
+/// How many extra bits follow a code-length symbol.
+fn run_extra(symbol: u8) -> u32 {
+    match symbol {
+        16 => 2,
+        17 => 3,
+        18 => 7,
+        _ => 0,
+    }
+}
+
+/// A canonical Huffman code.
+struct Code {
+    lengths: Vec<u8>,
+    /// Each symbol's code, bit-reversed: DEFLATE writes codes first bit first.
+    codes: Vec<u32>,
+}
+
+impl Code {
+    /// The code whose symbols are this many bits long.
+    fn new(lengths: Vec<u8>) -> Self {
+        let mut per_length = [0u32; 16];
+        for &length in &lengths {
+            per_length[usize::from(length)] += 1;
+        }
+        per_length[0] = 0;
+        let mut next = [0u32; 16];
+        let mut code = 0;
+        for length in 1..16 {
+            code = (code + per_length[length - 1]) << 1;
+            next[length] = code;
+        }
+        let codes = lengths
+            .iter()
+            .map(|&length| {
+                if length == 0 {
+                    return 0;
+                }
+                let code = next[usize::from(length)];
+                next[usize::from(length)] += 1;
+                code.reverse_bits() >> (32 - u32::from(length))
+            })
+            .collect();
+        Self { lengths, codes }
+    }
+
+    fn put(&self, bits: &mut Bits, symbol: usize) {
+        bits.put(self.codes[symbol], u32::from(self.lengths[symbol]));
+    }
 }
 
 /// How many symbols there are up to the last one with a code.
@@ -344,48 +793,6 @@ fn distance_symbol(distance: u16) -> (usize, u32, u32) {
     let extra_bits = top - 1;
     let symbol = 2 * top + (x >> extra_bits & 1);
     (symbol as usize, extra_bits, x & ((1 << extra_bits) - 1))
-}
-
-/// A canonical Huffman code.
-struct Code {
-    lengths: Vec<u8>,
-    /// Each symbol's code, bit-reversed: DEFLATE writes codes first bit first.
-    codes: Vec<u32>,
-}
-
-impl Code {
-    /// The code that writes symbols seen `counts` times in the fewest bits, none
-    /// longer than `limit`.
-    fn new(counts: &[u32], limit: u8) -> Self {
-        let lengths = code_lengths(counts, limit);
-        let mut per_length = [0u32; 16];
-        for &length in &lengths {
-            per_length[usize::from(length)] += 1;
-        }
-        per_length[0] = 0;
-        let mut next = [0u32; 16];
-        let mut code = 0;
-        for length in 1..16 {
-            code = (code + per_length[length - 1]) << 1;
-            next[length] = code;
-        }
-        let codes = lengths
-            .iter()
-            .map(|&length| {
-                if length == 0 {
-                    return 0;
-                }
-                let code = next[usize::from(length)];
-                next[usize::from(length)] += 1;
-                code.reverse_bits() >> (32 - u32::from(length))
-            })
-            .collect();
-        Self { lengths, codes }
-    }
-
-    fn put(&self, bits: &mut Bits, symbol: usize) {
-        bits.put(self.codes[symbol], u32::from(self.lengths[symbol]));
-    }
 }
 
 /// The optimal code lengths for symbols seen `counts` times, none longer than

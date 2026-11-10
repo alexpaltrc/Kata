@@ -174,8 +174,8 @@ monitor y haz clic. Entra todo, también la barra de tareas.
 **¿La captura pierde calidad?** No. Se guarda en PNG, sin pérdida: cada píxel queda idéntico.
 
 **¿Por qué mis archivos pesan menos?** Kata tiene su propia compresión PNG, hecha desde cero. En
-capturas de ventanas y páginas suele ahorrar entre 5 y 20 % frente al codificador de Windows; con
-fotos, pesa prácticamente lo mismo. Detalles en [compresion.md](compresion.md).
+capturas de ventanas y páginas suele ahorrar entre 15 y 45 % frente al codificador de Windows; con
+fotos, entre 8 y 10 %. Detalles en [compresion.md](compresion.md).
 
 **¿Puedo usar la tecla Impr Pant?** Sí. Enciende «Haz de Kata tu app de capturas» en Ajustes. Desde
 entonces, `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`) y `Win + Mayús + S` abren Kata.

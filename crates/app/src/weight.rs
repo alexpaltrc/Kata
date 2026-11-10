@@ -91,3 +91,54 @@ unsafe fn encode(image: &Image) -> Result<u64> {
         Ok(stat.cbSize)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{env, fs, path::PathBuf, time::Instant};
+
+    use super::*;
+    use crate::import::decode;
+
+    /// Weighs every picture in the folder `KATA_BENCH` names with Windows' encoder
+    /// and with Kata's, and checks that Windows reads Kata's back pixel for pixel.
+    #[test]
+    #[ignore = "measures"]
+    fn weighing_a_folder() {
+        let folder = PathBuf::from(env::var_os("KATA_BENCH").expect("KATA_BENCH names a folder"));
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok().unwrap() };
+        let mut paths: Vec<_> = (fs::read_dir(folder).unwrap())
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        paths.sort();
+        let back = env::temp_dir().join(format!("kata-weight-{}.png", std::process::id()));
+        let (mut shares, mut windows_all, mut kata_all, mut time_all) = (Vec::new(), 0, 0, 0.0);
+        println!(
+            "{:<22} {:>10} {:>10} {:>7} {:>8}",
+            "", "Windows", "Kata", "saved", "ms"
+        );
+        for path in paths {
+            let image = decode(&path).unwrap();
+            let windows = unsafe { encode(&image) }.unwrap();
+            let start = Instant::now();
+            let png = image.to_png();
+            let time = start.elapsed().as_secs_f64() * 1000.0;
+            fs::write(&back, &png).unwrap();
+            assert!(decode(&back).unwrap() == image, "{}", path.display());
+            let saved = 100.0 * (1.0 - png.len() as f64 / windows as f64);
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            println!(
+                "{name:<22} {windows:>10} {:>10} {saved:>6.1}% {time:>8.0}",
+                png.len()
+            );
+            shares.push(saved);
+            windows_all += windows;
+            kata_all += png.len() as u64;
+            time_all += time;
+        }
+        let _ = fs::remove_file(&back);
+        let mean = shares.iter().sum::<f64>() / shares.len() as f64;
+        let worst = shares.iter().copied().fold(f64::MAX, f64::min);
+        let total = 100.0 * (1.0 - kata_all as f64 / windows_all as f64);
+        println!("mean {mean:.1}%  worst {worst:.1}%  total {total:.1}%  {time_all:.0} ms");
+    }
+}

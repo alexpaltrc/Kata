@@ -2,13 +2,20 @@
 //!
 //! A capture with 256 colors or fewer, as most windows are, stores each pixel as an
 //! index into its colors, packed as tightly as their number allows. Any other
-//! stores RGB, each row with the filter that leaves it most repetitive.
+//! stores RGB, filtered a band of rows at a time: each band is tried seven ways, and
+//! keeps the one that compresses best.
 
-use crate::{Image, deflate};
+use std::ops::Range;
+
+use crate::{Image, deflate, parallel};
 
 const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1A, b'\n'];
 const TRUECOLOR: u8 = 2;
 const INDEXED: u8 = 3;
+/// Bytes to a pixel of RGB.
+const BPP: usize = 3;
+/// About how many bytes of rows are filtered the same way.
+const BAND: usize = 1 << 17;
 /// No color has this key: colors only use the low 24 bits.
 const NO_COLOR: u32 = u32::MAX;
 
@@ -118,66 +125,95 @@ fn packed_rows(image: &Image, indices: &[u8], depth: u8) -> Vec<u8> {
     rows
 }
 
-/// RGB rows, each led by the filter that suits it best.
+/// RGB rows, a band of them at a time, each band filtered the way that compresses
+/// it best.
 fn filtered_rows(image: &Image) -> Vec<u8> {
-    const BPP: usize = 3;
-    let row_len = image.width() as usize * BPP;
-    let mut rows = Vec::with_capacity((1 + row_len) * image.height() as usize);
-    let mut above = vec![0; row_len];
-    let mut line = vec![0; row_len];
+    let (width, height) = (image.width() as usize, image.height() as usize);
+    let row_len = width * BPP;
+    let mut rgb = Vec::with_capacity(row_len * height);
+    for pixels in image.pixels().chunks_exact(image.stride()) {
+        for bgra in pixels[..width * Image::BYTES_PER_PIXEL].as_chunks::<4>().0 {
+            rgb.extend_from_slice(&[bgra[2], bgra[1], bgra[0]]);
+        }
+    }
+    let rows = (BAND / row_len).max(1);
+    let bands = parallel::each(height.div_ceil(rows), |band| {
+        let first = band * rows;
+        filtered_band(&rgb, row_len, first..height.min(first + rows))
+    });
+    bands.concat()
+}
+
+/// The rows `rows` of `rgb` filtered seven ways: with each of the five filters all
+/// through, and with the filter picked row by row, by either of two measures. The
+/// way that weighs least compressed is the one returned.
+fn filtered_band(rgb: &[u8], row_len: usize, rows: Range<usize>) -> Vec<u8> {
+    let size = rows.len() * (1 + row_len);
+    let mut ways = [(); 7].map(|()| Vec::with_capacity(size));
     // Sub, Up, Average and Paeth, after None: the row itself.
     let mut filtered = [(); 4].map(|()| vec![0u8; row_len]);
     let mut pairs = Pairs::new();
-    for pixels in image.pixels().chunks_exact(image.stride()) {
-        for (rgb, bgra) in line
-            .as_chunks_mut::<BPP>()
-            .0
-            .iter_mut()
-            .zip(pixels.as_chunks::<4>().0)
-        {
-            *rgb = [bgra[2], bgra[1], bgra[0]];
+    let blank = vec![0; row_len];
+    for row in rows {
+        let line = &rgb[row * row_len..][..row_len];
+        let above = match row {
+            0 => &blank[..],
+            _ => &rgb[(row - 1) * row_len..][..row_len],
+        };
+        filter(line, above, &mut filtered);
+        let [sub, up, average, paeth] = &filtered;
+        let candidates: [&[u8]; 5] = [line, sub, up, average, paeth];
+        let fewest_pairs = (0..5).min_by_key(|&filter| pairs.count(candidates[filter]));
+        let nearest_zero = (0..5).min_by_key(|&filter| distance_to_zero(candidates[filter]));
+        let picks = (0..5).chain(fewest_pairs).chain(nearest_zero);
+        for (way, filter) in ways.iter_mut().zip(picks) {
+            way.push(filter as u8);
+            way.extend_from_slice(candidates[filter]);
         }
-
-        let [sub, up, average, paeth_row] = &mut filtered;
-        // The first pixel has nothing to its left: it counts as zero.
-        let first = BPP.min(row_len);
-        for i in 0..first {
-            sub[i] = line[i];
-            average[i] = line[i].wrapping_sub(above[i] / 2);
-            paeth_row[i] = line[i].wrapping_sub(above[i]);
-        }
-        for (out, (&x, &b)) in up.iter_mut().zip(line.iter().zip(&above)) {
-            *out = x.wrapping_sub(b);
-        }
-        let (current, left) = (&line[first..], &line[..row_len - first]);
-        let (over, over_left) = (&above[first..], &above[..row_len - first]);
-        for (out, (&x, &a)) in sub[first..].iter_mut().zip(current.iter().zip(left)) {
-            *out = x.wrapping_sub(a);
-        }
-        for (out, ((&x, &a), &b)) in average[first..]
-            .iter_mut()
-            .zip(current.iter().zip(left).zip(over))
-        {
-            *out = x.wrapping_sub(((u16::from(a) + u16::from(b)) / 2) as u8);
-        }
-        for (out, (((&x, &a), &b), &c)) in paeth_row[first..]
-            .iter_mut()
-            .zip(current.iter().zip(left).zip(over).zip(over_left))
-        {
-            *out = x.wrapping_sub(paeth(a, b, c));
-        }
-
-        let candidates: [&[u8]; 5] = [&line, sub, up, average, paeth_row];
-        let (filter, row) = candidates
-            .into_iter()
-            .enumerate()
-            .min_by_key(|&(_, row)| pairs.count(row))
-            .expect("five filters");
-        rows.push(filter as u8);
-        rows.extend_from_slice(row);
-        std::mem::swap(&mut above, &mut line);
     }
-    rows
+    let lightest = ways.into_iter().min_by_key(|way| deflate::weigh(way));
+    lightest.expect("seven ways")
+}
+
+/// `line` as Sub, Up, Average and Paeth leave it, given the row `above`.
+fn filter(line: &[u8], above: &[u8], filtered: &mut [Vec<u8>; 4]) {
+    let row_len = line.len();
+    let [sub, up, average, paeth_row] = filtered;
+    // The first pixel has nothing to its left: it counts as zero.
+    let first = BPP.min(row_len);
+    for i in 0..first {
+        sub[i] = line[i];
+        average[i] = line[i].wrapping_sub(above[i] / 2);
+        paeth_row[i] = line[i].wrapping_sub(above[i]);
+    }
+    for (out, (&x, &b)) in up.iter_mut().zip(line.iter().zip(above)) {
+        *out = x.wrapping_sub(b);
+    }
+    let (current, left) = (&line[first..], &line[..row_len - first]);
+    let (over, over_left) = (&above[first..], &above[..row_len - first]);
+    for (out, (&x, &a)) in sub[first..].iter_mut().zip(current.iter().zip(left)) {
+        *out = x.wrapping_sub(a);
+    }
+    for (out, ((&x, &a), &b)) in average[first..]
+        .iter_mut()
+        .zip(current.iter().zip(left).zip(over))
+    {
+        *out = x.wrapping_sub(((u16::from(a) + u16::from(b)) / 2) as u8);
+    }
+    for (out, (((&x, &a), &b), &c)) in paeth_row[first..]
+        .iter_mut()
+        .zip(current.iter().zip(left).zip(over).zip(over_left))
+    {
+        *out = x.wrapping_sub(paeth(a, b, c));
+    }
+}
+
+/// How far a row's bytes are from zero, taken as differences: 255 is one below.
+fn distance_to_zero(bytes: &[u8]) -> u32 {
+    bytes
+        .iter()
+        .map(|&byte| u32::from((byte as i8).unsigned_abs()))
+        .sum()
 }
 
 /// Whichever of left, up and up-left is closest to `left + up - up_left`.
