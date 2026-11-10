@@ -38,8 +38,8 @@ pub struct IconButton {
 
 impl IconButton {
     pub const WIDTH: f32 = 40.0;
-    /// Lower than the standard control, for a title bar.
-    pub const HEIGHT: f32 = 28.0;
+    /// As tall as a title bar's own buttons are in Windows 11.
+    pub const HEIGHT: f32 = 36.0;
 
     pub fn new(glyph: Label, name: &str) -> Self {
         Self {
