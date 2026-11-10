@@ -416,6 +416,11 @@ impl Editor {
     /// or on the graphics card, yet.
     pub(super) fn recompose(&mut self) {
         self.renderer.restart(self.document.image());
+        self.reload();
+    }
+
+    /// Copies all the renderer has drawn to the graphics card again.
+    pub(super) fn reload(&mut self) {
         self.stale.clear();
         let bitmap = (self.gpu.as_ref())
             .map(|gpu| card::bitmap(gpu.surface.context(), self.renderer.output()));

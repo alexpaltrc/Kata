@@ -1,25 +1,34 @@
 //! Reframing a capture put together with others: double-clicked, the others dim
 //! and what its space leaves out unfolds around it, faint, to drag into view and
 //! to zoom into with the wheel. Each change keeps once it rests, to undo one by one.
+//! The captures as it's framed are drawn ahead, elsewhere, and fade in as they come
+//! back: the shapes on it keep their size as it zooms.
 
 use std::{
     mem,
-    sync::Arc,
+    sync::{
+        Arc,
+        mpsc::{self, Receiver},
+    },
+    thread,
     time::{Duration, Instant},
 };
 
-use kata_editor::{Collage, Image, Placement, Shape, Slot};
+use kata_editor::{Collage, Document, Edits, Image, Placement, Renderer, Shape, Slot};
 use kata_ui::{
     motion::{self, Animation, Easing},
     paint::{Area, Painter, Point},
     theme::{self, color, faded},
 };
 use windows::Win32::{
+    Foundation::{HWND, LPARAM, WPARAM},
     Graphics::Direct2D::ID2D1Bitmap1,
     UI::{
         HiDpi::GetSystemMetricsForDpi,
         Input::KeyboardAndMouse::GetDoubleClickTime,
-        WindowsAndMessaging::{KillTimer, SM_CXDOUBLECLK, SM_CYDOUBLECLK, SetTimer},
+        WindowsAndMessaging::{
+            KillTimer, PostMessageW, SM_CXDOUBLECLK, SM_CYDOUBLECLK, SetTimer, WM_APP,
+        },
     },
 };
 
@@ -32,6 +41,8 @@ use crate::card;
 
 /// The timer that says the wheel rested.
 pub const REFRAME_TIMER: usize = 3;
+/// Says the captures as a framing has them came back drawn.
+pub const FRAMED: u32 = WM_APP + 2;
 /// How long the wheel rests before its zoom keeps, in milliseconds: a turn of it
 /// makes one change.
 const WHEEL_REST: u32 = 350;
@@ -54,6 +65,47 @@ pub struct Reframing {
     unfold: Animation,
     /// The wheel turned and hasn't rested yet.
     wheeled: bool,
+    /// The captures as it's framed, being drawn elsewhere, one framing at a time.
+    drawing: Option<Receiver<Drawn>>,
+    /// The last framing drawn, until it keeps.
+    ready: Option<Drawn>,
+    /// The framings drawn on show over the document's image, the last fading in
+    /// over the one before.
+    under: Option<Layer>,
+    over: Option<Layer>,
+}
+
+/// The captures composed as a framing has them, with the edits drawn on.
+struct Drawn {
+    collage: Collage,
+    image: Arc<Image>,
+    renderer: Renderer,
+    /// The document's captures and edits it was drawn for, the only ones it fits.
+    from: (Collage, Edits),
+}
+
+impl Drawn {
+    fn fits(&self, document: &Document) -> bool {
+        let (collage, edits) = &self.from;
+        collage == document.collage() && edits == document.edits()
+    }
+}
+
+/// The captures, or a part of them from `origin` on, on the graphics card as
+/// `collage` has them.
+struct Layer {
+    bitmap: ID2D1Bitmap1,
+    origin: (i32, i32),
+    collage: Collage,
+    fade: Animation,
+}
+
+impl Layer {
+    /// The same, fading in in `duration`.
+    fn fading_in(self, duration: Duration) -> Self {
+        let fade = Animation::new(0.0, 1.0, duration, Easing::DECELERATE);
+        Self { fade, ..self }
+    }
 }
 
 impl Reframing {
@@ -114,6 +166,7 @@ impl Editor {
                 {
                     let whole = reframing.collage.reframed(index, 1.0, (0.5, 0.5));
                     self.glide_framing(self.document.arranged(whole), motion::NORMAL);
+                    self.draw_ahead();
                 }
             }
             return inside;
@@ -171,6 +224,10 @@ impl Editor {
             travel: Animation::idle(1.0),
             unfold: Animation::new(0.0, 1.0, motion::NORMAL, Easing::DECELERATE),
             wheeled: false,
+            drawing: None,
+            ready: None,
+            under: None,
+            over: None,
         });
         self.set_cursor();
         self.invalidate();
@@ -202,10 +259,169 @@ impl Editor {
             let _ = unsafe { KillTimer(Some(self.hwnd), REFRAME_TIMER) };
         }
         let collage = reframing.collage.clone();
+        if self.adopt_framing() {
+            return;
+        }
+        // Not drawn ahead yet: drawn here, and faded in.
+        let before = self.document.collage().clone();
         if self.document.arrange(collage) {
             self.sync();
             self.unpublished = true;
-            self.recompose();
+            self.recompose_framing(&before, motion::FAST);
+        }
+    }
+
+    /// Keeps the framing as it came back drawn, if it did. Returns whether it keeps.
+    fn adopt_framing(&mut self) -> bool {
+        let Some(reframing) = &mut self.reframing else {
+            return false;
+        };
+        let Some(drawn) = reframing.ready.take() else {
+            return false;
+        };
+        if drawn.collage != reframing.collage || !drawn.fits(&self.document) {
+            return false;
+        }
+        // What shows of the document's image stays while the framing fades in over it.
+        let fading = (reframing.over.as_ref())
+            .is_some_and(|over| over.fade.is_running(Instant::now()))
+            && reframing.under.is_none();
+        let shown = fading.then(|| self.document_layer(self.document.collage()));
+        if !self.document.arrange_composed(drawn.collage, drawn.image) {
+            return false;
+        }
+        self.renderer = drawn.renderer;
+        self.reload();
+        if let Some(reframing) = &mut self.reframing
+            && let Some(shown) = shown.flatten()
+        {
+            reframing.under = Some(shown);
+        }
+        self.sync();
+        self.unpublished = true;
+        true
+    }
+
+    /// The document's image as it's on the graphics card, its captures as `collage`
+    /// has them.
+    fn document_layer(&self, collage: &Collage) -> Option<Layer> {
+        Some(Layer {
+            bitmap: self.gpu.as_ref()?.image.clone(),
+            origin: (0, 0),
+            collage: collage.clone(),
+            fade: Animation::idle(1.0),
+        })
+    }
+
+    /// Composes the document's image again, its captures before as `before` has
+    /// them: the new one fades in over the framing on show, in `duration`.
+    fn recompose_framing(&mut self, before: &Collage, duration: Duration) {
+        let shown = self.document_layer(before);
+        self.recompose();
+        if let Some(layer) = self.document_layer(self.document.collage()) {
+            self.lay(layer.fading_in(duration), shown);
+        }
+    }
+
+    /// Lays `layer` over the framing on show, to fade in over what shows most, or
+    /// over `shown`, the document's image, with nothing over it.
+    fn lay(&mut self, layer: Layer, shown: Option<Layer>) {
+        let now = Instant::now();
+        let Some(reframing) = &mut self.reframing else {
+            return;
+        };
+        let top = match (reframing.over.take(), reframing.under.take()) {
+            (Some(over), under) if under.is_none() || over.fade.value(now) >= 0.5 => Some(over),
+            (_, under) => under,
+        };
+        reframing.under = top.or(shown);
+        reframing.over = Some(layer);
+        self.invalidate();
+    }
+
+    /// Draws the captures as the one reframed is framed now, elsewhere: the shapes on
+    /// it show their own size well before it rests. One framing at a time, the last
+    /// one next.
+    fn draw_ahead(&mut self) {
+        let Some(reframing) = &mut self.reframing else {
+            return;
+        };
+        let collage = &reframing.collage;
+        if reframing.drawing.is_some()
+            || collage == self.document.collage()
+            || (reframing.ready.as_ref()).is_some_and(|drawn| drawn.collage == *collage)
+        {
+            return;
+        }
+        let collage = collage.clone();
+        let edits = self.document.carried(&collage);
+        let from = (
+            self.document.collage().clone(),
+            self.document.edits().clone(),
+        );
+        let mut renderer = self.renderer.alike();
+        let (sender, receiver) = mpsc::channel();
+        reframing.drawing = Some(receiver);
+        let editor = self.hwnd.0 as usize;
+        thread::spawn(move || {
+            let image = collage.compose();
+            renderer.restart(&image);
+            let spot = edits.focus.map(|focus| focus.spot());
+            renderer.update(&image, &edits.blurs, spot, &edits.figures, &edits.steps);
+            let drawn = Drawn {
+                collage,
+                image,
+                renderer,
+                from,
+            };
+            // Gone with the reframing, if it ended.
+            if sender.send(drawn).is_ok() {
+                let editor = HWND(editor as *mut _);
+                let _ = unsafe { PostMessageW(Some(editor), FRAMED, WPARAM(0), LPARAM(0)) };
+            }
+        });
+    }
+
+    /// Takes the captures drawn as a framing has them: the capture reframed fades in
+    /// over the framing on show, to keep as they are once it rests, and the last
+    /// framing draws next.
+    pub(super) fn framed_ahead(&mut self) {
+        let Some(reframing) = &mut self.reframing else {
+            return;
+        };
+        let Some(Ok(drawn)) = reframing.drawing.as_ref().map(Receiver::try_recv) else {
+            return;
+        };
+        reframing.drawing = None;
+        let output = drawn.renderer.output();
+        let wanted = reframing.collage != *self.document.collage() && drawn.fits(&self.document);
+        // Only its space goes on the graphics card, for now: a part of the whole.
+        let space = (drawn.collage.slots().into_iter())
+            .find(|slot| slot.shows(&reframing.image))
+            .and_then(|slot| slot.rect.intersect(&output.bounds()))
+            .filter(|_| wanted);
+        let layer = space.zip(self.gpu.as_ref()).and_then(|(space, gpu)| {
+            let bitmap = card::part_bitmap(gpu.surface.context(), output, space).ok()?;
+            Some(Layer {
+                bitmap,
+                origin: (space.left, space.top),
+                collage: drawn.collage.clone(),
+                fade: Animation::idle(1.0),
+            })
+        });
+        let last = wanted && drawn.collage == reframing.collage;
+        reframing.ready = last.then_some(drawn);
+        if let Some(layer) = layer {
+            self.lay(layer.fading_in(motion::FAST), None);
+        }
+        self.draw_ahead();
+    }
+
+    /// Lets go of the framings on the graphics card, as it goes away.
+    pub(super) fn framing_lost(&mut self) {
+        if let Some(reframing) = &mut self.reframing {
+            reframing.under = None;
+            reframing.over = None;
         }
     }
 
@@ -321,6 +537,7 @@ impl Editor {
             return;
         };
         self.glide_framing(collage, motion::FAST);
+        self.draw_ahead();
         if let Some(reframing) = &mut self.reframing {
             reframing.wheeled = true;
         }
@@ -365,20 +582,42 @@ impl Editor {
         }
         let collage = collage.clone();
         self.glide_framing(collage, motion::NORMAL);
-        self.recompose();
+        self.recompose_framing(before, motion::NORMAL);
         true
     }
 
-    /// Keeps the framing once the capture rests, and lets go of it once folded.
+    /// Keeps the framing once the capture rests, as it comes back drawn, and lets go
+    /// of it once folded.
     pub(super) fn reframing_rests(&mut self, now: Instant) {
-        let Some(reframing) = &self.reframing else {
+        let Some(reframing) = &mut self.reframing else {
             return;
         };
+        let document = self.document.collage();
+        // Faded in, the framing on top is all that shows, or the document's image as
+        // it's kept.
+        if let Some(over) = &reframing.over
+            && !over.fade.is_running(now)
+        {
+            reframing.under = None;
+            if over.collage == *document {
+                reframing.over = None;
+            }
+        }
         let panning = matches!(self.gesture, Some(Gesture::Pan { .. }));
         let rests = !panning && !reframing.wheeled && !reframing.travel.is_running(now);
         let folded = reframing.unfold.target() == 0.0 && !reframing.unfold.is_running(now);
-        if rests && !folded && reframing.collage != *self.document.collage() {
-            self.keep_framing();
+        let stale = (reframing.over.as_ref()).is_some_and(|over| over.collage != *document);
+        if rests && !folded {
+            if reframing.collage != *document {
+                if !self.adopt_framing() {
+                    self.draw_ahead();
+                }
+            } else if stale {
+                // Back where it was kept: the document's image fades back in.
+                if let Some(layer) = self.document_layer(self.document.collage()) {
+                    self.lay(layer.fading_in(motion::FAST), None);
+                }
+            }
         }
         if folded {
             self.reframing = None;
@@ -392,7 +631,9 @@ impl Editor {
     /// Whether the capture reframed still glides, unfolds or folds.
     pub(super) fn reframing_moves(&self, now: Instant) -> bool {
         (self.reframing.as_ref()).is_some_and(|reframing| {
-            reframing.travel.is_running(now) || reframing.unfold.is_running(now)
+            reframing.travel.is_running(now)
+                || reframing.unfold.is_running(now)
+                || (reframing.over.as_ref()).is_some_and(|over| over.fade.is_running(now))
         })
     }
 
@@ -453,15 +694,30 @@ impl Editor {
                 painter.faded_bitmap(own, whole, frame, GHOST * unfold);
             });
         }
-        // Its space shows it whole, with the shapes on it from the image.
-        let shown = (dock::shown(self.document.collage(), kept, self.view).into_iter())
-            .find(|(shown, _)| Arc::ptr_eq(shown, &reframing.image));
+        // Its space shows it whole, with the shapes on it from the image, and from
+        // each framing drawn since, fading in.
+        let framed = |bitmap: &ID2D1Bitmap1, (left, top): (i32, i32), collage, opacity| {
+            let shown = (dock::shown(collage, kept, self.view).into_iter())
+                .find(|(shown, _)| Arc::ptr_eq(shown, &reframing.image));
+            if let Some((_, shown)) = shown {
+                let mut part = card::part(shown.part);
+                part.left -= left as f32;
+                part.top -= top as f32;
+                painter.faded_bitmap(bitmap, part, shown.over(frame), opacity);
+            }
+        };
         painter.clip(space, || {
             if let Some(own) = own {
                 painter.bitmap(own, whole, frame);
             }
-            if let Some((_, shown)) = shown {
-                painter.bitmap(image, card::part(shown.part), shown.over(frame));
+            framed(image, (0, 0), self.document.collage(), 1.0);
+            for layer in [&reframing.under, &reframing.over].into_iter().flatten() {
+                framed(
+                    &layer.bitmap,
+                    layer.origin,
+                    &layer.collage,
+                    layer.fade.value(now),
+                );
             }
         });
         let palette = &self.palette;

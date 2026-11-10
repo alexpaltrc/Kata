@@ -93,7 +93,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 - **Compresión a fondo.** El plan por fases de [compresion.md](compresion.md).
 - **Bienvenida (onboarding).** Sus cinco fases (hola, la primera captura, el editor, Lista y Premium) están hechas: ver [Bienvenida](#bienvenida). Falta que Alex las pruebe y conectar «Obtener Premium» con la compra en la Store.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
-- **Juntar capturas: lo que sigue.** Pegar con `Ctrl + V` una captura para juntarla, que la ventana crezca con la composición, y decidir si va en el Premium. Al ampliar con la rueda al reencuadrar, la línea de las formas crece mientras dura el movimiento y vuelve a su grosor al parar: pulirlo para que no cambie.
+- **Juntar capturas: lo que sigue.** Pegar con `Ctrl + V` una captura para juntarla, que la ventana crezca con la composición, y decidir si va en el Premium.
 - **Grabar video, a futuro.** Antes de decidir nada, analizar si Kata podría grabar la pantalla: qué permite Windows, si la app seguiría siendo igual de ligera y rápida, y si no la desvía de su enfoque (capturas para manuales). Con eso, Alex decide.
 - **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 

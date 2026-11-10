@@ -603,8 +603,22 @@ impl Document {
         true
     }
 
+    /// Lays the captures out as `arrange` does, `image` being them composed as
+    /// `collage` has them, made ahead. Returns whether anything changed.
+    pub fn arrange_composed(&mut self, collage: Collage, image: Arc<Image>) -> bool {
+        if collage == self.version.collage {
+            return false;
+        }
+        let edits = self.carried(&collage);
+        let previous = std::mem::replace(&mut self.version, Version { collage, edits });
+        self.image = image;
+        self.undo.push(previous);
+        self.redo.clear();
+        true
+    }
+
     /// The edits, each shape moved along with the capture under it into `collage`.
-    fn carried(&self, collage: &Collage) -> Edits {
+    pub fn carried(&self, collage: &Collage) -> Edits {
         let Version {
             collage: now,
             edits,
@@ -798,6 +812,23 @@ mod tests {
         let center = (73.0 / 100.0, 43.0 / 60.0);
         document.arrange(document.collage().reframed(0, 2.0, center));
         assert_eq!(document.edits().steps[0].rect, Rect::new(22, 28, 28, 34));
+    }
+
+    #[test]
+    fn captures_composed_ahead_arrange_as_if_composed_here() {
+        let (mut document, ..) = docked();
+        let collage = document.collage().reframed(0, 2.0, (0.7, 0.7));
+        let edits = document.carried(&collage);
+        assert_eq!(edits.steps.len(), 1);
+        let image = collage.compose();
+        assert!(document.arrange_composed(collage.clone(), image.clone()));
+        assert!(!document.arrange_composed(collage.clone(), image.clone()));
+        assert!(Arc::ptr_eq(document.image(), &image));
+        assert_eq!(document.edits(), &edits);
+        assert!(document.undo());
+        assert!(document.arrange(collage));
+        assert_eq!(document.image(), &image);
+        assert_eq!(document.edits(), &edits);
     }
 
     #[test]

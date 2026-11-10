@@ -169,14 +169,26 @@ pub fn part(rect: Rect) -> Area {
 
 /// `image`, copied to the graphics card that `context` draws on.
 pub fn bitmap(context: &ID2D1DeviceContext, image: &Image) -> Result<ID2D1Bitmap1> {
+    part_bitmap(context, image, image.bounds())
+}
+
+/// The part of `image` in `rect`, which lies inside it, copied to the graphics card
+/// that `context` draws on.
+pub fn part_bitmap(
+    context: &ID2D1DeviceContext,
+    image: &Image,
+    rect: Rect,
+) -> Result<ID2D1Bitmap1> {
+    let stride = image.stride();
+    let start = rect.top as usize * stride + rect.left as usize * 4;
     unsafe {
         context.CreateBitmap(
             D2D_SIZE_U {
-                width: image.width(),
-                height: image.height(),
+                width: rect.width() as u32,
+                height: rect.height() as u32,
             },
-            Some(image.pixels().as_ptr().cast()),
-            image.stride() as u32,
+            Some(image.pixels()[start..].as_ptr().cast()),
+            stride as u32,
             &D2D1_BITMAP_PROPERTIES1 {
                 pixelFormat: D2D1_PIXEL_FORMAT {
                     format: DXGI_FORMAT_B8G8R8A8_UNORM,

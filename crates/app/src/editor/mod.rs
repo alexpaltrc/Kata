@@ -579,6 +579,7 @@ impl Editor {
                 }
             }
             dock::DOCK => return Some(LRESULT(self.docking(wparam, lparam) as isize)),
+            reframe::FRAMED => self.framed_ahead(),
             // The last changes still reach the clipboard, and the name the file.
             WM_DESTROY => {
                 import::refuse(self.hwnd);
@@ -1665,6 +1666,9 @@ impl Editor {
         );
         self.stale.extend(changed);
         let fresh = self.gpu.is_none();
+        if fresh {
+            self.framing_lost();
+        }
         let output = self.renderer.output();
         let gpu = match self.gpu.take() {
             Some(gpu) => gpu.upload(output, &self.stale).map(|()| gpu),

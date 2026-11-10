@@ -89,13 +89,24 @@ impl Renderer {
         *self = Self {
             base: image.clone(),
             output: image.clone(),
+            ..self.alike()
+        };
+    }
+
+    /// Another renderer whose blurs show this one's grain, with no capture yet: to
+    /// draw ahead, elsewhere, once `restart` gives it one.
+    pub fn alike(&self) -> Self {
+        let none = Image::new(0, 0, Vec::new());
+        Self {
+            base: none.clone(),
+            output: none,
             blurs: Vec::new(),
             focus: None,
             haze: None,
             figures: Vec::new(),
             steps: Vec::new(),
             ..*self
-        };
+        }
     }
 
     pub fn output(&self) -> &Image {
@@ -846,6 +857,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn one_alike_draws_the_same_grain() {
+        let image = stripes();
+        let rect = Rect::new(8, 8, 40, 40);
+        let mut renderer = Renderer::new(&image, 1.0);
+        renderer.update(&image, &[blur(rect)], None, &[], &[]);
+        let mut alike = renderer.alike();
+        alike.restart(&image);
+        alike.update(&image, &[blur(rect)], None, &[], &[]);
+        assert_eq!(alike.output(), renderer.output());
     }
 
     #[test]
