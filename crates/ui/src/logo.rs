@@ -87,13 +87,14 @@ impl Painter<'_> {
             self.gradient(&stops(BRIGHT, DEEP), from, to).ok()
         };
         let signature = theme::signature(palette.light);
-        for (index, corner) in corners(area).into_iter().enumerate() {
+        for (index, corner) in corners(area.inflate(-NEAR * unit)).into_iter().enumerate() {
             let start = index as f32 * STAGGER;
             let traced = PEN.apply(progress(time, start, TRACE));
             if traced <= 0.0 {
                 continue;
             }
-            let Ok(path) = corner.path(&factory, unit, traced) else {
+            let Ok(path) = corner.path(&factory, (REACH - NEAR) * unit, RADIUS * unit, traced)
+            else {
                 continue;
             };
             let warm = PEN.apply(progress(time, start + TRACE, WARM));
@@ -146,6 +147,35 @@ impl Painter<'_> {
         });
     }
 
+    /// The logo's four corners alone, in its orange, around any `area`, as around a
+    /// capture: their arms reach `arm` and turn round at `radius`, `stroke` wide.
+    pub fn frame(&self, area: Area, arm: f32, radius: f32, stroke: f32) {
+        let palette = self.palette;
+        let Ok(factory) = (unsafe { self.context.GetFactory() }) else {
+            return;
+        };
+        let Ok(round) = round_stroke(&factory) else {
+            return;
+        };
+        let (from, to) = diagonal(area);
+        let orange = match palette.contrast {
+            true => None,
+            false => self.gradient(&stops(BRIGHT, DEEP), from, to).ok(),
+        };
+        let brush: &ID2D1Brush = match &orange {
+            Some(orange) => orange,
+            None => self.solid(palette.text),
+        };
+        for corner in corners(area) {
+            if let Ok(path) = corner.path(&factory, arm, radius, 1.0) {
+                unsafe {
+                    brush.SetOpacity(1.0);
+                    self.context.DrawGeometry(&path, brush, stroke, &round);
+                }
+            }
+        }
+    }
+
     /// The painter's own brush, in `color`.
     fn solid(&self, color: D2D1_COLOR_F) -> &ID2D1Brush {
         unsafe { self.brush.SetColor(&color) };
@@ -164,10 +194,15 @@ struct Corner {
 }
 
 impl Corner {
-    /// The part of the corner traced so far, `traced` of the way along it.
-    fn path(&self, factory: &ID2D1Factory, unit: f32, traced: f32) -> Result<ID2D1PathGeometry> {
-        let arm = (REACH - NEAR) * unit;
-        let radius = RADIUS * unit;
+    /// The part of the corner traced so far, `traced` of the way along it: its arms
+    /// reach `arm` from where they'd meet, and it turns round at `radius`.
+    fn path(
+        &self,
+        factory: &ID2D1Factory,
+        arm: f32,
+        radius: f32,
+        traced: f32,
+    ) -> Result<ID2D1PathGeometry> {
         let (straight, turn) = (arm - radius, FRAC_PI_2 * radius);
         let mut left = traced.clamp(0.0, 1.0) * (2.0 * straight + turn);
         let (vertex, along, then) = (self.vertex, self.along, self.then);
@@ -205,12 +240,10 @@ impl Corner {
     }
 }
 
-/// The four corners of a logo filling `area`, clockwise from the top left, each
-/// traced clockwise.
+/// The four corners of `area`, clockwise from the top left, each traced clockwise.
 fn corners(area: Area) -> [Corner; 4] {
-    let near = NEAR * area.width / 16.0;
-    let (left, top) = (area.left + near, area.top + near);
-    let (right, bottom) = (area.right() - near, area.bottom() - near);
+    let (left, top) = (area.left, area.top);
+    let (right, bottom) = (area.right(), area.bottom());
     let (up, down) = (Vector2::new(0.0, -1.0), Vector2::new(0.0, 1.0));
     let (back, ahead) = (Vector2::new(-1.0, 0.0), Vector2::new(1.0, 0.0));
     let corner = |x, y, along, then| Corner {

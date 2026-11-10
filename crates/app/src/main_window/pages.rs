@@ -12,7 +12,8 @@ use kata_ui::{
     Graphics,
     access::Element,
     controls::{self, Button, Caption, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
-    motion::Animation,
+    logo,
+    motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
 };
 use windows::core::Result;
@@ -29,8 +30,29 @@ const BAR_GAP: f32 = 8.0;
 /// Around the cards, and inside them.
 const PADDING: f32 = 16.0;
 const CARD: f32 = 64.0;
-/// Between cards.
-const GAP: f32 = 4.0;
+/// A setting's row in its group's card, and the room above a group, with its title.
+const ROW: f32 = 52.0;
+const HEADING: f32 = 36.0;
+/// How many settings each group has, from top to bottom.
+const GROUPS: [usize; 3] = [4, 2, 1];
+/// The glyph that leads a setting or the window's title, and the room after it.
+const ICON: f32 = 16.0;
+const ICON_GAP: f32 = 16.0;
+/// Where a setting's words start in its row, after its glyph.
+const LEAD: f32 = PADDING + ICON + ICON_GAP;
+/// A key of the shortcut under the capture button: its height, the room at each
+/// side of its name, and between keys.
+const KEY: f32 = 24.0;
+const KEY_PADDING: f32 = 8.0;
+const KEY_GAP: f32 = 4.0;
+/// The frame around the capture button and its shortcut, the logo's four corners:
+/// how far out it stands, across and down; how much it closes in under the pointer,
+/// as if focusing; and its corners' arms, turn and stroke.
+const FRAME: (f32, f32) = (40.0, 28.0);
+const FOCUS: f32 = 6.0;
+const FRAME_ARM: f32 = 14.0;
+const FRAME_TURN: f32 = 5.0;
+const FRAME_STROKE: f32 = 2.5;
 /// Between a tip and the window's edges.
 const EDGE: f32 = 8.0;
 /// The back button's width: its glyph sits 16 from the window's edge and from the
@@ -145,11 +167,19 @@ pub struct Pages {
     title: Label,
     capture: Button,
     open_settings: IconButton,
-    /// The shortcut, under the capture button.
+    /// The shortcut, under the welcome's invitation.
     hint: Label,
+    /// The shortcut's keys and Print Screen, as keycaps under the capture button.
+    keys: Vec<Label>,
+    print_screen: Label,
+    /// How far the frame around the capture button has closed in, from 0 to 1.
+    framing: Animation,
 
     back: IconButton,
     settings_title: Label,
+    group_titles: [Label; 3],
+    /// The glyph that leads each setting, in the rows' order.
+    row_icons: [Label; CARDS],
     shortcut_title: Label,
     shortcut: Shortcut,
     /// In `Prompt`'s order.
@@ -214,6 +244,23 @@ impl Pages {
             capture: Button::new(fonts.label(text.new_capture)?),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
             hint: fonts.caption("")?,
+            keys: Vec::new(),
+            print_screen: fonts.caption(&Hotkey::print_screen().label())?,
+            framing: Animation::idle(0.0),
+            group_titles: [
+                fonts.caption(text.groups[0])?,
+                fonts.caption(text.groups[1])?,
+                fonts.caption(text.groups[2])?,
+            ],
+            row_icons: [
+                fonts.icon('\u{E765}', ICON)?,
+                fonts.icon('\u{E722}', ICON)?,
+                fonts.icon('\u{E767}', ICON)?,
+                fonts.icon('\u{E7E8}', ICON)?,
+                fonts.icon('\u{E70F}', ICON)?,
+                fonts.icon('\u{E8EC}', ICON)?,
+                fonts.icon('\u{E8B7}', ICON)?,
+            ],
             back: IconButton::new(fonts.icon('\u{E72B}', 12.0)?, text.back),
             settings_title: fonts.caption(text.settings)?,
             shortcut_title: fonts.label(text.shortcut)?,
@@ -256,9 +303,9 @@ impl Pages {
             self.folder_title.width + PADDING + self.change_folder.width(),
             self.startup.width(),
         ];
-        let cards = rows.into_iter().fold(0.0, f32::max) + 4.0 * PADDING;
+        let cards = rows.into_iter().fold(0.0, f32::max) + LEAD + 3.0 * PADDING;
         let title_bar = BACK + self.settings_title.width + PADDING + Caption::WIDTH;
-        let height = self.cards_top() + CARDS as f32 * (CARD + GAP) - GAP + PADDING;
+        let height = self.rows()[CARDS - 1].bottom() + PADDING;
         (MIN_WIDTH.max(cards).max(title_bar + PADDING), height)
     }
 
@@ -268,7 +315,7 @@ impl Pages {
         self.room = room;
         self.caption.layout(room.0, TITLE_BAR);
         self.layout_welcome();
-        let group = HEIGHT + HINT_GAP + self.hint.height;
+        let group = HEIGHT + HINT_GAP + KEY;
         let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
         self.capture
             .place((room.0 - self.capture.width()) / 2.0, top);
@@ -281,23 +328,24 @@ impl Pages {
         let [
             shortcut,
             screen_keys,
+            sound,
+            startup,
             open_editor,
             tool_names,
-            sound,
             folder,
-            startup,
-        ] = self.cards();
+        ] = self.rows();
         self.shortcut
             .place(shortcut.right() - PADDING, shortcut.middle());
-        for (toggle, card) in [
+        for (toggle, row) in [
             (&mut self.screen_keys, screen_keys),
-            (&mut self.open_editor, open_editor),
-            (&mut self.tool_names, tool_names),
             (&mut self.sound, sound),
             (&mut self.startup, startup),
+            (&mut self.open_editor, open_editor),
+            (&mut self.tool_names, tool_names),
         ] {
-            toggle.place(card.left + PADDING, card.top);
-            toggle.stretch(card.width - 2.0 * PADDING, card.height);
+            // After the row's glyph.
+            toggle.place(row.left + LEAD, row.top);
+            toggle.stretch(row.width - LEAD - PADDING, row.height);
         }
         let left = self.screen_keys.label_right() + INFO_GAP;
         let below_title = Area::new(EDGE, TITLE_BAR, room.0 - 2.0 * EDGE, room.1 - TITLE_BAR);
@@ -383,6 +431,12 @@ impl Pages {
     pub fn hover(&mut self, page: Page, point: Option<Point>) -> bool {
         // Only the part under the pointer sees it: the info glyph sits on its setting.
         let under = point.and_then(|point| self.part_at(page, point));
+        // The frame closes in on the capture button under the pointer.
+        let framed = f32::from(u8::from(under == Some(Part::Capture)));
+        if framed != self.framing.target() {
+            let spring = Easing::SPRING;
+            self.framing = self.framing.retarget(framed, motion::NORMAL, spring);
+        }
         parts(page).iter().fold(false, |changed, &part| {
             let point = point.filter(|_| under == Some(part));
             self.control(part).hover(point) | changed
@@ -409,29 +463,44 @@ impl Pages {
         match page {
             // Their controls come in in turn.
             Page::Welcome | Page::Ready | Page::Premium => {
-                painter.text(&self.title, PADDING, self.title_row, palette.text);
+                self.draw_title(painter);
                 self.draw_welcome(page, painter, now);
             }
             Page::Home => {
-                painter.text(&self.title, PADDING, self.title_row, palette.text);
-                self.draw_hint(painter, self.capture.area());
+                self.draw_title(painter);
+                self.draw_frame(painter, now);
+                self.draw_keys(painter);
                 controls();
             }
             Page::Settings => {
                 painter.text(&self.settings_title, BACK, self.title_row, palette.text);
-                let cards = self.cards();
-                for card in cards {
+                let rows = self.rows();
+                let mut first = 0;
+                for (count, title) in GROUPS.into_iter().zip(&self.group_titles) {
+                    let top = rows[first].top;
+                    let middle = top - HEADING + (HEADING + PADDING) / 2.0;
+                    painter.text(title, PADDING, middle, palette.text_secondary);
+                    let card = Area::new(PADDING, top, rows[first].width, count as f32 * ROW);
                     let card = painter.align(card);
                     painter.fill(card, RADIUS, palette.card);
                     painter.stroke(card, RADIUS, painter.border(), palette.control_stroke);
+                    // A hairline between a group's settings.
+                    for row in &rows[first + 1..first + count] {
+                        let line = Area::new(row.left, row.top, row.width, painter.border());
+                        painter.fill(painter.align(line), 0.0, palette.control_stroke);
+                    }
+                    first += count;
                 }
-                let [shortcut, _, _, _, _, folder, _] = cards;
-                let left = shortcut.left + PADDING;
+                for (row, icon) in rows.iter().zip(&self.row_icons) {
+                    painter.text(icon, row.left + PADDING, row.middle(), palette.text);
+                }
+                let [shortcut, .., folder] = rows;
+                let left = shortcut.left + LEAD;
                 painter.text(&self.shortcut_title, left, shortcut.middle(), palette.text);
                 // The folder's title and path, one above the other.
                 let (title, path) = (&self.folder_title, &self.folder_path);
                 let top = folder.middle() - (title.height + path.height) / 2.0;
-                let left = folder.left + PADDING;
+                let left = folder.left + LEAD;
                 painter.text(title, left, top + title.height / 2.0, palette.text);
                 let middle = top + title.height + path.height / 2.0;
                 painter.text(path, left, middle, palette.text_secondary);
@@ -452,6 +521,65 @@ impl Pages {
         let left = (self.room.0 - self.hint.width) / 2.0;
         let middle = button.bottom() + HINT_GAP + self.hint.height / 2.0;
         painter.text(&self.hint, left, middle, painter.palette.text_secondary);
+    }
+
+    /// The shortcut, centered under `button`.    pub(super) fn draw_hint(&self, painter: &Painter, button: Area) {        let left = (self.room.0 - self.hint.width) / 2.0;        let middle = button.bottom() + HINT_GAP + self.hint.height / 2.0;        painter.text(&self.hint, left, middle, painter.palette.text_secondary);    }
+    /// Kata's logo and name, at the start of the title bar.
+    fn draw_title(&self, painter: &Painter) {
+        let logo = Area::new(PADDING, self.title_row - ICON / 2.0, ICON, ICON);
+        painter.logo(painter.align(logo), logo::DRAWING);
+        let left = PADDING + ICON + ICON_GAP;
+        painter.text(&self.title, left, self.title_row, painter.palette.text);
+    }
+
+    /// The keys that start a capture: Print Screen while Kata answers to Windows'
+    /// capture keys, the shortcut otherwise.
+    fn keys(&self) -> &[Label] {
+        if self.screen_keys.is_on() {
+            std::slice::from_ref(&self.print_screen)
+        } else {
+            &self.keys
+        }
+    }
+
+    /// How wide `keys` are as keycaps in a row.
+    fn keys_width(keys: &[Label]) -> f32 {
+        let caps = keys
+            .iter()
+            .map(|key| KEY.max(key.width + 2.0 * KEY_PADDING));
+        caps.sum::<f32>() + KEY_GAP * keys.len().saturating_sub(1) as f32
+    }
+
+    /// The keys, as keycaps centered under the capture button.
+    fn draw_keys(&self, painter: &Painter) {
+        let palette = painter.palette;
+        let keys = self.keys();
+        let top = self.capture.area().bottom() + HINT_GAP;
+        let mut left = (self.room.0 - Self::keys_width(keys)) / 2.0;
+        for key in keys {
+            let width = KEY.max(key.width + 2.0 * KEY_PADDING);
+            let cap = painter.align(Area::new(left, top, width, KEY));
+            painter.fill(cap, RADIUS, palette.button);
+            painter.stroke(cap, RADIUS, painter.border(), palette.control_stroke);
+            let text = cap.left + (cap.width - key.width) / 2.0;
+            painter.text(key, text, cap.middle(), palette.text_secondary);
+            left += width + KEY_GAP;
+        }
+    }
+
+    /// The logo's four corners around the capture button and its keys, as around a
+    /// capture. Under the pointer they close in, as if focusing.
+    fn draw_frame(&self, painter: &Painter, now: Instant) {
+        let button = self.capture.area();
+        let width = button.width.max(Self::keys_width(self.keys()));
+        let closer = FOCUS * self.framing.value(now);
+        let frame = Area::new(
+            (self.room.0 - width) / 2.0 - FRAME.0 + closer,
+            button.top - FRAME.1 + closer,
+            width + 2.0 * (FRAME.0 - closer),
+            HEIGHT + HINT_GAP + KEY + 2.0 * (FRAME.1 - closer),
+        );
+        painter.frame(frame, FRAME_ARM, FRAME_TURN, FRAME_STROKE);
     }
 
     /// Moves the keyboard focus to `page`'s next control, or the previous one if
@@ -479,6 +607,7 @@ impl Pages {
 
     pub fn is_animating(&self, page: Page, now: Instant) -> bool {
         (page.is_welcome() && self.welcome_animating(page, now))
+            || self.framing.is_running(now)
             || parts(page)
                 .iter()
                 .any(|&part| self.get(part).is_animating(now))
@@ -489,6 +618,9 @@ impl Pages {
         let keys = keys.iter().map(|key| self.fonts.label(key));
         self.shortcut.set_keys(keys.collect::<Result<_>>()?);
         self.hint = self.fonts.caption(&hotkey.label())?;
+        let keys = hotkey.keys();
+        let keys = keys.iter().map(|key| self.fonts.caption(key));
+        self.keys = keys.collect::<Result<_>>()?;
         Ok(())
     }
 
@@ -543,23 +675,25 @@ impl Pages {
         self.startup.set(on);
     }
 
-    fn cards_top(&self) -> f32 {
-        TITLE_BAR + PADDING
-    }
-
-    /// The settings' cards, from top to bottom.
-    fn cards(&self) -> [Area; CARDS] {
+    /// The settings' rows, from top to bottom, each group under its heading.
+    fn rows(&self) -> [Area; CARDS] {
         let width = self.room.0 - 2.0 * PADDING;
-        let top = self.cards_top();
-        std::array::from_fn(|row| {
-            let top = top + row as f32 * (CARD + GAP);
-            Area::new(PADDING, top, width, CARD)
-        })
+        let mut rows = [Area::default(); CARDS];
+        let (mut row, mut top) = (0, TITLE_BAR - PADDING);
+        for count in GROUPS {
+            top += HEADING;
+            for _ in 0..count {
+                rows[row] = Area::new(PADDING, top, width, ROW);
+                row += 1;
+                top += ROW;
+            }
+        }
+        rows
     }
 
     /// Fits the folder's path between its card's edge and the Change button.
     fn trim_folder(&mut self) -> Result<()> {
-        let left = self.cards()[5].left + PADDING;
+        let left = self.rows()[CARDS - 1].left + LEAD;
         let width = self.change_folder.area().left - PADDING - left;
         let path = self.folder.to_string_lossy();
         self.folder_path = self.fonts.path(&path, width)?;
@@ -587,11 +721,11 @@ fn parts(page: Page) -> &'static [Part] {
             // Before its setting, which it sits on.
             Part::ScreenKeysInfo,
             Part::ScreenKeys,
+            Part::Sound,
+            Part::Startup,
             Part::OpenEditor,
             Part::ToolNames,
-            Part::Sound,
             Part::Folder,
-            Part::Startup,
         ],
     }
 }

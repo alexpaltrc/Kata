@@ -50,6 +50,15 @@ impl Default for Hotkey {
 }
 
 impl Hotkey {
+    /// Print Screen on its own, which starts a capture while Kata answers to Windows'
+    /// capture keys.
+    pub fn print_screen() -> Self {
+        Self {
+            modifiers: HOT_KEY_MODIFIERS(0),
+            key: u32::from(VK_SNAPSHOT.0),
+        }
+    }
+
     /// The shortcut `key` makes with the modifiers held down along with it.
     pub fn pressed(key: VIRTUAL_KEY) -> Press {
         let flags = [

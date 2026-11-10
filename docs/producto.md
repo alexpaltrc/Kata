@@ -47,7 +47,7 @@ Un clic en el icono inicia un recorte. Su menú: **Nuevo recorte** · **Abrir ca
 
 ## Ventana principal
 
-El botón **Nuevo recorte**, el atajo debajo y el engranaje de Ajustes, en la barra de título, antes de los botones de la ventana y distinto de ellos: un botón redondeado, propio. Nada más.
+El botón **Nuevo recorte** y, debajo, las teclas que inician una captura, como teclas: el atajo o, con Kata como app de capturas, `Impr Pant`. Alrededor, las cuatro esquinas del icono, en su naranja, como alrededor de una captura; al pasar el cursor por el botón se cierran un poco, con un resorte, como al enfocar. En la barra de título, el icono de Kata y su nombre, y el engranaje de Ajustes antes de los botones de la ventana y distinto de ellos: un botón redondeado, propio. Nada más.
 
 La barra de título mide 48 píxeles de alto, la más alta de las dos que usa Windows 11, igual que la del editor. El título, el engranaje, la flecha de volver y los botones de la ventana comparten la misma línea, en su centro. Los botones de minimizar, maximizar y cerrar los dibuja Kata, del alto de la barra; Windows los sigue reconociendo, así que al dejar el cursor sobre Maximizar salen los diseños de acople.
 
@@ -56,7 +56,7 @@ La barra de título mide 48 píxeles de alto, la más alta de las dos que usa Wi
 
 ## Ajustes
 
-Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inicio.
+Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inicio. Los ajustes van en tres grupos con título, cada uno en una tarjeta con una línea fina entre sus filas y un icono al principio de cada fila: **Capturar** (atajo, app de capturas, sonido, iniciar con Windows), **Editar** (abrir el editor, nombres de las herramientas) y **Guardar** (carpeta).
 
 | Ajuste | Por defecto | Cómo funciona |
 |---|---|---|

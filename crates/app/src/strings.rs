@@ -36,6 +36,8 @@ pub struct Strings {
     /// What assistive technologies call the window's buttons: minimize, maximize, close
     /// and restore.
     pub caption: [&'static str; 4],
+    /// What the settings' groups are called: capturing, editing and saving.
+    pub groups: [&'static str; 3],
     pub exit: &'static str,
     /// Kata Dev's command to try the welcome again.
     pub replay_welcome: &'static str,
@@ -146,6 +148,7 @@ static SPANISH: Strings = Strings {
     settings: "Ajustes",
     back: "Atrás",
     caption: ["Minimizar", "Maximizar", "Cerrar", "Restaurar"],
+    groups: ["Capturar", "Editar", "Guardar"],
     exit: "Salir",
     replay_welcome: "Repetir la bienvenida",
     blur: "Desenfocar",
@@ -210,6 +213,7 @@ static ENGLISH: Strings = Strings {
     settings: "Settings",
     back: "Back",
     caption: ["Minimize", "Maximize", "Close", "Restore"],
+    groups: ["Capture", "Edit", "Save"],
     exit: "Exit",
     replay_welcome: "Replay the welcome",
     blur: "Blur",
