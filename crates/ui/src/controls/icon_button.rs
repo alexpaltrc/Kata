@@ -20,9 +20,6 @@ const GAP: f32 = 6.0;
 enum Fit {
     /// On its own, with rounded corners.
     Alone,
-    /// Filling its part of the title bar edge to edge, square, as the caption
-    /// buttons beside it do.
-    Bleeds,
     /// Round at both ends, inside a capsule.
     Round,
 }
@@ -41,7 +38,7 @@ pub struct IconButton {
 
 impl IconButton {
     pub const WIDTH: f32 = 40.0;
-    /// Short enough to fit beside the caption buttons.
+    /// Lower than the standard control, for a title bar.
     pub const HEIGHT: f32 = 28.0;
 
     pub fn new(glyph: Label, name: &str) -> Self {
@@ -77,13 +74,6 @@ impl IconButton {
         self.fit = Fit::Alone;
     }
 
-    /// Fills `area` of the title bar edge to edge, square, as the caption buttons
-    /// beside it do.
-    pub fn bleed(&mut self, area: Area) {
-        self.area = area;
-        self.fit = Fit::Bleeds;
-    }
-
     /// Places it `height` DIPs tall and round at both ends, inside a capsule.
     pub fn round(&mut self, left: f32, top: f32, height: f32) {
         self.area = Area::new(left, top, self.width(), height);
@@ -101,7 +91,6 @@ impl IconButton {
     fn radius(&self) -> f32 {
         match self.fit {
             Fit::Alone => RADIUS,
-            Fit::Bleeds => 0.0,
             Fit::Round => self.area.height / 2.0,
         }
     }
@@ -134,9 +123,7 @@ impl Control for IconButton {
     }
 
     fn focus_area(&self) -> (Area, f32) {
-        // Inside an edge-to-edge button, as the window's edge would cut a ring around it.
-        let inset = if self.fit == Fit::Bleeds { -4.0 } else { 0.0 };
-        (self.area.inflate(inset), self.radius())
+        (self.area, self.radius())
     }
 
     fn act(&mut self, action: Action) -> bool {

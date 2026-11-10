@@ -7,11 +7,10 @@ use windows::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::{
             Dwm::{
-                DWMSBT_MAINWINDOW, DWMWA_CAPTION_BUTTON_BOUNDS, DWMWA_SYSTEMBACKDROP_TYPE,
-                DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE, DwmDefWindowProc,
-                DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
+                DWMSBT_MAINWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                DWMWINDOWATTRIBUTE, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
             },
-            Gdi::{ClientToScreen, GetMonitorInfoW, HMONITOR, MONITORINFO, ScreenToClient},
+            Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO, ScreenToClient},
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -21,29 +20,24 @@ use windows::{
                 GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
             },
             Input::KeyboardAndMouse::{
-                GetKeyState, TME_HOVER, TME_LEAVE, TRACKMOUSEEVENT, TRACKMOUSEEVENT_FLAGS,
-                TrackMouseEvent, VIRTUAL_KEY,
+                GetKeyState, TME_HOVER, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
+                TRACKMOUSEEVENT_FLAGS, TrackMouseEvent, VIRTUAL_KEY,
             },
             WindowsAndMessaging::{
                 CREATESTRUCTW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetClientRect,
-                GetWindowLongPtrW, GetWindowRect, HTCLIENT, HTTOP, IDC_ARROW, IsZoomed,
-                LoadCursorW, MINMAXINFO, NCCALCSIZE_PARAMS, RegisterClassExW, SM_CXPADDEDBORDER,
-                SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-                SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCCALCSIZE, WM_NCCREATE,
+                GetWindowLongPtrW, HTCLIENT, HTTOP, IDC_ARROW, IsZoomed, LoadCursorW, MINMAXINFO,
+                NCCALCSIZE_PARAMS, RegisterClassExW, SM_CXPADDEDBORDER, SM_CYSIZEFRAME,
+                SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                SetWindowLongPtrW, SetWindowPos, WINDOW_STYLE, WM_NCCALCSIZE, WM_NCCREATE,
                 WM_NCHITTEST, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
+                WS_SYSMENU,
             },
         },
     },
     core::{BOOL, HSTRING, PCWSTR, Result},
 };
 
-use crate::paint::Area;
-
-/// How wide the caption buttons are, in DIPs, when Windows doesn't say.
-pub const CAPTION_BUTTONS: f32 = 138.0;
-/// How tall they are, then.
-const CAPTION_HEIGHT: f32 = 30.0;
-
+/// A window with a frame to resize it by and a place in the taskbar, but no caption/// buttons of Windows' own: it draws its own (`controls::Caption`).const FRAME: WINDOW_STYLE =    WINDOW_STYLE(WS_OVERLAPPEDWINDOW.0 & !WS_SYSMENU.0);
 /// The state linked to `hwnd`. Call it first thing in the window procedure: on
 /// `WM_NCCREATE` it links the pointer passed as `CreateWindowExW`'s last argument.
 ///
@@ -104,8 +98,8 @@ pub fn set_dark(hwnd: HWND, dark: bool) {
     set_attribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, BOOL::from(dark));
 }
 
-/// Lets the client area cover the title bar, while Windows still draws the
-/// caption buttons and handles the resize borders. Call it first in the window
+/// Lets the client area cover the title bar, while Windows still handles the
+/// resize borders. Call it first in the window
 /// procedure and return its result when there is one.
 ///
 /// Over the client area, `WM_NCHITTEST` is left to the window: it answers
@@ -120,11 +114,6 @@ pub unsafe fn frame_proc(
     lparam: LPARAM,
 ) -> Option<LRESULT> {
     unsafe {
-        // The caption buttons.
-        let mut result = LRESULT(0);
-        if DwmDefWindowProc(hwnd, message, wparam, lparam, &mut result).as_bool() {
-            return Some(result);
-        }
         match message {
             WM_NCCALCSIZE if wparam.0 != 0 => {
                 // Keep the standard side and bottom borders, without the caption.
@@ -150,51 +139,6 @@ pub unsafe fn frame_proc(
             _ => None,
         }
     }
-}
-
-/// Where the caption buttons are, in DIPs.
-pub fn caption_buttons(hwnd: HWND, scale: f32) -> Area {
-    caption_button_bounds(hwnd).map_or_else(
-        || {
-            let left = client_size(hwnd).0 as f32 / scale - CAPTION_BUTTONS;
-            Area::new(left, 0.0, CAPTION_BUTTONS, CAPTION_HEIGHT)
-        },
-        |bounds| {
-            let (width, height) = (bounds.right - bounds.left, bounds.bottom - bounds.top);
-            Area::new(
-                bounds.left as f32 / scale,
-                bounds.top as f32 / scale,
-                width as f32 / scale,
-                height as f32 / scale,
-            )
-        },
-    )
-}
-
-/// Where Windows draws the caption buttons, in client pixels.
-fn caption_button_bounds(hwnd: HWND) -> Option<RECT> {
-    let mut bounds = RECT::default();
-    let mut window = RECT::default();
-    let mut client = POINT::default();
-    unsafe {
-        DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_CAPTION_BUTTON_BOUNDS,
-            (&raw mut bounds).cast(),
-            size_of::<RECT>() as u32,
-        )
-        .ok()?;
-        GetWindowRect(hwnd, &mut window).ok()?;
-        ClientToScreen(hwnd, &mut client).ok().ok()?;
-    }
-    // The bounds are relative to the window's top-left corner.
-    let (dx, dy) = (window.left - client.x, window.top - client.y);
-    Some(RECT {
-        left: bounds.left + dx,
-        top: bounds.top + dy,
-        right: bounds.right + dx,
-        bottom: bounds.bottom + dy,
-    })
 }
 
 /// The part of a monitor that isn't under the taskbar.
@@ -259,7 +203,7 @@ pub fn create(
             WS_EX_NOREDIRECTIONBITMAP,
             class,
             &HSTRING::from(title),
-            WS_OVERLAPPEDWINDOW,
+            FRAME,
             work.rect.left + (work.width() - width) / 2,
             work.rect.top + (work.height() - height) / 2,
             width,
@@ -297,13 +241,7 @@ fn frame_size(client: (i32, i32), dpi: u32) -> (i32, i32) {
         bottom: client.1,
     };
     let _ = unsafe {
-        AdjustWindowRectExForDpi(
-            &mut frame,
-            WS_OVERLAPPEDWINDOW,
-            false,
-            WS_EX_NOREDIRECTIONBITMAP,
-            dpi,
-        )
+        AdjustWindowRectExForDpi(&mut frame, FRAME, false, WS_EX_NOREDIRECTIONBITMAP, dpi)
     };
     // Only the side and bottom borders add.
     (frame.right - frame.left, frame.bottom)
@@ -359,6 +297,13 @@ pub fn track_mouse_leave(hwnd: HWND) -> bool {
     track_mouse(hwnd, TME_LEAVE)
 }
 
+/// Asks Windows to send `WM_NCMOUSELEAVE` once the pointer leaves the parts of the
+/// window that aren't its client area, such as its caption buttons, and returns
+/// whether it will.
+pub fn track_frame_leave(hwnd: HWND) -> bool {
+    track_mouse(hwnd, TME_LEAVE | TME_NONCLIENT)
+}
+
 /// Asks Windows to send `WM_MOUSEHOVER` once the pointer rests on the window as
 /// long as a tooltip waits, starting over now, and returns whether it will.
 pub fn track_mouse_rest(hwnd: HWND) -> bool {
@@ -387,3 +332,7 @@ fn resize_border(hwnd: HWND) -> i32 {
         GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
     }
 }
+
+/// A window with a frame to resize it by and a place in the taskbar, but none of
+/// Windows' caption buttons: it draws its own (`controls::Caption`).
+const FRAME: WINDOW_STYLE = WINDOW_STYLE(WS_OVERLAPPEDWINDOW.0 & !WS_SYSMENU.0);

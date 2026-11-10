@@ -8,12 +8,11 @@ use kata_editor::{Form, Frame, Shape, ZOOMS};
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Control, Dock, HEIGHT, IconButton, Item, Slider, tip},
+    controls::{self, Caption, Control, Dock, HEIGHT, IconButton, Item, Slider, tip},
     figure::Figure,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
     theme::faded,
-    window,
 };
 use windows::core::Result;
 
@@ -178,6 +177,7 @@ pub struct Toolbar {
     frames: Dock,
     name: Name,
     folder: IconButton,
+    caption: Caption,
     /// That the capture saved itself, which the folder button says the first few
     /// times.
     saved: Option<Saved>,
@@ -277,6 +277,7 @@ impl Toolbar {
             frames: Dock::compact(frames, settings.frame),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
+            caption: Caption::new(fonts, strings.caption)?,
             saved: None,
             focus: None,
             window: (0.0, 0.0),
@@ -309,7 +310,7 @@ impl Toolbar {
     /// The narrowest the window fits the toolbar in, in DIPs: the title bar's
     /// controls beside the caption buttons, and the widest capsule at the bottom.
     pub fn min_width(&self) -> f32 {
-        let title = EDGE + name::MIN + EDGE + IconButton::WIDTH + END + window::CAPTION_BUTTONS;
+        let title = EDGE + name::MIN + EDGE + IconButton::WIDTH + END + Caption::WIDTH;
         let options = Tool::ALL
             .map(|tool| self.options_width(tool))
             .into_iter()
@@ -323,12 +324,12 @@ impl Toolbar {
     }
 
     /// Lays the controls out in a window of `window` DIPs: along the title bar,
-    /// before the caption buttons that start at `caption_buttons`, and centered at
-    /// the bottom.
-    pub fn layout(&mut self, window: (f32, f32), caption_buttons: f32) {
+    /// before the caption buttons, and centered at the bottom.
+    pub fn layout(&mut self, window: (f32, f32)) {
         self.window = window;
+        self.caption.layout(window.0, TITLE_BAR);
         let top = |height: f32| (TITLE_BAR - height) / 2.0;
-        let folder = caption_buttons - END - IconButton::WIDTH;
+        let folder = self.caption.left() - END - IconButton::WIDTH;
         self.folder.place(folder, top(IconButton::HEIGHT));
         let center = (window.0 / 2.0, TITLE_BAR / 2.0);
         self.name.place(EDGE, folder - EDGE, center);
@@ -383,7 +384,13 @@ impl Toolbar {
         for part in self.parts() {
             self.get(part).describe(part as usize, &mut elements);
         }
+        self.caption.describe(&mut elements);
         elements
+    }
+
+    /// The window's minimize, maximize and close buttons.
+    pub fn caption(&mut self) -> &mut Caption {
+        &mut self.caption
     }
 
     /// The part on show with the number `describe` gave it.
@@ -464,6 +471,7 @@ impl Toolbar {
     }
 
     pub fn draw(&self, painter: &Painter, now: Instant) {
+        self.caption.draw(painter);
         self.draw_options(painter, now);
         let options = self.tool().options();
         for part in self.parts() {

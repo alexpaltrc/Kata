@@ -1,6 +1,7 @@
 //! Fluent controls, drawn with Direct2D. Positions and sizes are in DIPs.
 
 mod button;
+mod caption;
 mod dock;
 mod icon_button;
 mod info;
@@ -12,6 +13,7 @@ mod toggle;
 use std::time::Instant;
 
 pub use button::Button;
+pub use caption::Caption;
 pub use dock::{Dock, Item};
 pub use icon_button::IconButton;
 pub use info::Info;

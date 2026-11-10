@@ -495,6 +495,14 @@ struct Editor {
 
 impl Editor {
     fn handle(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        // Clicking the title bar ends naming the capture, its buttons included.
+        if message == WM_NCLBUTTONDOWN {
+            self.finish_naming();
+        }
+        let caption = self.toolbar.caption();
+        if let Some(result) = caption.handle(self.hwnd, self.scale, message, wparam, lparam) {
+            return Some(result);
+        }
         match message {
             WM_PAINT => self.paint(),
             // Every frame covers the whole window: erasing first would only flicker.
@@ -1919,8 +1927,7 @@ impl Editor {
         self.view = self.frame().fit();
         self.glide = Glide::rest(self.view);
         self.toolbar.hint_zoom(false);
-        let caption_buttons = window::caption_buttons(self.hwnd, self.scale).left;
-        self.toolbar.layout(self.window(), caption_buttons);
+        self.toolbar.layout(self.window());
     }
 
     /// Where `shape` shows, in capture pixels: a focus follows its zoom as it glides.

@@ -258,6 +258,10 @@ struct Main {
 
 impl Main {
     fn handle(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        let caption = self.pages.caption();
+        if let Some(result) = caption.handle(self.hwnd, self.scale, message, wparam, lparam) {
+            return Some(result);
+        }
         let key = VIRTUAL_KEY(wparam.0 as u16);
         match message {
             WM_PAINT => self.paint(),
@@ -292,7 +296,7 @@ impl Main {
                 }
             }
             WM_KEYDOWN => return self.key(key).then_some(LRESULT(0)),
-            // Alt with a letter would only beep. Alt + Space still opens the window menu.
+            // Alt with a letter would only beep.
             WM_SYSCHAR if wparam.0 != usize::from(b' ') => {}
             WM_ACTIVATE => {
                 if wparam.0 as u32 & 0xffff == WA_INACTIVE {
@@ -613,6 +617,7 @@ impl Main {
         let offset = (1.0 - shown) * SLIDE * self.direction;
         surface.draw(&self.palette, self.scale, |painter| {
             painter.layer(shown, offset, || self.pages.draw(self.page, painter, now));
+            self.pages.draw_caption(painter);
         })
     }
 
@@ -642,8 +647,7 @@ impl Main {
             self.size.0 as f32 / self.scale,
             self.size.1 as f32 / self.scale,
         );
-        let caption_buttons = window::caption_buttons(self.hwnd, self.scale);
-        if let Err(error) = self.pages.layout(room, caption_buttons) {
+        if let Err(error) = self.pages.layout(room) {
             report("window", &error);
         }
     }

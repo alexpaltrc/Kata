@@ -33,6 +33,9 @@ pub struct Strings {
     pub open_captures: &'static str,
     pub settings: &'static str,
     pub back: &'static str,
+    /// What assistive technologies call the window's buttons: minimize, maximize, close
+    /// and restore.
+    pub caption: [&'static str; 4],
     pub exit: &'static str,
     /// Kata Dev's command to try the welcome again.
     pub replay_welcome: &'static str,
@@ -142,6 +145,7 @@ static SPANISH: Strings = Strings {
     open_captures: "Abrir capturas",
     settings: "Ajustes",
     back: "Atrás",
+    caption: ["Minimizar", "Maximizar", "Cerrar", "Restaurar"],
     exit: "Salir",
     replay_welcome: "Repetir la bienvenida",
     blur: "Desenfocar",
@@ -205,6 +209,7 @@ static ENGLISH: Strings = Strings {
     open_captures: "Open captures",
     settings: "Settings",
     back: "Back",
+    caption: ["Minimize", "Maximize", "Close", "Restore"],
     exit: "Exit",
     replay_welcome: "Replay the welcome",
     blur: "Blur",

@@ -11,10 +11,9 @@ use std::{
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Button, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
+    controls::{self, Button, Caption, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
     motion::Animation,
     paint::{Area, Fonts, Label, Painter, Point},
-    window::CAPTION_BUTTONS,
 };
 use windows::core::Result;
 
@@ -22,8 +21,11 @@ use crate::{channel, hotkey::Hotkey, settings::Settings, strings::strings};
 pub use welcome::Ready;
 use welcome::{First, GLYPH};
 
-/// The title bar's height, as Windows recommends.
-pub const TITLE_BAR: f32 = 32.0;
+/// The title bar's height: the taller of the two Windows recommends, with room for
+/// buttons of its own.
+pub const TITLE_BAR: f32 = 48.0;
+/// Between the title bar's own buttons and what's beside them.
+const BAR_GAP: f32 = 8.0;
 /// Around the cards, and inside them.
 const PADDING: f32 = 16.0;
 const CARD: f32 = 64.0;
@@ -101,6 +103,7 @@ pub enum Prompt {
 
 pub struct Pages {
     fonts: Fonts,
+    caption: Caption,
     /// The client area.
     room: (f32, f32),
     /// The middle of the title bar's row of buttons and titles.
@@ -176,6 +179,7 @@ impl Pages {
         let fonts = Fonts::new(graphics)?;
         let text = strings();
         let mut pages = Self {
+            caption: Caption::new(&fonts, text.caption)?,
             room: (0.0, 0.0),
             title_row: TITLE_BAR / 2.0,
             logo: Area::default(),
@@ -253,30 +257,27 @@ impl Pages {
             self.startup.width(),
         ];
         let cards = rows.into_iter().fold(0.0, f32::max) + 4.0 * PADDING;
-        let title_bar = BACK + self.settings_title.width + PADDING + CAPTION_BUTTONS;
+        let title_bar = BACK + self.settings_title.width + PADDING + Caption::WIDTH;
         let height = self.cards_top() + CARDS as f32 * (CARD + GAP) - GAP + PADDING;
         (MIN_WIDTH.max(cards).max(title_bar + PADDING), height)
     }
 
-    /// Arranges both pages in a client area of `room`, with the caption buttons at
-    /// `caption_buttons`. The title bar's buttons and titles line up with them.
-    pub fn layout(&mut self, room: (f32, f32), caption_buttons: Area) -> Result<()> {
+    /// Arranges the pages in a client area of `room`. The title bar's buttons and
+    /// titles share its middle with the caption buttons.
+    pub fn layout(&mut self, room: (f32, f32)) -> Result<()> {
         self.room = room;
-        self.title_row = caption_buttons.middle();
+        self.caption.layout(room.0, TITLE_BAR);
         self.layout_welcome();
         let group = HEIGHT + HINT_GAP + self.hint.height;
         let top = TITLE_BAR + (room.1 - TITLE_BAR - group) / 2.0;
         self.capture
             .place((room.0 - self.capture.width()) / 2.0, top);
-        // Edge to edge, as the caption buttons: Settings beside them, as wide as
-        // one, and Back at the window's edge. Windows' bounds for the caption
-        // buttons start a little left of the first, so Settings goes by their end.
-        let (top, height) = (caption_buttons.top, caption_buttons.height);
-        let width = CAPTION_BUTTONS / 3.0;
-        let left = caption_buttons.right() - CAPTION_BUTTONS - width;
-        self.open_settings
-            .bleed(Area::new(left, top, width, height));
-        self.back.bleed(Area::new(0.0, top, BACK, height));
+        // Buttons of their own, unlike the caption buttons: Settings before those, and
+        // Back at the window's edge.
+        let top = (TITLE_BAR - IconButton::HEIGHT) / 2.0;
+        let left = self.caption.left() - BAR_GAP - IconButton::WIDTH;
+        self.open_settings.place(left, top);
+        self.back.place((BACK - IconButton::WIDTH) / 2.0, top);
         let [
             shortcut,
             screen_keys,
@@ -322,7 +323,18 @@ impl Pages {
         for &part in parts(page) {
             self.get(part).describe(part as usize, &mut elements);
         }
+        self.caption.describe(&mut elements);
         elements
+    }
+
+    /// The window's minimize, maximize and close buttons.
+    pub fn caption(&mut self) -> &mut Caption {
+        &mut self.caption
+    }
+
+    /// Draws them: they stay put while a page comes in.
+    pub fn draw_caption(&self, painter: &Painter) {
+        self.caption.draw(painter);
     }
 
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
