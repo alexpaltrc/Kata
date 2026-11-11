@@ -22,8 +22,10 @@ const MAX_MATCH: usize = 258;
 const MAX_CHAIN: usize = 64;
 /// Earlier positions a search tries when the answer is only weighed.
 const QUICK_CHAIN: usize = 16;
-/// A repeat this long ends the search, and is taken whole.
+/// A repeat this long ends the search.
 const NICE_MATCH: usize = 128;
+/// A repeat this long is taken whole: nothing inside it is weighed.
+const WHOLE: usize = 258;
 /// Positions are chained by their first four bytes: chaining by three finds more
 /// short repeats, which cost about as much as the bytes they replace.
 const HASHED: usize = 4;
@@ -80,7 +82,7 @@ pub fn weigh(data: &[u8], row: usize) -> u64 {
     while pos < data.len() {
         let (mut length, mut distance) = chains.find(pos, QUICK_CHAIN);
         // The row above, where the search stops short of it.
-        let above = chains.above(pos);
+        let above = chains.above(pos, 0);
         if above > length {
             (length, distance) = (above, row);
         }
@@ -137,23 +139,25 @@ impl Repeats {
         let mut starts = Vec::with_capacity(span.len() + 1);
         let mut found = Vec::new();
         let mut pos = span.start;
+        // How much of the byte before repeated the row above: all but one of those
+        // bytes do here too, so comparing goes on from there.
+        let mut above = 0usize;
         while pos < span.end {
             starts.push(found.len() as u32);
             let mut most = 0;
-            // The row above too: where the search stops short of it, it's one more.
             chains.search(pos, MAX_CHAIN, |length, distance| {
                 found.push((length as u16, distance as u16));
                 most = length;
             });
             // The row above too: in a capture, what repeats is often right there,
             // farther back than the search gets where much else looks alike.
-            let above = chains.above(pos);
+            above = chains.above(pos, above.saturating_sub(1));
             if above > most && above >= MIN_MATCH {
                 found.push((above as u16, row as u16));
                 most = above;
             }
             pos += 1;
-            if most >= NICE_MATCH {
+            if most >= WHOLE {
                 // So long a repeat is taken whole: nothing inside it is looked up.
                 let whole = found.pop().expect("the longest");
                 found.truncate(starts[starts.len() - 1] as usize);
@@ -163,6 +167,7 @@ impl Repeats {
                     starts.push(found.len() as u32);
                 }
                 pos += most - 1;
+                above = 0;
             }
         }
         starts.push(found.len() as u32);
@@ -218,7 +223,7 @@ impl Repeats {
             );
             let repeats = self.at(at);
             if let [(length, distance)] = *repeats
-                && usize::from(length) >= NICE_MATCH
+                && usize::from(length) >= WHOLE
             {
                 let price = here + prices.lengths[usize::from(length)] + prices.distance(distance);
                 reach(at + usize::from(length), price, Token { length, distance });
@@ -426,13 +431,16 @@ impl<'a> Chains<'a> {
         chains
     }
 
-    /// How much of what starts at `pos` repeats the row above.
-    fn above(&self, pos: usize) -> usize {
+    /// How much of what starts at `pos` repeats the row above, knowing that its
+    /// first `known` bytes do.
+    fn above(&self, pos: usize, known: usize) -> usize {
         if self.row == 0 || pos < self.row {
             return 0;
         }
         let max = (self.end - pos).min(MAX_MATCH);
-        match_length(self.data, pos - self.row, pos, max)
+        let known = known.min(max);
+        let (earlier, pos) = (pos - self.row + known, pos + known);
+        known + match_length(self.data, earlier, pos, max - known)
     }
 
     fn hash(&self, pos: usize) -> usize {
@@ -474,6 +482,10 @@ impl<'a> Chains<'a> {
         let nice = max.min(NICE_MATCH);
         let word = |at: usize| u32::from_le_bytes(data[at..at + HASHED].try_into().unwrap());
         let mut best = MIN_MATCH - 1;
+        // Only a repeat that reaches past the best so far can beat it: its four bytes
+        // up to there have to be these.
+        let mut tail = best - (HASHED - 1).min(best);
+        let mut wanted = word(pos + tail);
         let mut candidate = self.head[hash];
         for _ in 0..chain {
             if candidate == NONE {
@@ -484,21 +496,19 @@ impl<'a> Chains<'a> {
             if distance > WINDOW {
                 break;
             }
-            // Only a repeat that reaches past the best so far can beat it: its four
-            // bytes up to there have to be the same.
-            let tail = best - (HASHED - 1).min(best);
-            if word(start + tail) == word(pos + tail) {
+            if word(start + tail) == wanted {
                 let length = match_length(data, start, pos, max);
                 if length > best {
                     best = length;
-
                     longer(length, distance);
                     if length >= nice {
                         break;
                     }
+                    tail = best - (HASHED - 1).min(best);
+                    wanted = word(pos + tail);
                 }
             }
-            candidate = self.prev[start % WINDOW];
+            candidate = self.prev[start & (WINDOW - 1)];
         }
         self.link(pos, hash);
     }

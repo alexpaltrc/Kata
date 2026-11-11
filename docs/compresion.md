@@ -1,7 +1,7 @@
 # La compresión PNG de Kata
 
 Kata guarda cada captura como PNG con un compresor propio, escrito desde cero, **sin cambiar un
-solo píxel**. Frente al que trae Windows, en el banco de pruebas los archivos pesan **35,5 % menos
+solo píxel**. Frente al que trae Windows, en el banco de pruebas los archivos pesan **36 % menos
 de media**: entre 18 y 48 % en ventanas, más de 50 % con pocos colores y entre 8 y 11 % cuando hay
 fotos. Ninguna captura sale más grande que con Windows.
 
@@ -351,24 +351,64 @@ de arriba ya incluida:
 
 **Decisión:** 16.
 
+### 19. La fila de arriba, a cualquier largo
+
+La fila de arriba solo se ofrecía cuando repetía más que lo hallado por la búsqueda. Como su
+distancia es siempre la misma, su código sale barato, así que probamos ofrecerla también a largos
+menores, para que el camino más barato decidiera. **35,5 %, igual, y un 1 % más lento.
+Descartado.**
+
+### 20. ¿Se eligen bien los filtros?
+
+Para saber cuánto queda por ganar eligiendo mejor el filtro de cada franja, se eligió con el
+compresor completo en vez del rápido: el techo de esa idea.
+
+| Cómo se pesa cada franja | Media | Tiempo |
+|---|---|---|
+| Compresión rápida (lo adoptado) | 35,5 % | 1664 ms |
+| El compresor completo | 35,5 % | 6405 ms |
+| Una octava manera: cada fila, probada de verdad tras la anterior | 35,4 % | 2152 ms |
+
+**Descartado, y cerrado:** con estas maneras de filtrar ya se elige lo mejor. Lo que quede por
+ganar no está en los filtros.
+
+### 21. Repeticiones largas, pesadas por dentro
+
+Una repetición de 128 bytes o más se tomaba entera, sin mirar dentro. Ahora solo se toman enteras
+las de 258, el máximo de DEFLATE: en las demás, cada posición entra en la cuenta del camino más
+barato.
+
+| Se toma entera desde | Media | Tiempo (el mejor de 5) |
+|---|---|---|
+| 128 bytes | 35,5 % | 1654 ms |
+| 192 bytes | 35,7 % | 1754 ms |
+| **258 bytes** | **36,0 %** | **1837 ms** |
+
+**Adoptado.** Cuesta un 11 % más de tiempo. Tres intentos de recuperarlo no sirvieron: pesar solo
+los extremos de una repetición larga (35,9 %, el mismo tiempo), no volver a buscar mientras una
+repetición larga sigue valiendo (35,7 %, el mismo tiempo) y bajar la búsqueda a 48 o 40 candidatos
+(35,7 % y 35,5 %). Sí quedaron dos ajustes que no cambian el resultado: la comparación con la fila
+de arriba continúa la de la posición anterior en vez de empezar de cero, y la búsqueda ya no
+recalcula en cada candidato lo que no cambia.
+
 ### Dónde quedó
 
 | Captura | Windows | Antes | Ahora | Ahorro | Tiempo |
 |---|---|---|---|---|---|
-| Editor de código oscuro (2560×1440) | 188 693 | 121 798 | 103 290 | 45,3 % | 109 ms |
-| Recorte pequeño (680×100) | 5 717 | 3 018 | 2 772 | 51,5 % | 5 ms |
-| Escritorio con foto (2560×1440) | 3 406 662 | 3 327 329 | 3 127 001 | 8,2 % | 614 ms |
-| Diálogo de pocos colores (480×320) | 10 426 | 4 532 | 4 132 | 60,4 % | 6 ms |
-| Captura editada (1920×1080) | 163 766 | 135 995 | 112 541 | 31,3 % | 104 ms |
-| Ajustes con degradado (1920×1080) | 69 737 | 62 092 | 52 066 | 25,3 % | 59 ms |
-| Hoja de cálculo (1600×900) | 74 223 | 39 256 | 33 001 | 55,5 % | 47 ms |
-| Página web larga con fotos (1920×2400) | 1 353 874 | 1 305 386 | 1 203 838 | 11,1 % | 378 ms |
-| Ventana oscura en 4K (3840×2160) | 330 364 | 196 632 | 172 151 | 47,9 % | 105 ms |
-| Ventana clara sobre foto (2560×1440) | 502 807 | 472 549 | 412 075 | 18,0 % | 238 ms |
-| **Media** | | 26,7 % | | **35,5 %** | |
+| Editor de código oscuro (2560×1440) | 188 693 | 121 798 | 102 650 | 45,6 % | 120 ms |
+| Recorte pequeño (680×100) | 5 717 | 3 018 | 2 720 | 52,4 % | 8 ms |
+| Escritorio con foto (2560×1440) | 3 406 662 | 3 327 329 | 3 126 689 | 8,2 % | 598 ms |
+| Diálogo de pocos colores (480×320) | 10 426 | 4 532 | 4 049 | 61,2 % | 10 ms |
+| Captura editada (1920×1080) | 163 766 | 135 995 | 111 895 | 31,7 % | 120 ms |
+| Ajustes con degradado (1920×1080) | 69 737 | 62 092 | 50 870 | 27,1 % | 129 ms |
+| Hoja de cálculo (1600×900) | 74 223 | 39 256 | 33 003 | 55,5 % | 54 ms |
+| Página web larga con fotos (1920×2400) | 1 353 874 | 1 305 386 | 1 202 434 | 11,2 % | 399 ms |
+| Ventana oscura en 4K (3840×2160) | 330 364 | 196 632 | 170 949 | 48,3 % | 130 ms |
+| Ventana clara sobre foto (2560×1440) | 502 807 | 472 549 | 409 784 | 18,5 % | 303 ms |
+| **Media** | | 26,7 % | | **36,0 %** | |
 
-En bytes. El peor caso pasó de 2,3 a 8,2 %, y el ahorro sobre el peso total, de 7,2 a 14,5 %. El
-banco entero tarda 1664 ms, frente a 978 ms: 1,7 veces más, en segundo plano y con la captura ya
+En bytes. El peor caso pasó de 2,3 a 8,2 %, y el ahorro sobre el peso total, de 7,2 a 14,6 %. El
+banco entero tarda 1837 ms, frente a 978 ms: 1,9 veces más, en segundo plano y con la captura ya
 en el portapapeles.
 
 ## Datos para nerds
@@ -394,7 +434,8 @@ arriba, y sin afinar.
 | Tramos | De 256 KiB, uno por núcleo a la vez; cada uno ve los 32 KiB anteriores |
 | Búsqueda | Cadenas hash sobre 4 bytes, con una tabla de 2¹⁵ entradas |
 | Candidatos por posición | 64, más la fila de arriba; se guarda, para cada largo, la repetición más cercana |
-| Repetición que se toma entera | 128 bytes o más |
+| Repetición que corta la búsqueda | 128 bytes o más |
+| Repetición que se toma entera | 258 bytes, el máximo |
 | Lectura | El camino de menos bits por el tramo, tres veces: la primera con los precios de tomar siempre la repetición más larga, y cada una con los de la anterior |
 | Precios | La entropía de cada símbolo, en 1/32 de bit, entre 1 y 15 bits |
 | Bloques | Trozos de 256 símbolos que se unen mientras pesen menos juntos; 262 144 símbolos como mucho |
@@ -413,13 +454,13 @@ Del plan para ir a fondo ya está hecho lo que más prometía: el banco permanen
 filtros de verdad, el camino más barato en bits, los bloques a medida y usar todos los núcleos.
 **Lo que no se puede cambiar** sigue igual: el archivo es un PNG normal, sin pérdida. Eso fija las
 herramientas: cinco filtros por fila y DEFLATE, que solo recuerda 32 KB hacia atrás. Quedan estas
-ideas, de más a menos prometedoras:
+ideas, de más a menos prometedoras. Los filtros ya no están entre ellas: el experimento 20 midió su
+techo. Y hay un límite que conviene tener claro: en una foto, un PNG sin pérdida no baja mucho más
+de lo que ya baja, con ningún compresor; ahí solo cambiaría las cosas otro formato, que descartamos.
 
 - **Un buscador de repeticiones mejor.** Buscar más hondo sigue dando,
   pero cuesta tiempo. Una estructura que encuentre la repetición más larga sin recorrer
   candidatos uno a uno daría eso y más, por menos.
-- **Filtros fila por fila, probados de verdad.** Hoy se prueban por franjas. Probar cada fila con
-  lo que ya se eligió encima es más fino y más caro.
 - **Colores:** paleta con filtros cuando convenga, índices de 8 bits frente a empaquetados, y
   grises con filtros frente a la paleta.
 - **Empezar antes:** comprimir mientras el editor está abierto, para que guardar sea instantáneo.

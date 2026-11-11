@@ -56,7 +56,7 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 
 ## Guardado
 
-- **Formato:** PNG, con un compresor propio escrito desde cero (`crates/editor`), sin librerías ni código de nadie más. Pesa menos que con el de Windows, sin cambiar un píxel: 35,5 % de media en el banco de pruebas, y entre 8 y 11 % cuando hay fotos. Prueba los filtros por franjas, busca el camino de menos bits y corta los bloques donde cambia la imagen, repartiendo el trabajo entre todos los núcleos (`crates/editor/src/parallel.rs`). Cómo funciona, qué se probó y cuánto ahorra: [compresion.md](compresion.md).
+- **Formato:** PNG, con un compresor propio escrito desde cero (`crates/editor`), sin librerías ni código de nadie más. Pesa menos que con el de Windows, sin cambiar un píxel: 36 % de media en el banco de pruebas, y entre 8 y 11 % cuando hay fotos. Prueba los filtros por franjas, busca el camino de menos bits y corta los bloques donde cambia la imagen, repartiendo el trabajo entre todos los núcleos (`crates/editor/src/parallel.rs`). Cómo funciona, qué se probó y cuánto ahorra: [compresion.md](compresion.md).
 - **Comprobado:** una prueba hace que el decodificador de Windows lea cada PNG de vuelta, píxel a píxel.
 - **Sin bloqueos:** se guarda en segundo plano, así la app nunca se traba.
 - **Escritura atómica:** primero un archivo temporal, luego se reemplaza. Nunca queda una imagen a medias.
@@ -111,5 +111,5 @@ Al dibujar sus propios controles, Kata hace por su cuenta lo que Windows da grat
 | Copiar lo recortado de una captura 4K para entregarlo | < 16 ms | 1,8 ms (entera, 4,3 ms) |
 | Las señales del editor, por cuadro | < 1 ms más | 0,1–0,3 ms el globo y la píldora; 0,5–1 ms el ensayo del arrastre (solo mientras se ven) |
 | Tamaño del ejecutable | < 5 MB | 0.3 MB |
-| PNG frente al de Windows | Nunca mayor | 35,5 % menor de media en el banco de pruebas; con fotos, 8 % menor |
-| Comprimir una captura de 2560 × 1440, en segundo plano | < 1 s | 109 ms un editor de código, 238 ms una ventana sobre una foto, 614 ms una foto (12 núcleos) |
+| PNG frente al de Windows | Nunca mayor | 36 % menor de media en el banco de pruebas; con fotos, 8 % menor |
+| Comprimir una captura de 2560 × 1440, en segundo plano | < 1 s | 120 ms un editor de código, 303 ms una ventana sobre una foto, 598 ms una foto (12 núcleos) |
