@@ -7,8 +7,9 @@ use crate::{Image, Rect, marker::STEP_SIZE};
 
 /// How strongly each blur level hides what's under it: Soft, Medium, Strong.
 pub const BLUR_LEVELS: usize = 3;
-/// How much each focus level magnifies.
-pub const ZOOMS: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
+/// How much a focus magnifies what it lights: enough to lift it off the capture,
+/// and little enough to cover no more than its edges do.
+pub const FOCUS_ZOOM: f32 = 1.25;
 /// How big each step size draws the markers, against the usual: Small, Medium, Large, Extra large.
 pub const STEP_SIZES: [f32; 4] = [0.75, 1.0, 1.35, 1.8];
 /// The least a usual marker spans of the capture's shorter side, so it still reads once
@@ -39,8 +40,6 @@ pub enum Frame {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Focus {
     pub rect: Rect,
-    /// An index into `ZOOMS`.
-    pub level: usize,
     /// The blur level around it, if it blurs what's around.
     pub blur: Option<usize>,
     pub frame: Frame,
@@ -50,7 +49,7 @@ impl Focus {
     pub fn spot(&self) -> Spot {
         Spot {
             rect: self.rect,
-            zoom: ZOOMS[self.level],
+            zoom: FOCUS_ZOOM,
             blur: self.blur,
             frame: self.frame,
         }
@@ -315,7 +314,7 @@ impl Edits {
             }
             Shape::Focus => {
                 if let Some(focus) = &mut self.focus {
-                    focus.rect = Spot::source(outline, ZOOMS[focus.level]);
+                    focus.rect = Spot::source(outline, FOCUS_ZOOM);
                 }
             }
             Shape::Figure(index) => {
@@ -889,7 +888,6 @@ mod tests {
             ],
             focus: Some(Focus {
                 rect: Rect::new(40, 40, 50, 50),
-                level: 3,
                 blur: None,
                 frame: Frame::Soft,
             }),
@@ -900,8 +898,8 @@ mod tests {
         };
         assert_eq!(edits.shape_at(10, 10, 0.0, bounds), Some(Shape::Blur(0)));
         assert_eq!(edits.shape_at(30, 30, 0.0, bounds), Some(Shape::Blur(1)));
-        // Doubled, the focus lights 35..55.
-        assert_eq!(edits.shape_at(36, 36, 0.0, bounds), Some(Shape::Focus));
+        // Magnified, the focus lights 39..52.
+        assert_eq!(edits.shape_at(39, 39, 0.0, bounds), Some(Shape::Focus));
         assert_eq!(edits.shape_at(50, 50, 0.0, bounds), Some(Shape::Step(0)));
         assert_eq!(edits.shape_at(90, 90, 0.0, bounds), None);
     }
@@ -912,7 +910,6 @@ mod tests {
         let mut edits = Edits {
             focus: Some(Focus {
                 rect: Rect::new(20, 20, 80, 60),
-                level: 0,
                 blur: None,
                 frame: Frame::Ellipse,
             }),
@@ -956,7 +953,6 @@ mod tests {
             blurs: Vec::new(),
             focus: Some(Focus {
                 rect: Rect::new(10, 10, 30, 30),
-                level: 2,
                 blur: Some(1),
                 frame: Frame::Soft,
             }),
@@ -965,8 +961,7 @@ mod tests {
         let outline = Rect::new(100, 60, 160, 120);
         edits.reshape(Shape::Focus, outline, bounds);
         assert_eq!(edits.outline(Shape::Focus, bounds), Some(outline));
-        let focus = edits.focus.map(|focus| (focus.level, focus.blur));
-        assert_eq!(focus, Some((2, Some(1))));
+        assert_eq!(edits.focus.map(|focus| focus.blur), Some(Some(1)));
     }
 
     #[test]
@@ -984,7 +979,6 @@ mod tests {
         let mut edits = blurred(0);
         edits.focus = Some(Focus {
             rect: Rect::new(0, 0, 10, 10),
-            level: 0,
             blur: None,
             frame: Frame::Soft,
         });

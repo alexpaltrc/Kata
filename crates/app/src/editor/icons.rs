@@ -79,18 +79,6 @@ pub fn steps(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
     Ok((ring.and(&one)?, disc.and(&ring)?.without(&one)?))
 }
 
-/// The magnifier that leads the focus's zoom, `size` DIPs square.
-pub fn zoom(graphics: &Graphics, size: f32) -> Result<Figure> {
-    let unit = size / GRID;
-    let at = |x: f32, y: f32| (x * unit, y * unit);
-    Figure::new(graphics, |pen| {
-        pen.circle(at(8.75, 8.75), 5.625 * unit);
-        pen.start(at(12.75, 12.75));
-        pen.line(at(16.875, 16.875));
-    })?
-    .traced(LINE * unit)
-}
-
 /// Formas's icon: a circle behind a square, `size` DIPs square. Filled in, both are,
 /// a little apart.
 pub fn shapes(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
@@ -111,43 +99,6 @@ pub fn shapes(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
         .and(&frame)?
         .and(&disc.and(&ring)?.without(&clear)?)?;
     Ok((outlined, filled))
-}
-
-/// A soft focus's icon: four corners, as Foco's, around a rectangle figure's area,
-/// `size` DIPs square. Filled in, the area inside lights up.
-pub fn soft(graphics: &Graphics, size: f32) -> Result<(Figure, Figure)> {
-    const ARM: f32 = 4.0;
-    const CORNER: f32 = 2.0;
-    let unit = size / GRID;
-    let at = |x: f32, y: f32| (x * unit, y * unit);
-    let (left, top, right, bottom) = (2.5, 4.5, 17.5, 15.5);
-    let corners = Figure::new(graphics, |pen| {
-        for (x, y, across, down) in [
-            (left, top, 1.0, 1.0),
-            (right, top, -1.0, 1.0),
-            (right, bottom, -1.0, -1.0),
-            (left, bottom, 1.0, -1.0),
-        ] {
-            pen.start(at(x, y + down * ARM));
-            pen.line(at(x, y + down * CORNER));
-            pen.arc(
-                at(x + across * CORNER, y),
-                CORNER * unit,
-                across * down > 0.0,
-                false,
-            );
-            pen.line(at(x + across * ARM, y));
-        }
-    })?
-    .traced(LINE * unit)?;
-    let area = Figure::new(graphics, |pen| {
-        pen.rounded(
-            Area::new(6.0 * unit, 8.0 * unit, 8.0 * unit, 4.0 * unit),
-            unit,
-        );
-    })?;
-    let filled = corners.and(&area)?;
-    Ok((corners, filled))
 }
 
 /// A rectangle figure's icon, `size` DIPs square.

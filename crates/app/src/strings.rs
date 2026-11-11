@@ -2,7 +2,7 @@
 
 use std::sync::OnceLock;
 
-use kata_editor::{BLUR_LEVELS, STEP_SIZES};
+use kata_editor::STEP_SIZES;
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
 
 pub struct Strings {
@@ -56,13 +56,8 @@ pub struct Strings {
     pub shapes: &'static str,
     /// What each form of the shapes is called: rectangle, ellipse and arrow.
     pub forms: [&'static str; 3],
-    /// What each frame of the focus is called: soft, rectangle and ellipse.
-    pub frames: [&'static str; 3],
-    pub blur_levels: [&'static str; BLUR_LEVELS],
-    /// What assistive technologies call the setting that blurs around the focus, and
-    /// its first step.
+    /// The switch that has the focus blur what's around it.
     pub blur_around: &'static str,
-    pub no_blur: &'static str,
     /// What assistive technologies call the setting that sizes the steps.
     pub step_size: &'static str,
     pub step_sizes: [&'static str; STEP_SIZES.len()],
@@ -184,10 +179,7 @@ static SPANISH: Strings = Strings {
     steps: "Pasos",
     shapes: "Formas",
     forms: ["Rectángulo", "Elipse", "Flecha"],
-    frames: ["Suave", "Rectángulo", "Elipse"],
-    blur_levels: ["Suave", "Medio", "Fuerte"],
     blur_around: "Desenfocar alrededor",
-    no_blur: "Ninguno",
     step_size: "Tamaño de los pasos",
     step_sizes: ["Pequeño", "Mediano", "Grande", "Muy grande"],
     open_file_location: "Abrir la ubicación del archivo",
@@ -267,10 +259,7 @@ static ENGLISH: Strings = Strings {
     steps: "Steps",
     shapes: "Shapes",
     forms: ["Rectangle", "Ellipse", "Arrow"],
-    frames: ["Soft", "Rectangle", "Ellipse"],
-    blur_levels: ["Soft", "Medium", "Strong"],
     blur_around: "Blur around",
-    no_blur: "None",
     step_size: "Step size",
     step_sizes: ["Small", "Medium", "Large", "Extra large"],
     open_file_location: "Open file location",

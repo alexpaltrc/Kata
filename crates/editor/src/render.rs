@@ -804,7 +804,7 @@ fn random(seed: u64, key: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Form, ZOOMS};
+    use crate::Form;
 
     /// A 64x48 image of 1-pixel black and white stripes: the hardest thing to hide.
     fn stripes() -> Image {
@@ -963,7 +963,7 @@ mod tests {
         let mut renderer = Renderer::new(&image, 1.0);
         let focus = Spot {
             rect: Rect::new(24, 16, 40, 32),
-            zoom: ZOOMS[3],
+            zoom: 2.0,
             blur: None,
             frame: Frame::Soft,
         };

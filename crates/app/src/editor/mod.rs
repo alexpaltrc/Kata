@@ -23,8 +23,8 @@ use std::{
 };
 
 use kata_editor::{
-    Blur, Collage, Document, Edits, Figure, Focus, Form, Image, Placement, Rect, Renderer,
-    STEP_SIZES, Shape, Spot, Step, ZOOMS,
+    BLUR_LEVELS, Blur, Collage, Document, Edits, FOCUS_ZOOM, Figure, Focus, Form, Image, Placement,
+    Rect, Renderer, STEP_SIZES, Shape, Spot, Step,
 };
 use kata_ui::{
     Graphics,
@@ -83,8 +83,10 @@ use canvas::{Frame, Glide, Gpu, HANDLE_REACH, View, WHITE};
 use crop::{Corners, Cropping};
 use toolbar::{Part, Tool, Toolbar};
 
-/// The title bar's height, in DIPs. Saving sits in it.
+/// The title bar's height, in DIPs.
 const TITLE_BAR: f32 = 48.0;
+/// How strongly Kata blurs: the strongest level, so nothing under it can be read.
+const BLUR: usize = BLUR_LEVELS - 1;
 /// The least room around the capture.
 const MARGIN: f32 = 24.0;
 /// The least of the capture a resized window keeps showing.
@@ -966,9 +968,9 @@ impl Editor {
                 shape: Shape::Focus,
                 ..
             } => {
-                if let Some(focus) = self.edits.focus {
-                    let zoom = ZOOMS[focus.level];
-                    self.zoom = Animation::new(1.0, zoom, motion::NORMAL, Easing::DECELERATE);
+                if self.edits.focus.is_some() {
+                    let ease = Easing::DECELERATE;
+                    self.zoom = Animation::new(1.0, FOCUS_ZOOM, motion::NORMAL, ease);
                 }
             }
             // A figure needs its ends apart.
@@ -1080,18 +1082,15 @@ impl Editor {
         let rect = solid(Rect::new(start.0, start.1, start.0, start.1)).moved_inside(&bounds);
         let shape = match self.toolbar.tool() {
             Tool::Blur => {
-                let level = self.toolbar.blur_level();
-                self.edits.blurs.push(Blur { rect, level });
+                self.edits.blurs.push(Blur { rect, level: BLUR });
                 Shape::Blur(self.edits.blurs.len() - 1)
             }
             Tool::Focus => {
                 // There's one focus at most: a new one replaces it.
-                let level = self.toolbar.zoom_level();
                 self.edits.focus = Some(Focus {
                     rect,
-                    level,
-                    blur: self.toolbar.around(),
-                    frame: self.toolbar.frame(),
+                    blur: self.toolbar.around().then_some(BLUR),
+                    frame: kata_editor::Frame::Soft,
                 });
                 self.zoom = Animation::idle(1.0);
                 Shape::Focus
@@ -1128,18 +1127,11 @@ impl Editor {
     fn select(&mut self, shape: Option<Shape>) {
         self.selected = shape;
         match shape {
-            Some(Shape::Blur(index)) => {
-                self.toolbar.select_tool(Tool::Blur);
-                if let Some(blur) = self.edits.blurs.get(index) {
-                    self.toolbar.set_blur_level(blur.level);
-                }
-            }
+            Some(Shape::Blur(_)) => self.toolbar.select_tool(Tool::Blur),
             Some(Shape::Focus) => {
                 self.toolbar.select_tool(Tool::Focus);
                 if let Some(focus) = self.edits.focus {
-                    self.toolbar.set_zoom_level(focus.level);
-                    self.toolbar.set_around(focus.blur);
-                    self.toolbar.set_frame(focus.frame);
+                    self.toolbar.set_around(focus.blur.is_some());
                 }
             }
             Some(Shape::Step(_)) => self.toolbar.select_tool(Tool::Steps),
@@ -1177,28 +1169,9 @@ impl Editor {
                 let side = self.step_side(self.toolbar.step_size());
                 self.edits.resize_steps(side, self.whole());
             }
-            (Part::Blur, Some(Shape::Blur(index))) => {
-                if let Some(blur) = self.edits.blurs.get_mut(index) {
-                    blur.level = self.toolbar.blur_level();
-                }
-            }
-            (Part::Zoom, Some(Shape::Focus)) => {
-                if let Some(focus) = &mut self.edits.focus {
-                    focus.level = self.toolbar.zoom_level();
-                    let zoom = ZOOMS[focus.level];
-                    self.zoom = self
-                        .zoom
-                        .retarget(zoom, motion::NORMAL, Easing::POINT_TO_POINT);
-                }
-            }
             (Part::Around, Some(Shape::Focus)) => {
                 if let Some(focus) = &mut self.edits.focus {
-                    focus.blur = self.toolbar.around();
-                }
-            }
-            (Part::Frame, Some(Shape::Focus)) => {
-                if let Some(focus) = &mut self.edits.focus {
-                    focus.frame = self.toolbar.frame();
+                    focus.blur = self.toolbar.around().then_some(BLUR);
                 }
             }
             (Part::Form, Some(Shape::Figure(index))) => {
@@ -1232,9 +1205,7 @@ impl Editor {
         }
         match part {
             Part::Tools => self.tool_changed(),
-            Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form | Part::Frame => {
-                self.option_changed(part)
-            }
+            Part::Around | Part::StepSize | Part::Form => self.option_changed(part),
             Part::Crop => self.crop(),
             Part::Name => self.start_naming(),
             Part::Folder => {
@@ -1562,7 +1533,7 @@ impl Editor {
                 .unwrap_or_default();
             self.toolbar.set_step_size(size);
         }
-        let zoom = self.edits.focus.map_or(1.0, |focus| ZOOMS[focus.level]);
+        let zoom = self.edits.focus.map_or(1.0, |_| FOCUS_ZOOM);
         self.zoom = Animation::idle(zoom);
         self.hovered = None;
     }

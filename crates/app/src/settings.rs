@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use kata_editor::{BLUR_LEVELS, STEP_SIZES, ZOOMS};
+use kata_editor::STEP_SIZES;
 use windows::core::{PCWSTR, w};
 
 use crate::{channel, hotkey::Hotkey, registry};
@@ -58,40 +58,29 @@ impl Settings {
 pub struct EditorSettings {
     /// The tool's place in the dock: blur, focus, steps, shapes.
     pub tool: usize,
-    pub blur_level: usize,
-    /// An index into `ZOOMS`.
-    pub zoom_level: usize,
-    /// How the focus blurs around it: 0 for not at all, or the blur level plus 1.
-    pub around: usize,
+    /// Whether the focus blurs what's around it.
+    pub around: bool,
     /// An index into `STEP_SIZES`.
     pub step_size: usize,
     /// The shapes' form: rectangle, ellipse, arrow.
     pub form: usize,
-    /// The focus's frame: soft, rectangle, ellipse.
-    pub frame: usize,
 }
 
 impl EditorSettings {
     pub fn load() -> Self {
         Self {
             tool: read(w!("Tool"), 0).min(3),
-            blur_level: read(w!("BlurLevel"), 1).min(BLUR_LEVELS - 1),
-            zoom_level: read(w!("ZoomLevel"), 0).min(ZOOMS.len() - 1),
-            around: read(w!("Around"), 0).min(BLUR_LEVELS),
+            around: read(w!("Around"), 0) != 0,
             step_size: read(w!("StepSize"), 1).min(STEP_SIZES.len() - 1),
             form: read(w!("Form"), 0).min(2),
-            frame: read(w!("FocusFrame"), 0).min(2),
         }
     }
 
     pub fn save(&self) {
         write(w!("Tool"), self.tool);
-        write(w!("BlurLevel"), self.blur_level);
-        write(w!("ZoomLevel"), self.zoom_level);
-        write(w!("Around"), self.around);
+        write(w!("Around"), usize::from(self.around));
         write(w!("StepSize"), self.step_size);
         write(w!("Form"), self.form);
-        write(w!("FocusFrame"), self.frame);
     }
 }
 

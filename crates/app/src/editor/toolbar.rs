@@ -3,13 +3,13 @@
 //! A tool's options come out of it while the pointer is on it or on them: what it
 //! adds, round it as the top of a wheel, and its settings in a capsule over that.
 
-use std::{iter, time::Instant};
+use std::time::Instant;
 
-use kata_editor::{Form, Frame, Shape, ZOOMS};
+use kata_editor::{Form, Shape};
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Caption, Control, Dock, HEIGHT, IconButton, Item, Slider, tip},
+    controls::{self, Caption, Control, Dock, HEIGHT, IconButton, Item, Slider, Toggle, tip},
     figure::Figure,
     logo,
     motion::{self, Animation, Easing},
@@ -116,8 +116,8 @@ impl Tool {
     /// The settings it shows in the options, in order.
     fn options(self) -> &'static [Part] {
         match self {
-            Self::Blur => &[Part::Blur],
-            Self::Focus => &[Part::Frame, Part::Zoom, Part::Around],
+            Self::Blur => &[],
+            Self::Focus => &[Part::Around],
             Self::Steps => &[Part::StepSize],
             Self::Shapes => &[Part::Form],
         }
@@ -126,18 +126,13 @@ impl Tool {
 
 /// The shapes' forms, in their picker's order.
 const FORMS: [Form; 3] = [Form::Rectangle, Form::Ellipse, Form::Arrow];
-/// The focus's frames, in their picker's order.
-const FRAMES: [Frame; 3] = [Frame::Soft, Frame::Rectangle, Frame::Ellipse];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     Tools,
-    Blur,
-    Zoom,
     Around,
     StepSize,
     Form,
-    Frame,
     Crop,
     Name,
     Folder,
@@ -182,12 +177,10 @@ impl Setting {
 
 pub struct Toolbar {
     tools: Dock,
-    blur: Setting,
-    zoom: Setting,
-    around: Setting,
+    /// Whether the focus blurs what's around it.
+    around: Toggle,
     step_size: Setting,
     forms: Dock,
-    frames: Dock,
     name: Name,
     folder: IconButton,
     caption: Caption,
@@ -229,19 +222,6 @@ impl Toolbar {
         names: Option<(String, String)>,
     ) -> Result<Self> {
         let strings = strings();
-        let blur_levels = strings
-            .blur_levels
-            .iter()
-            .map(|name| fonts.label(name))
-            .collect::<Result<_>>()?;
-        let zooms = ZOOMS
-            .iter()
-            .map(|&zoom| fonts.label(&strings.percent(zoom)))
-            .collect::<Result<_>>()?;
-        let around = iter::once(strings.no_blur)
-            .chain(strings.blur_levels)
-            .map(|name| fonts.label(name))
-            .collect::<Result<_>>()?;
         let step_sizes = strings
             .step_sizes
             .iter()
@@ -265,33 +245,15 @@ impl Toolbar {
             item(icons::ellipse(graphics, Dock::ICON)?, strings.forms[1])?,
             item(icons::arrow(graphics, Dock::ICON)?, strings.forms[2])?,
         ];
-        let frames = vec![
-            item(icons::soft(graphics, Dock::ICON)?, strings.frames[0])?,
-            item(icons::rectangle(graphics, Dock::ICON)?, strings.frames[1])?,
-            item(icons::ellipse(graphics, Dock::ICON)?, strings.frames[2])?,
-        ];
-        let droplet = || icons::blur(graphics, SETTING_ICON).map(|(outlined, _)| outlined);
         let tool = Tool::at(settings.tool);
         let toolbar = Self {
             tools: Dock::new(tools, tool as usize, named),
-            blur: Setting::new(
-                droplet()?,
-                Slider::new(strings.blur, blur_levels, settings.blur_level),
-            ),
-            zoom: Setting::new(
-                icons::zoom(graphics, SETTING_ICON)?,
-                Slider::new(strings.focus, zooms, settings.zoom_level),
-            ),
-            around: Setting::new(
-                droplet()?,
-                Slider::new(strings.blur_around, around, settings.around),
-            ),
+            around: Toggle::new(fonts.label(strings.blur_around)?, settings.around),
             step_size: Setting::new(
                 icons::steps(graphics, SETTING_ICON)?.0,
                 Slider::new(strings.step_size, step_sizes, settings.step_size),
             ),
             forms: Dock::arced(forms, settings.form),
-            frames: Dock::arced(frames, settings.frame),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             caption: Caption::new(fonts, strings.caption)?,
@@ -315,12 +277,9 @@ impl Toolbar {
     pub fn settings(&self) -> EditorSettings {
         EditorSettings {
             tool: self.tool() as usize,
-            blur_level: self.blur.slider.value(),
-            zoom_level: self.zoom.slider.value(),
-            around: self.around.slider.value(),
+            around: self.around.is_on(),
             step_size: self.step_size.slider.value(),
             form: self.forms.selected(),
-            frame: self.frames.selected(),
         }
     }
 
@@ -384,6 +343,9 @@ impl Toolbar {
             let area = self.options_area(tool);
             let middle = area.middle();
             let mut left = area.left + OPTIONS_PADDING;
+            if tool == Tool::Focus {
+                self.around.place(left, middle - HEIGHT / 2.0);
+            }
             for &part in tool.options() {
                 if let Some(setting) = self.setting_mut(part) {
                     setting.place(left, middle);
@@ -439,12 +401,9 @@ impl Toolbar {
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
         match part {
             Part::Tools => &mut self.tools,
-            Part::Blur => &mut self.blur.slider,
-            Part::Zoom => &mut self.zoom.slider,
-            Part::Around => &mut self.around.slider,
+            Part::Around => &mut self.around,
             Part::StepSize => &mut self.step_size.slider,
             Part::Form => &mut self.forms,
-            Part::Frame => &mut self.frames,
             Part::Crop => &mut self.crop,
             Part::Name => &mut self.name,
             Part::Folder => &mut self.folder,
@@ -571,7 +530,6 @@ impl Toolbar {
         };
         self.tools.draw_tip(painter, tips, now);
         self.forms.draw_tip(painter, tips, now);
-        self.frames.draw_tip(painter, tips, now);
         self.draw_told(painter, now);
     }
 
@@ -604,32 +562,13 @@ impl Toolbar {
         self.reveal();
     }
 
-    pub fn blur_level(&self) -> usize {
-        self.blur.slider.value()
+    /// Whether the focus blurs what's around it.
+    pub fn around(&self) -> bool {
+        self.around.is_on()
     }
 
-    pub fn set_blur_level(&mut self, level: usize) {
-        self.blur.slider.set_value(level);
-    }
-
-    /// An index into `ZOOMS`.
-    pub fn zoom_level(&self) -> usize {
-        self.zoom.slider.value()
-    }
-
-    pub fn set_zoom_level(&mut self, level: usize) {
-        self.zoom.slider.set_value(level);
-    }
-
-    /// The blur level around the focus, if it blurs what's around.
-    pub fn around(&self) -> Option<usize> {
-        self.around.slider.value().checked_sub(1)
-    }
-
-    pub fn set_around(&mut self, level: Option<usize>) {
-        self.around
-            .slider
-            .set_value(level.map_or(0, |level| level + 1));
+    pub fn set_around(&mut self, around: bool) {
+        self.around.set(around);
     }
 
     /// An index into `STEP_SIZES`.
@@ -649,17 +588,6 @@ impl Toolbar {
     pub fn set_form(&mut self, form: Form) {
         if let Some(index) = FORMS.iter().position(|&each| each == form) {
             self.forms.select(index);
-        }
-    }
-
-    /// How a new focus is framed.
-    pub fn frame(&self) -> Frame {
-        FRAMES[self.frames.selected()]
-    }
-
-    pub fn set_frame(&mut self, frame: Frame) {
-        if let Some(index) = FRAMES.iter().position(|&each| each == frame) {
-            self.frames.select(index);
         }
     }
 
@@ -783,6 +711,9 @@ impl Toolbar {
                         setting.draw(painter, now);
                     }
                 }
+                if tool == Tool::Focus {
+                    self.around.draw(painter, now);
+                }
             }
         });
     }
@@ -871,8 +802,9 @@ impl Toolbar {
         (item.left + item.width / 2.0, item.middle())
     }
 
+    /// Whether `tool` has settings, which go in a capsule: sliders, or a switch.
     fn has_settings(&self, tool: Tool) -> bool {
-        (tool.options().iter()).any(|&part| self.setting(part).is_some())
+        tool == Tool::Focus || (tool.options().iter()).any(|&part| self.setting(part).is_some())
     }
 
     /// How wide the capsule of `tool`'s settings is.
@@ -881,6 +813,11 @@ impl Toolbar {
             .filter_map(|&part| self.setting(part))
             .collect();
         let widths: f32 = settings.iter().map(|setting| setting.width()).sum();
+        let widths = if tool == Tool::Focus {
+            self.around.width()
+        } else {
+            widths
+        };
         widths + settings.len().saturating_sub(1) as f32 * GAP + 2.0 * OPTIONS_PADDING
     }
 
@@ -907,17 +844,15 @@ impl Toolbar {
     /// The icons `tool`'s options lead with, to pick what it adds.
     fn picker(&self, tool: Tool) -> Option<&Dock> {
         match tool {
-            Tool::Focus => Some(&self.frames),
             Tool::Shapes => Some(&self.forms),
-            Tool::Blur | Tool::Steps => None,
+            Tool::Blur | Tool::Focus | Tool::Steps => None,
         }
     }
 
     fn picker_mut(&mut self, tool: Tool) -> Option<&mut Dock> {
         match tool {
-            Tool::Focus => Some(&mut self.frames),
             Tool::Shapes => Some(&mut self.forms),
-            Tool::Blur | Tool::Steps => None,
+            Tool::Blur | Tool::Focus | Tool::Steps => None,
         }
     }
 
@@ -949,12 +884,9 @@ impl Toolbar {
     fn get(&self, part: Part) -> &dyn Control {
         match part {
             Part::Tools => &self.tools,
-            Part::Blur => &self.blur.slider,
-            Part::Zoom => &self.zoom.slider,
-            Part::Around => &self.around.slider,
+            Part::Around => &self.around,
             Part::StepSize => &self.step_size.slider,
             Part::Form => &self.forms,
-            Part::Frame => &self.frames,
             Part::Crop => &self.crop,
             Part::Name => &self.name,
             Part::Folder => &self.folder,
@@ -963,9 +895,6 @@ impl Toolbar {
 
     fn setting(&self, part: Part) -> Option<&Setting> {
         match part {
-            Part::Blur => Some(&self.blur),
-            Part::Zoom => Some(&self.zoom),
-            Part::Around => Some(&self.around),
             Part::StepSize => Some(&self.step_size),
             _ => None,
         }
@@ -973,9 +902,6 @@ impl Toolbar {
 
     fn setting_mut(&mut self, part: Part) -> Option<&mut Setting> {
         match part {
-            Part::Blur => Some(&mut self.blur),
-            Part::Zoom => Some(&mut self.zoom),
-            Part::Around => Some(&mut self.around),
             Part::StepSize => Some(&mut self.step_size),
             _ => None,
         }
