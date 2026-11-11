@@ -56,10 +56,8 @@ impl Settings {
 /// The editor's settings, which it remembers as they change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EditorSettings {
-    /// The tool's place in the dock: blur, focus, steps, shapes.
+    /// The tool's place in the dock: shapes, steps, focus, blur.
     pub tool: usize,
-    /// Whether the focus blurs what's around it.
-    pub around: bool,
     /// An index into `STEP_SIZES`.
     pub step_size: usize,
     /// The shapes' form: rectangle, ellipse, arrow.
@@ -70,7 +68,6 @@ impl EditorSettings {
     pub fn load() -> Self {
         Self {
             tool: read(w!("Tool"), 0).min(3),
-            around: read(w!("Around"), 0) != 0,
             step_size: read(w!("StepSize"), 1).min(STEP_SIZES.len() - 1),
             form: read(w!("Form"), 0).min(2),
         }
@@ -78,7 +75,6 @@ impl EditorSettings {
 
     pub fn save(&self) {
         write(w!("Tool"), self.tool);
-        write(w!("Around"), usize::from(self.around));
         write(w!("StepSize"), self.step_size);
         write(w!("Form"), self.form);
     }

@@ -9,7 +9,7 @@ use kata_editor::{Form, Shape};
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Caption, Control, Dock, HEIGHT, IconButton, Item, Slider, Toggle, tip},
+    controls::{self, Caption, Control, Dock, HEIGHT, IconButton, Item, Slider, tip},
     figure::Figure,
     logo,
     motion::{self, Animation, Easing},
@@ -89,14 +89,14 @@ struct Saved {
 /// What dragging or clicking on the capture adds, in the dock's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
-    Blur,
-    Focus,
-    Steps,
     Shapes,
+    Steps,
+    Focus,
+    Blur,
 }
 
 impl Tool {
-    const ALL: [Self; 4] = [Self::Blur, Self::Focus, Self::Steps, Self::Shapes];
+    const ALL: [Self; 4] = [Self::Shapes, Self::Steps, Self::Focus, Self::Blur];
 
     /// The tool that adds `shape`.
     pub fn of(shape: Shape) -> Self {
@@ -117,7 +117,7 @@ impl Tool {
     fn options(self) -> &'static [Part] {
         match self {
             Self::Blur => &[],
-            Self::Focus => &[Part::Around],
+            Self::Focus => &[],
             Self::Steps => &[Part::StepSize],
             Self::Shapes => &[Part::Form],
         }
@@ -130,7 +130,6 @@ const FORMS: [Form; 3] = [Form::Rectangle, Form::Ellipse, Form::Arrow];
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     Tools,
-    Around,
     StepSize,
     Form,
     Crop,
@@ -177,8 +176,6 @@ impl Setting {
 
 pub struct Toolbar {
     tools: Dock,
-    /// Whether the focus blurs what's around it.
-    around: Toggle,
     step_size: Setting,
     forms: Dock,
     name: Name,
@@ -235,10 +232,10 @@ impl Toolbar {
             })
         };
         let tools = vec![
-            item(icons::blur(graphics, Dock::ICON)?, strings.blur)?,
-            item(icons::focus(graphics, Dock::ICON)?, strings.focus)?,
-            item(icons::steps(graphics, Dock::ICON)?, strings.steps)?,
             item(icons::shapes(graphics, Dock::ICON)?, strings.shapes)?,
+            item(icons::steps(graphics, Dock::ICON)?, strings.steps)?,
+            item(icons::focus(graphics, Dock::ICON)?, strings.focus)?,
+            item(icons::blur(graphics, Dock::ICON)?, strings.blur)?,
         ];
         let forms = vec![
             item(icons::rectangle(graphics, Dock::ICON)?, strings.forms[0])?,
@@ -248,7 +245,6 @@ impl Toolbar {
         let tool = Tool::at(settings.tool);
         let toolbar = Self {
             tools: Dock::new(tools, tool as usize, named),
-            around: Toggle::new(fonts.label(strings.blur_around)?, settings.around),
             step_size: Setting::new(
                 icons::steps(graphics, SETTING_ICON)?.0,
                 Slider::new(strings.step_size, step_sizes, settings.step_size),
@@ -277,7 +273,6 @@ impl Toolbar {
     pub fn settings(&self) -> EditorSettings {
         EditorSettings {
             tool: self.tool() as usize,
-            around: self.around.is_on(),
             step_size: self.step_size.slider.value(),
             form: self.forms.selected(),
         }
@@ -343,9 +338,6 @@ impl Toolbar {
             let area = self.options_area(tool);
             let middle = area.middle();
             let mut left = area.left + OPTIONS_PADDING;
-            if tool == Tool::Focus {
-                self.around.place(left, middle - HEIGHT / 2.0);
-            }
             for &part in tool.options() {
                 if let Some(setting) = self.setting_mut(part) {
                     setting.place(left, middle);
@@ -401,7 +393,6 @@ impl Toolbar {
     pub fn control(&mut self, part: Part) -> &mut dyn Control {
         match part {
             Part::Tools => &mut self.tools,
-            Part::Around => &mut self.around,
             Part::StepSize => &mut self.step_size.slider,
             Part::Form => &mut self.forms,
             Part::Crop => &mut self.crop,
@@ -562,15 +553,6 @@ impl Toolbar {
         self.reveal();
     }
 
-    /// Whether the focus blurs what's around it.
-    pub fn around(&self) -> bool {
-        self.around.is_on()
-    }
-
-    pub fn set_around(&mut self, around: bool) {
-        self.around.set(around);
-    }
-
     /// An index into `STEP_SIZES`.
     pub fn step_size(&self) -> usize {
         self.step_size.slider.value()
@@ -711,9 +693,6 @@ impl Toolbar {
                         setting.draw(painter, now);
                     }
                 }
-                if tool == Tool::Focus {
-                    self.around.draw(painter, now);
-                }
             }
         });
     }
@@ -802,9 +781,9 @@ impl Toolbar {
         (item.left + item.width / 2.0, item.middle())
     }
 
-    /// Whether `tool` has settings, which go in a capsule: sliders, or a switch.
+    /// Whether `tool` has settings, which go in a capsule.
     fn has_settings(&self, tool: Tool) -> bool {
-        tool == Tool::Focus || (tool.options().iter()).any(|&part| self.setting(part).is_some())
+        (tool.options().iter()).any(|&part| self.setting(part).is_some())
     }
 
     /// How wide the capsule of `tool`'s settings is.
@@ -813,11 +792,6 @@ impl Toolbar {
             .filter_map(|&part| self.setting(part))
             .collect();
         let widths: f32 = settings.iter().map(|setting| setting.width()).sum();
-        let widths = if tool == Tool::Focus {
-            self.around.width()
-        } else {
-            widths
-        };
         widths + settings.len().saturating_sub(1) as f32 * GAP + 2.0 * OPTIONS_PADDING
     }
 
@@ -884,7 +858,6 @@ impl Toolbar {
     fn get(&self, part: Part) -> &dyn Control {
         match part {
             Part::Tools => &self.tools,
-            Part::Around => &self.around,
             Part::StepSize => &self.step_size.slider,
             Part::Form => &self.forms,
             Part::Crop => &self.crop,

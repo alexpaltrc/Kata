@@ -1032,10 +1032,10 @@ impl Editor {
         }
         match key {
             VK_TAB => self.toolbar.tab(shift),
-            VK_1 | VK_NUMPAD1 if !ctrl => self.choose_tool(Tool::Blur),
-            VK_2 | VK_NUMPAD2 if !ctrl => self.choose_tool(Tool::Focus),
-            VK_3 | VK_NUMPAD3 if !ctrl => self.choose_tool(Tool::Steps),
-            VK_4 | VK_NUMPAD4 if !ctrl => self.choose_tool(Tool::Shapes),
+            VK_1 | VK_NUMPAD1 if !ctrl => self.choose_tool(Tool::Shapes),
+            VK_2 | VK_NUMPAD2 if !ctrl => self.choose_tool(Tool::Steps),
+            VK_3 | VK_NUMPAD3 if !ctrl => self.choose_tool(Tool::Focus),
+            VK_4 | VK_NUMPAD4 if !ctrl => self.choose_tool(Tool::Blur),
             VK_Z if ctrl && shift => self.step(Document::redo),
             VK_Y if ctrl => self.step(Document::redo),
             VK_Z if ctrl => self.step(Document::undo),
@@ -1089,7 +1089,8 @@ impl Editor {
                 // There's one focus at most: a new one replaces it.
                 self.edits.focus = Some(Focus {
                     rect,
-                    blur: self.toolbar.around().then_some(BLUR),
+                    // It shows one part alone: what's around it is blurred.
+                    blur: Some(BLUR),
                     frame: kata_editor::Frame::Soft,
                 });
                 self.zoom = Animation::idle(1.0);
@@ -1128,12 +1129,7 @@ impl Editor {
         self.selected = shape;
         match shape {
             Some(Shape::Blur(_)) => self.toolbar.select_tool(Tool::Blur),
-            Some(Shape::Focus) => {
-                self.toolbar.select_tool(Tool::Focus);
-                if let Some(focus) = self.edits.focus {
-                    self.toolbar.set_around(focus.blur.is_some());
-                }
-            }
+            Some(Shape::Focus) => self.toolbar.select_tool(Tool::Focus),
             Some(Shape::Step(_)) => self.toolbar.select_tool(Tool::Steps),
             Some(Shape::Figure(index)) => {
                 self.toolbar.select_tool(Tool::Shapes);
@@ -1169,11 +1165,6 @@ impl Editor {
                 let side = self.step_side(self.toolbar.step_size());
                 self.edits.resize_steps(side, self.whole());
             }
-            (Part::Around, Some(Shape::Focus)) => {
-                if let Some(focus) = &mut self.edits.focus {
-                    focus.blur = self.toolbar.around().then_some(BLUR);
-                }
-            }
             (Part::Form, Some(Shape::Figure(index))) => {
                 if let Some(figure) = self.edits.figures.get_mut(index) {
                     figure.form = self.toolbar.form();
@@ -1205,7 +1196,7 @@ impl Editor {
         }
         match part {
             Part::Tools => self.tool_changed(),
-            Part::Around | Part::StepSize | Part::Form => self.option_changed(part),
+            Part::StepSize | Part::Form => self.option_changed(part),
             Part::Crop => self.crop(),
             Part::Name => self.start_naming(),
             Part::Folder => {

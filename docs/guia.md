@@ -39,25 +39,24 @@ propio documento: [compresion.md](compresion.md).
 
 ## Editar
 
-Hay cuatro herramientas, como iconos en una barra centrada abajo. Encima aparecen los niveles de la
-que está activa. Al dejar el cursor quieto sobre un icono se ve su nombre; en Ajustes se puede
-mostrar siempre.
+Hay cuatro herramientas, como iconos en una barra centrada abajo: primero las que añaden algo
+encima, luego las que cambian la imagen. Las opciones de una herramienta salen de ella al pasar el
+cursor. Al dejar el cursor quieto sobre un icono se ve su nombre; en Ajustes se puede mostrar
+siempre.
 
-1. **Desenfocar:** se arrastra para tapar uno o varios rectángulos. Intensidad: Suave, Medio o
-   Fuerte. El texto desenfocado no se puede recuperar.
-2. **Foco:** se arrastra sobre un área para resaltarla y oscurecer el resto. Hay un solo foco: uno
-   nuevo reemplaza al anterior. Los iconos del principio eligen su forma: **suave**, sin borde, o
-   **rectángulo** y **elipse**, con la línea naranja de las Formas. Ampliación: 100 %, 125 %, 150 %
-   o 200 %. Con la gota de al lado,
-   **desenfoca también lo de alrededor**, con los mismos niveles de Desenfocar.
-3. **Pasos:** cada clic pone el número siguiente, en un círculo naranja. Si se borra uno, los
-   demás se renumeran. Su tamaño se ajusta solo a la captura; al lado está el **tamaño**
-   (Pequeño, Mediano, Grande o Muy grande), que cambia todos los pasos a la vez.
-4. **Formas:** se arrastra para dibujar un **rectángulo**, una **elipse** o una **flecha**, en
-   naranja: el rectángulo y la elipse, solo el contorno; la flecha, con la punta rellena. Encima se
-   elige cuál, con su icono. El grosor se ajusta solo a la captura.
+1. **Formas:** se arrastra para dibujar un **rectángulo**, una **elipse** o una **flecha**, en
+   naranja: el rectángulo y la elipse, solo el contorno; la flecha, con la punta rellena. Cuál se
+   elige en el arco que sale de la herramienta. El grosor se ajusta solo a la captura.
+2. **Pasos:** cada clic pone el número siguiente, en un círculo naranja. Si se borra uno, los
+   demás se renumeran. Su tamaño se ajusta solo a la captura; el **tamaño** (Pequeño, Mediano,
+   Grande o Muy grande) cambia todos los pasos a la vez.
+3. **Foco:** se arrastra sobre lo único que se quiere ver. Esa área queda nítida y un poco
+   ampliada, y todo lo demás se oscurece y se desenfoca. Hay un solo foco: uno nuevo reemplaza al
+   anterior. No tiene opciones.
+4. **Desenfocar:** se arrastra para tapar uno o varios rectángulos. El texto desenfocado no se
+   puede recuperar. No tiene opciones.
 
-- Cada nivel es un control deslizante que recuerda el último valor.
+- El tamaño de los pasos es un control deslizante que recuerda el último valor.
 - Un clic selecciona un rectángulo, un paso o una forma (una forma, sobre su línea): se mueve
   arrastrándolo, cambia de tamaño desde sus esquinas (una flecha, desde sus puntas) y se borra con
   el botón de su esquina, `Supr` o `Retroceso`. Mover un control deslizante, o elegir otra forma,
@@ -113,7 +112,7 @@ mostrar siempre.
 | `Ctrl + Mayús + S` | Nueva captura (se puede cambiar) |
 | `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`), `Win + Mayús + S` | Nueva captura, con el ajuste encendido |
 | `Esc` o clic derecho | Cancelar la captura |
-| `1` / `2` / `3` / `4` | Desenfocar / Foco / Pasos / Formas |
+| `1` / `2` / `3` / `4` | Formas / Pasos / Foco / Desenfocar |
 | `Ctrl + Z` | Deshacer |
 | `Ctrl + Y` o `Ctrl + Mayús + Z` | Rehacer |
 | `Ctrl + S` | Guardar |
