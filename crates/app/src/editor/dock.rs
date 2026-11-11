@@ -254,7 +254,8 @@ impl Editor {
             image: Arc::new(image),
             bitmap: None,
             at,
-            shown: Animation::idle(0.0),
+            // It has no card to show, but it's there: gone, it would be forgotten.
+            shown: Animation::idle(1.0),
             glint: Animation::idle(1.0),
             place: None,
             zone: None,

@@ -200,6 +200,10 @@ pub fn set_premium(premium: bool) {
 /// Only Kata Dev offers it, to try the welcome again.
 pub fn forget_welcome() {
     registry::delete(KEY, w!("Premium"));
+    // A color of the user's own goes with Premium.
+    if read(w!("Ink"), 0) >= INKS.len() {
+        registry::delete(KEY, w!("Ink"));
+    }
     for perk in Perk::ALL {
         registry::delete(KEY, perk.value());
     }

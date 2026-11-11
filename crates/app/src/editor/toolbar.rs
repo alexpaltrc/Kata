@@ -181,8 +181,10 @@ pub struct Toolbar {
     forms: Dock,
     name: Name,
     folder: IconButton,
-    /// Takes another capture, from its island before the dock.
+    /// Takes another capture, from its island before the dock; and its glyph, which
+    /// goes with the pointer that drags it.
     add: IconButton,
+    plus: Label,
     caption: Caption,
     /// That the capture saved itself, which the folder button says the first few
     /// times.
@@ -257,6 +259,7 @@ impl Toolbar {
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             add: IconButton::new(fonts.icon('\u{E710}', 16.0)?, strings.new_capture),
             caption: Caption::new(fonts, strings.caption)?,
+            plus: fonts.icon('\u{E710}', 16.0)?,
             saved: None,
             check: Animation::idle(logo::CHECKING),
             focus: None,
@@ -307,6 +310,16 @@ impl Toolbar {
     fn add_island(&self) -> Area {
         let left = (self.window.0 - self.tools.width()) / 2.0 - ISLAND_GAP - ISLAND;
         Area::new(left, self.dock_top(), ISLAND, self.tools.height())
+    }
+
+    /// The button for another capture as it's dragged, at the pointer, `at`: lifted
+    /// off its island, over everything else.
+    pub fn draw_adding(&self, painter: &Painter, at: Point) {
+        let side = self.add.area().height;
+        let lifted = Area::new(at.0 - side / 2.0, at.1 - side / 2.0, side, side);
+        painter.flyout(lifted, side / 2.0);
+        let left = at.0 - self.plus.width / 2.0;
+        painter.text(&self.plus, left, at.1, painter.palette.text);
     }
 
     /// The capture saved itself: the folder button's check draws itself again.

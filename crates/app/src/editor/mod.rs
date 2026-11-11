@@ -1756,6 +1756,9 @@ impl Editor {
                 card::draw(painter, image, card::part(self.bounds()), pose, glint);
             }
             self.draw_cards(painter, image, now);
+            if self.placing {
+                self.toolbar.draw_adding(painter, self.pointer());
+            }
         })
     }
 
