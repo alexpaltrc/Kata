@@ -1,7 +1,8 @@
 //! A floating row of icons with one chosen, such as an editor's tools. A highlight
 //! glides to the chosen one, stretching as it goes, and its icon fills in. Their
 //! names show under the icons, or in a tooltip once the pointer rests on one. A
-//! compact dock sits inside another capsule, such as a tool's options.
+//! compact dock sits inside another capsule. An arced one lays its icons along the
+//! top of a wheel around what it belongs to, such as a tool's forms above the tool.
 
 use std::time::Instant;
 
@@ -28,6 +29,11 @@ const NAME_GAP: f32 = 2.0;
 /// How strongly the highlight tints the chosen item with the accent color, on
 /// light and dark surfaces.
 const TINT: (f32, f32) = (0.12, 0.16);
+/// An arced dock: how far its icons are from its center, the angle between two of
+/// them, and how wide its band is.
+const ARC: f32 = 70.0;
+const STEP: f32 = 0.58;
+const BAND: f32 = 40.0;
 
 /// One of the dock's choices.
 pub struct Item {
@@ -44,6 +50,8 @@ pub struct Dock {
     named: bool,
     /// Whether it's compact: smaller, unnamed and without a capsule of its own.
     compact: bool,
+    /// The center its icons go round, above it, when it's arced.
+    around: Option<Point>,
     left: f32,
     top: f32,
     selected: usize,
@@ -73,6 +81,14 @@ impl Dock {
         Self::build(items, selected, false, true)
     }
 
+    /// A dock whose icons go along the top of a wheel, round where `place_around`
+    /// puts it.
+    pub fn arced(items: Vec<Item>, selected: usize) -> Self {
+        let mut dock = Self::build(items, selected, false, true);
+        dock.around = Some((0.0, 0.0));
+        dock
+    }
+
     fn build(items: Vec<Item>, selected: usize, named: bool, compact: bool) -> Self {
         let lit = (0..items.len())
             .map(|index| Animation::idle(if index == selected { 1.0 } else { 0.0 }))
@@ -81,6 +97,7 @@ impl Dock {
             items,
             named,
             compact,
+            around: None,
             left: 0.0,
             top: 0.0,
             selected,
@@ -111,6 +128,45 @@ impl Dock {
     pub fn place(&mut self, left: f32, top: f32, bounds: Area) {
         (self.left, self.top) = (left, top);
         self.bounds = bounds;
+    }
+
+    /// Puts an arced dock's icons round `center`, above it, with the tooltip kept
+    /// within `bounds`.
+    pub fn place_around(&mut self, center: Point, bounds: Area) {
+        self.around = Some(center);
+        self.bounds = bounds;
+    }
+
+    /// Where the item at `index` is.
+    pub fn item_area(&self, index: usize) -> Area {
+        self.item(index)
+    }
+
+    /// The item at `point`, if any.
+    pub fn index_at(&self, point: Point) -> Option<usize> {
+        self.item_at(point)
+    }
+
+    /// What an arced dock covers: its band, ends included.
+    pub fn reach(&self) -> Area {
+        let Some((x, y)) = self.around else {
+            return self.area();
+        };
+        let half = self.items.len() as f32 / 2.0 * STEP;
+        let across = ARC * half.min(std::f32::consts::FRAC_PI_2).sin() + BAND / 2.0;
+        let top = y - ARC - BAND / 2.0;
+        Area::new(
+            x - across,
+            top,
+            2.0 * across,
+            ARC * (1.0 - half.cos()) + BAND,
+        )
+    }
+
+    /// The angle of an arced dock's place `along` its items, counted in items from
+    /// the first one's start: clockwise from straight up.
+    fn angle(&self, along: f32) -> f32 {
+        (along - self.items.len() as f32 / 2.0) * STEP
     }
 
     pub fn selected(&self) -> usize {
@@ -207,19 +263,37 @@ impl Dock {
 
     fn item(&self, index: usize) -> Area {
         let (width, height) = self.item_size();
+        if let Some((x, y)) = self.around {
+            let angle = self.angle(index as f32 + 0.5);
+            let (x, y) = (x + ARC * angle.sin(), y - ARC * angle.cos());
+            return Area::new(x - height / 2.0, y - height / 2.0, height, height);
+        }
         let (start, _) = self.span(index);
         Area::new(self.left + start, self.top + PADDING, width, height)
     }
 
     fn item_at(&self, point: Point) -> Option<usize> {
-        (0..self.items.len()).find(|&index| self.item(index).contains(point))
+        let Some((x, y)) = self.around else {
+            return (0..self.items.len()).find(|&index| self.item(index).contains(point));
+        };
+        // On the band, each item has its slice of it.
+        let (across, up) = (point.0 - x, y - point.1);
+        let far = across.hypot(up);
+        if (far - ARC).abs() > BAND / 2.0 {
+            return None;
+        }
+        let along = across.atan2(up) / STEP + self.items.len() as f32 / 2.0;
+        (along >= 0.0 && along < self.items.len() as f32).then_some(along as usize)
     }
 }
 
 impl Control for Dock {
     /// The whole dock, so the pointer never reaches what's behind it.
     fn contains(&self, point: Point) -> bool {
-        self.area().contains(point)
+        match self.around {
+            Some(_) => self.item_at(point).is_some(),
+            None => self.area().contains(point),
+        }
     }
 
     fn hover(&mut self, point: Option<Point>) -> bool {
@@ -295,6 +369,26 @@ impl Control for Dock {
             painter.flyout(dock, dock.height / 2.0);
         }
         let radius = self.item_size().1 / 2.0;
+        let width = self.item_size().0;
+        let (start, end) = (self.start.value(now), self.end.value(now));
+        let tint = if palette.light { TINT.0 } else { TINT.1 };
+        if let Some(center) = self.around {
+            // The band, edged as a flyout is, then the highlight along it.
+            let (first, last) = (self.angle(0.5), self.angle(self.items.len() as f32 - 0.5));
+            let edge = BAND + 2.0 * painter.border();
+            painter.arc(center, ARC, first, last, edge, palette.flyout_stroke);
+            painter.arc(center, ARC, first, last, BAND, palette.flyout);
+            let along = |edge: f32| (edge - PADDING) / width;
+            let (from, to) = (self.angle(along(start) + 0.5), self.angle(along(end) - 0.5));
+            painter.arc(
+                center,
+                ARC,
+                from,
+                to,
+                2.0 * radius,
+                faded(palette.accent, tint),
+            );
+        }
         if let Some(index) = self.hovered {
             let color = if self.pressed == Some(index) {
                 palette.subtle_pressed
@@ -303,11 +397,11 @@ impl Control for Dock {
             };
             painter.fill(self.item(index), radius, color);
         }
-        let (start, end) = (self.start.value(now), self.end.value(now));
-        let row = self.item(0);
-        let highlight = Area::new(self.left + start, row.top, end - start, row.height);
-        let tint = if palette.light { TINT.0 } else { TINT.1 };
-        painter.fill(highlight, radius, faded(palette.accent, tint));
+        if self.around.is_none() {
+            let row = self.item(0);
+            let highlight = Area::new(self.left + start, row.top, end - start, row.height);
+            painter.fill(highlight, radius, faded(palette.accent, tint));
+        }
 
         for (index, item) in self.items.iter().enumerate() {
             let area = self.item(index);

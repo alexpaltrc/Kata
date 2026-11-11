@@ -1,7 +1,8 @@
 //! Kata's logo, as on its Start menu tile: the glyph's four corners around a lit
 //! area, in Kata's orange, lit from the top left. It can draw itself, a corner at
 //! a time, each traced in one of Kata's own colors and warming to orange through
-//! the colors that follow its own.
+//! the colors that follow its own. Its pen also draws the check mark that says a
+//! capture is saved, and arcs.
 
 use std::f32::consts::FRAC_PI_2;
 
@@ -21,7 +22,7 @@ use windows_numerics::Vector2;
 
 use crate::{
     motion::Easing,
-    paint::{Area, Painter, diagonal, rounded},
+    paint::{Area, Painter, Point, diagonal, rounded},
     theme::{self, color, mix},
 };
 
@@ -346,4 +347,62 @@ fn round_stroke(factory: &ID2D1Factory) -> Result<ID2D1StrokeStyle> {
         ..Default::default()
     };
     unsafe { factory.CreateStrokeStyle(&round, None) }
+}
+
+impl Painter<'_> {
+    /// Part of the circle of `radius` around `center`, from the angle `from` to `to`,
+    /// clockwise from straight up, as a pen `width` wide leaves it: round at both
+    /// ends. No longer than half a turn.
+    pub fn arc(
+        &self,
+        center: Point,
+        radius: f32,
+        from: f32,
+        to: f32,
+        width: f32,
+        color: D2D1_COLOR_F,
+    ) {
+        if color.a <= 0.0 {
+            return;
+        }
+        let Ok(factory) = (unsafe { self.context.GetFactory() }) else {
+            return;
+        };
+        let Ok(round) = round_stroke(&factory) else {
+            return;
+        };
+        // A point still shows, as a dot.
+        let to = to.max(from + 0.001);
+        let at = |angle: f32| {
+            Vector2::new(
+                center.0 + radius * angle.sin(),
+                center.1 - radius * angle.cos(),
+            )
+        };
+        let path = (|| unsafe {
+            let path = factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            sink.BeginFigure(at(from), D2D1_FIGURE_BEGIN_HOLLOW);
+            sink.AddArc(&D2D1_ARC_SEGMENT {
+                point: at(to),
+                size: D2D_SIZE_F {
+                    width: radius,
+                    height: radius,
+                },
+                rotationAngle: 0.0,
+                sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                arcSize: D2D1_ARC_SIZE_SMALL,
+            });
+            sink.EndFigure(D2D1_FIGURE_END_OPEN);
+            sink.Close()?;
+            Result::Ok(path)
+        })();
+        if let Ok(path) = path {
+            unsafe {
+                let brush = self.solid(color);
+                brush.SetOpacity(1.0);
+                self.context.DrawGeometry(&path, brush, width, &round);
+            }
+        }
+    }
 }

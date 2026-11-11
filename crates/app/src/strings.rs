@@ -87,6 +87,8 @@ pub struct Strings {
     pub in_use: &'static str,
     /// The Shift key's name.
     pub shift: &'static str,
+    /// What the Print Screen key is called: Windows has no name for it in every layout.
+    pub print_screen: &'static str,
     /// The space bar's name, on the hint that it resets the zoom, and what it does.
     pub space: &'static str,
     pub reset_zoom: &'static str,
@@ -181,6 +183,7 @@ static SPANISH: Strings = Strings {
     add_modifier: "Añade Ctrl o Alt",
     in_use: "Ya está en uso",
     shift: "Mayús",
+    print_screen: "Impr Pant",
     space: "Espacio",
     reset_zoom: "Restablecer el zoom",
     crop: "Recortar así",
@@ -246,6 +249,7 @@ static ENGLISH: Strings = Strings {
     add_modifier: "Add Ctrl or Alt",
     in_use: "Already in use",
     shift: "Shift",
+    print_screen: "Print Screen",
     space: "Space",
     reset_zoom: "Reset zoom",
     crop: "Crop to view",

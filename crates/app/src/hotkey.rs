@@ -151,6 +151,9 @@ fn is_modifier(key: u32) -> bool {
 
 /// A key's name in the keyboard's layout and the system's language.
 fn key_name(key: u32) -> String {
+    if key == u32::from(VK_SNAPSHOT.0) {
+        return strings().print_screen.to_owned();
+    }
     let (first, last) = (u32::from(VK_F1.0), u32::from(VK_F24.0));
     if (first..=last).contains(&key) {
         return format!("F{}", key - first + 1);

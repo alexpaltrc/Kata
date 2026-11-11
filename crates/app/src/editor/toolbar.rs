@@ -1,8 +1,9 @@
-//! The editor's controls: the capture's name, saving and its folder in the title bar,
-//! and two capsules floating at the bottom, centered: the tools' dock and, above it,
-//! the chosen tool's options, with a hint above them while the capture is zoomed.
+//! The editor's controls: the capture's name in the title bar and, floating at the
+//! bottom, the tools' dock, centered, with the folder button on an island beside it.
+//! A tool's options come out of it while the pointer is on it or on them: what it
+//! adds, round it as the top of a wheel, and its settings in a capsule over that.
 
-use std::{iter, mem, time::Instant};
+use std::{iter, time::Instant};
 
 use kata_editor::{Form, Frame, Shape, ZOOMS};
 use kata_ui::{
@@ -31,11 +32,13 @@ const END: f32 = 16.0;
 const BOTTOM: f32 = 12.0;
 /// Between the dock and the options above it.
 const STACK: f32 = 8.0;
-/// Between the options and the capture, at the least.
+/// Between the dock and the capture, at the least.
 const ABOVE: f32 = 16.0;
 /// The options' height, and the room inside them at each end.
 const OPTIONS: f32 = 40.0;
 const OPTIONS_PADDING: f32 = 16.0;
+/// How big a tool's options are as they start out of it.
+const SEED: f32 = 0.6;
 /// The icon that leads each setting, and the room between it and the setting.
 const SETTING_ICON: f32 = 16.0;
 const ICON_GAP: f32 = 8.0;
@@ -197,13 +200,15 @@ pub struct Toolbar {
     focus: Option<Part>,
     /// The window's size, in DIPs.
     window: (f32, f32),
-    /// The tool whose options show, and the one whose options fade out for them.
-    showing: Tool,
-    leaving: Tool,
-    /// From 0 as the options change to 1 once the new ones show in full.
-    fade: Animation,
-    /// The options' width, which glides from one tool's to the next.
-    width: Animation,
+    /// The tool the pointer is on, or on whose options it is.
+    pointed: Option<Tool>,
+    /// The tool whose options are out, above it: the one the pointer is on, or the
+    /// chosen one while the keyboard is on the dock or on its options.
+    open: Option<Tool>,
+    /// The tool whose options show, or showed last, and how far out of it they
+    /// are, from 0, away, to 1.
+    shown: Tool,
+    out: Animation,
     /// The hint that the space bar resets the zoom: the key, what it does, and from 0,
     /// hidden, to 1, in full.
     space: Label,
@@ -267,7 +272,7 @@ impl Toolbar {
         ];
         let droplet = || icons::blur(graphics, SETTING_ICON).map(|(outlined, _)| outlined);
         let tool = Tool::at(settings.tool);
-        let mut toolbar = Self {
+        let toolbar = Self {
             tools: Dock::new(tools, tool as usize, named),
             blur: Setting::new(
                 droplet()?,
@@ -285,8 +290,8 @@ impl Toolbar {
                 icons::steps(graphics, SETTING_ICON)?.0,
                 Slider::new(strings.step_size, step_sizes, settings.step_size),
             ),
-            forms: Dock::compact(forms, settings.form),
-            frames: Dock::compact(frames, settings.frame),
+            forms: Dock::arced(forms, settings.form),
+            frames: Dock::arced(frames, settings.frame),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             caption: Caption::new(fonts, strings.caption)?,
@@ -294,16 +299,15 @@ impl Toolbar {
             check: Animation::idle(logo::CHECKING),
             focus: None,
             window: (0.0, 0.0),
-            showing: tool,
-            leaving: tool,
-            fade: Animation::idle(1.0),
-            width: Animation::idle(0.0),
+            pointed: None,
+            open: None,
+            shown: tool,
+            out: Animation::idle(0.0),
             space: fonts.caption(strings.space)?,
             reset_zoom: fonts.caption(strings.reset_zoom)?,
             crop: IconButton::labeled(fonts.icon('\u{E8C6}', 14.0)?, fonts.caption(strings.crop)?),
             hint: Animation::idle(0.0),
         };
-        toolbar.width = Animation::idle(toolbar.options_width(tool));
         Ok(toolbar)
     }
 
@@ -345,9 +349,10 @@ impl Toolbar {
         self.check = Animation::clock(logo::CHECKING);
     }
 
-    /// The room the capsules take at the bottom of the window, in DIPs.
+    /// The room the dock takes at the bottom of the window, in DIPs. A tool's options
+    /// come out over the capture.
     pub fn bottom(&self) -> f32 {
-        BOTTOM + self.tools.height() + STACK + OPTIONS + ABOVE
+        BOTTOM + self.tools.height() + ABOVE
     }
 
     /// Lays the controls out in a window of `window` DIPs: along the title bar,
@@ -370,16 +375,15 @@ impl Toolbar {
         let bounds = Area::new(0.0, TITLE_BAR, width, height - TITLE_BAR);
         self.tools
             .place(dock, height - BOTTOM - self.tools.height(), bounds);
-        let middle = self.options_top() + OPTIONS / 2.0;
         for tool in Tool::ALL {
-            // A picker leads, with its own room around it.
-            let area = self.options_area(tool);
-            let mut left = area.left;
+            // Its picker goes round the tool, and its settings over that.
+            let center = self.tool_center(tool);
             if let Some(picker) = self.picker_mut(tool) {
-                picker.place(left, area.top, bounds);
-                left += picker.width();
+                picker.place_around(center, bounds);
             }
-            left += OPTIONS_PADDING;
+            let area = self.options_area(tool);
+            let middle = area.middle();
+            let mut left = area.left + OPTIONS_PADDING;
             for &part in tool.options() {
                 if let Some(setting) = self.setting_mut(part) {
                     setting.place(left, middle);
@@ -404,7 +408,7 @@ impl Toolbar {
     /// zoom hint.
     pub fn covers(&self, point: Point) -> bool {
         self.part_at(point).is_some()
-            || self.options_area(self.tool()).contains(point)
+            || (self.open).is_some_and(|tool| self.options_area(tool).contains(point))
             || self.island().contains(point)
             || (self.hint.target() > 0.0 && self.hint_area().contains(point))
     }
@@ -449,6 +453,13 @@ impl Toolbar {
 
     /// Returns whether the toolbar's look changes.
     pub fn hover(&mut self, point: Option<Point>) -> bool {
+        // A tool's options come out while the pointer is on it, and stay out while
+        // it's on them or on its way there.
+        let on = point.and_then(|point| self.tools.index_at(point).map(Tool::at));
+        let kept =
+            (self.pointed).filter(|&tool| point.is_some_and(|at| self.reach(tool).contains(at)));
+        self.pointed = on.or(kept);
+        let opened = self.reveal();
         let parts = self.parts();
         // The other tools' settings let go of the pointer, and the crop button too
         // once the hint goes.
@@ -459,27 +470,59 @@ impl Toolbar {
             }
         }
         // Every control hears about the pointer, even after one changed.
-        let mut changed = false;
+        let mut changed = opened;
         for part in parts {
             changed |= self.control(part).hover(point);
         }
         changed
     }
 
+    /// Brings out the options of the tool the pointer is on, or the chosen one's
+    /// while the keyboard is on the dock or on them, and puts away any other's.
+    /// Returns whether that changes what shows.
+    fn reveal(&mut self) -> bool {
+        let tool = self.tool();
+        let keyed = (self.focus)
+            .filter(|&part| part == Part::Tools || tool.options().contains(&part))
+            .map(|_| tool);
+        let open = self.pointed.or(keyed);
+        if open == self.open {
+            return false;
+        }
+        self.out = match open {
+            Some(tool) => {
+                // Another tool's start halfway out: quick, but still from the tool.
+                let from = if tool == self.shown {
+                    self.out.value(Instant::now())
+                } else {
+                    0.5
+                };
+                self.shown = tool;
+                Animation::new(from.min(1.0), 1.0, motion::NORMAL, Easing::SPRING)
+            }
+            None => (self.out).retarget(0.0, motion::FAST, Easing::ACCELERATE),
+        };
+        self.open = open;
+        true
+    }
+
+    /// The tool that `part` is an option of, if it's one.
+    pub fn owner(&self, part: Part) -> Option<Tool> {
+        (Tool::ALL.into_iter()).find(|tool| tool.options().contains(&part))
+    }
+
     /// Whether resting the pointer where it is would show a tool's name, or a form's or
     /// a frame's.
     pub fn awaits_rest(&self) -> bool {
-        self.tools.awaits_rest() || self.picker(self.tool()).is_some_and(Dock::awaits_rest)
+        let picker = self.open.and_then(|tool| self.picker(tool));
+        self.tools.awaits_rest() || picker.is_some_and(Dock::awaits_rest)
     }
 
     /// The pointer rested at `point`. Returns whether that shows a tool's name, or a
     /// form's or a frame's.
     pub fn rest(&mut self, point: Point) -> bool {
-        let tool = self.tool();
-        self.tools.rest(point)
-            || self
-                .picker_mut(tool)
-                .is_some_and(|picker| picker.rest(point))
+        let picker = self.open.and_then(|tool| self.picker_mut(tool));
+        picker.is_some_and(|picker| picker.rest(point)) || self.tools.rest(point)
     }
 
     /// Moves the keyboard focus to the next control, or the previous one if `back`.
@@ -490,6 +533,7 @@ impl Toolbar {
             .and_then(|focus| parts.iter().position(|&part| part == focus));
         let focusable = |index: usize| self.get(parts[index]).is_focusable();
         self.focus = controls::tab(parts.len(), focus, back, focusable).map(|index| parts[index]);
+        self.reveal();
     }
 
     /// The control with the keyboard focus.
@@ -500,28 +544,31 @@ impl Toolbar {
 
     pub fn unfocus(&mut self) {
         self.focus = None;
+        self.reveal();
     }
 
     pub fn draw(&self, painter: &Painter, now: Instant) {
         self.caption.draw(painter);
-        self.draw_options(painter, now);
-        let options = self.tool().options();
+        self.draw_hint(painter, now);
         for part in self.parts() {
             match part {
-                _ if options.contains(&part) => {}
-                Part::Folder => self.draw_folder(painter, now),
-                // It shows with the hint, which draws it.
+                // They show with what draws them: the options and the hint.
+                _ if self.owner(part).is_some() => {}
                 Part::Crop => {}
+                Part::Folder => self.draw_folder(painter, now),
                 _ => self.get(part).draw(painter, now),
             }
         }
-        self.draw_hint(painter, now);
+        self.draw_options(painter, now);
         if let Some(part) = self.focused() {
             let (area, radius) = self.get(part).focus_area();
             painter.focus(area, radius);
         }
-        // The tools' names make room for the hint, above it.
-        let tips = self.options_top() - (STACK + HINT) * self.hint.value(now);
+        // The names make room for what's above the dock: the options, or the hint.
+        let tips = match self.open {
+            Some(tool) => self.reach(tool).top,
+            None => self.dock_top() - (STACK + HINT) * self.hint.value(now),
+        };
         self.tools.draw_tip(painter, tips, now);
         self.forms.draw_tip(painter, tips, now);
         self.frames.draw_tip(painter, tips, now);
@@ -529,8 +576,7 @@ impl Toolbar {
     }
 
     pub fn is_animating(&self, now: Instant) -> bool {
-        self.fade.is_running(now)
-            || self.width.is_running(now)
+        self.out.is_running(now)
             || self.hint.is_running(now)
             || self.check.is_running(now)
             || (self.saved.as_ref()).is_some_and(|saved| saved.clock.is_running(now))
@@ -549,19 +595,13 @@ impl Toolbar {
         self.follow_tool();
     }
 
-    /// Shows the chosen tool's options, after the dock changed the tool.
+    /// Shows the chosen tool's options, after the dock changed the tool: under the
+    /// pointer that chose it, or with the keyboard on the dock.
     pub fn follow_tool(&mut self) {
-        let tool = self.tool();
-        if tool == self.showing {
-            return;
+        if self.pointed.is_some() {
+            self.pointed = Some(self.tool());
         }
-        self.leaving = mem::replace(&mut self.showing, tool);
-        self.fade = Animation::new(0.0, 1.0, motion::FAST, Easing::DECELERATE);
-        self.width = self.width.retarget(
-            self.options_width(tool),
-            motion::NORMAL,
-            Easing::POINT_TO_POINT,
-        );
+        self.reveal();
     }
 
     pub fn blur_level(&self) -> usize {
@@ -721,19 +761,29 @@ impl Toolbar {
         });
     }
 
-    /// The options' capsule, as wide as it glides to, with the settings crossfading
-    /// inside it as the tool changes.
+    /// A tool's options, coming out of the tool they belong to and going back into
+    /// it: its picker round it, as the top of a wheel, and its settings in a capsule
+    /// over that.
     fn draw_options(&self, painter: &Painter, now: Instant) {
-        let width = self.width.value(now);
-        let left = (self.window.0 - width) / 2.0;
-        let area = painter.align(Area::new(left, self.options_top(), width, OPTIONS));
-        let fade = self.fade.value(now);
-        painter.flyout(area, OPTIONS / 2.0);
-        painter.clip(area, || {
-            painter.layer(1.0 - fade, 0.0, || {
-                self.draw_settings(painter, self.leaving, now)
-            });
-            painter.layer(fade, 0.0, || self.draw_settings(painter, self.showing, now));
+        let out = self.out.value(now);
+        if out <= 0.0 {
+            return;
+        }
+        let tool = self.shown;
+        let grown = SEED + (1.0 - SEED) * out;
+        painter.grown(out.min(1.0), grown, self.tool_center(tool), || {
+            if let Some(picker) = self.picker(tool) {
+                picker.draw(painter, now);
+            }
+            if self.has_settings(tool) {
+                let area = painter.align(self.options_area(tool));
+                painter.flyout(area, OPTIONS / 2.0);
+                for &part in tool.options() {
+                    if let Some(setting) = self.setting(part) {
+                        setting.draw(painter, now);
+                    }
+                }
+            }
         });
     }
 
@@ -758,7 +808,11 @@ impl Toolbar {
     /// that rises out of the options and grows into place as it shows, and sinks back
     /// into them as it hides.
     fn draw_hint(&self, painter: &Painter, now: Instant) {
-        let shown = self.hint.value(now);
+        // A tool's options take its place while they're out.
+        let shown = self.hint.value(now) * (1.0 - self.out.value(now)).clamp(0.0, 1.0);
+        if shown <= 0.0 {
+            return;
+        }
         let area = self.hint_area();
         let base = (area.left + area.width / 2.0, area.bottom());
         painter.lowered(1.0, RISE * (1.0 - shown), || {
@@ -799,7 +853,7 @@ impl Toolbar {
         let divider = BEFORE_DIVIDER + 1.0 + AFTER_DIVIDER;
         let width = hint + divider + self.crop.width() + inset;
         let left = (self.window.0 - width) / 2.0;
-        Area::new(left, self.options_top() - STACK - HINT, width, HINT)
+        Area::new(left, self.dock_top() - STACK - HINT, width, HINT)
     }
 
     /// The zoom hint's keycap: as wide as its key, but never narrower than round.
@@ -807,34 +861,47 @@ impl Toolbar {
         (self.space.width + 2.0 * KEY_PADDING).max(KEYCAP)
     }
 
-    fn draw_settings(&self, painter: &Painter, tool: Tool, now: Instant) {
-        for &part in tool.options() {
-            match self.setting(part) {
-                Some(setting) => setting.draw(painter, now),
-                None => self.get(part).draw(painter, now),
-            }
-        }
-    }
-
     fn dock_top(&self) -> f32 {
         self.window.1 - BOTTOM - self.tools.height()
     }
 
-    fn options_top(&self) -> f32 {
-        self.dock_top() - STACK - OPTIONS
+    /// The middle of `tool`'s place in the dock, which its options come out of.
+    fn tool_center(&self, tool: Tool) -> Point {
+        let item = self.tools.item_area(tool as usize);
+        (item.left + item.width / 2.0, item.middle())
     }
 
+    fn has_settings(&self, tool: Tool) -> bool {
+        (tool.options().iter()).any(|&part| self.setting(part).is_some())
+    }
+
+    /// How wide the capsule of `tool`'s settings is.
     fn options_width(&self, tool: Tool) -> f32 {
-        // A picker brings its own room around it.
-        let picker = self.picker(tool).map_or(0.0, Dock::width);
         let settings: Vec<&Setting> = (tool.options().iter())
             .filter_map(|&part| self.setting(part))
             .collect();
-        if settings.is_empty() {
-            return picker;
-        }
         let widths: f32 = settings.iter().map(|setting| setting.width()).sum();
-        picker + widths + (settings.len() - 1) as f32 * GAP + 2.0 * OPTIONS_PADDING
+        widths + settings.len().saturating_sub(1) as f32 * GAP + 2.0 * OPTIONS_PADDING
+    }
+
+    /// Everything of `tool`'s that the pointer can be on without its options going
+    /// away: the tool, its options and the way between them.
+    fn reach(&self, tool: Tool) -> Area {
+        let item = self.tools.item_area(tool as usize);
+        let mut areas = vec![item];
+        areas.extend(self.picker(tool).map(Dock::reach));
+        if self.has_settings(tool) {
+            areas.push(self.options_area(tool));
+        }
+        let edge = |pick: fn(f32, f32) -> f32, of: fn(&Area) -> f32, start: f32| {
+            areas.iter().map(of).fold(start, pick)
+        };
+        let (left, top) = (
+            edge(f32::min, |area| area.left, f32::MAX),
+            edge(f32::min, |area| area.top, f32::MAX),
+        );
+        let right = edge(f32::max, |area| area.right(), f32::MIN);
+        Area::new(left, top, right - left, item.bottom() - top)
     }
 
     /// The icons `tool`'s options lead with, to pick what it adds.
@@ -854,18 +921,24 @@ impl Toolbar {
         }
     }
 
-    /// Where `tool`'s options show, once the capsule has glided to them.
+    /// The capsule of `tool`'s settings: over the tool, above its picker if it has
+    /// one, and within the window.
     fn options_area(&self, tool: Tool) -> Area {
         let width = self.options_width(tool);
-        let left = (self.window.0 - width) / 2.0;
-        Area::new(left, self.options_top(), width, OPTIONS)
+        let bottom = match self.picker(tool) {
+            Some(picker) => picker.reach().top,
+            None => self.dock_top(),
+        };
+        let centered = self.tool_center(tool).0 - width / 2.0;
+        let left = centered.min(self.window.0 - EDGE - width).max(EDGE);
+        Area::new(left, bottom - STACK - OPTIONS, width, OPTIONS)
     }
 
-    /// The parts on show: the dock, the chosen tool's settings, the crop button while
+    /// The parts on show: the dock, the options that are out, the crop button while
     /// the capture is zoomed, and the title bar's.
     fn parts(&self) -> Vec<Part> {
         let mut parts = vec![Part::Tools];
-        parts.extend_from_slice(self.tool().options());
+        parts.extend_from_slice(self.open.map_or(&[], Tool::options));
         if self.hint.target() > 0.0 {
             parts.push(Part::Crop);
         }

@@ -11,7 +11,7 @@
 
 ## Editar
 
-Cuatro herramientas, como iconos en una barra centrada abajo. Encima, en otra cápsula, los niveles de la herramienta activa. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
+Cuatro herramientas, como iconos en una barra centrada abajo. Sus opciones no están a la vista: salen de cada herramienta al pasar el cursor por ella (o al elegirla con el teclado) y vuelven a entrar al irse. Lo que la herramienta añade (rectángulo, elipse o flecha; foco suave, rectángulo o elipse) va en un arco alrededor de ella, como la parte de arriba de una rueda; sus niveles, en una cápsula encima. Cambiar una opción elige esa herramienta. Al dejar el cursor quieto sobre un icono aparece su nombre, y un ajuste lo muestra siempre debajo.
 
 1. **Desenfocar.** Se arrastra para cubrir uno o varios rectángulos. Intensidad: Suave, Medio, Fuerte. El texto desenfocado no se puede recuperar.
 2. **Foco.** Se arrastra sobre un área: queda resaltada y el resto se oscurece. Hay un solo foco: uno nuevo reemplaza al anterior. **Forma:** Suave, sin borde y con las esquinas redondeadas; Rectángulo o Elipse, con la línea naranja de las Formas. La elipse también ilumina y amplía en forma de elipse. Ampliación: 100 %, 125 %, 150 %, 200 %. **Desenfocar alrededor:** Ninguno, Suave, Medio o Fuerte, los mismos niveles de Desenfocar, aplicados a todo lo que queda fuera del foco.

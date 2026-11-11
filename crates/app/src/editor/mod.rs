@@ -1221,6 +1221,15 @@ impl Editor {
 
     /// A toolbar control was clicked.
     fn activated(&mut self, part: Part) {
+        // An option of a tool that only showed them under the pointer chooses it.
+        if let Some(tool) = self
+            .toolbar
+            .owner(part)
+            .filter(|&tool| tool != self.toolbar.tool())
+        {
+            self.toolbar.select_tool(tool);
+            self.tool_changed();
+        }
         match part {
             Part::Tools => self.tool_changed(),
             Part::Blur | Part::Zoom | Part::Around | Part::StepSize | Part::Form | Part::Frame => {
