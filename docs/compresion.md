@@ -391,6 +391,27 @@ repetición larga sigue valiendo (35,7 %, el mismo tiempo) y bajar la búsqueda 
 de arriba continúa la de la posición anterior en vez de empezar de cero, y la búsqueda ya no
 recalcula en cada candidato lo que no cambia.
 
+### 22. Seguir leyendo solo mientras rinde
+
+En vez de tres vueltas fijas, hasta ocho, parando en cuanto una gana menos de cierta parte del
+tamaño.
+
+| Se para si gana menos de | Media | Tiempo |
+|---|---|---|
+| Tres vueltas fijas (lo adoptado) | 36,0 % | 1837 ms |
+| 1/50 | 35,9 % | 1750–1840 ms |
+| 1/150 | 36,1 % | 2010 ms |
+| 1/400 | 36,2 % | 2220 ms |
+| 1/1000 | 36,3 % | 2490 ms |
+
+**Descartado.** Es la misma recta de siempre: cada décima cuesta un 10 % de tiempo.
+
+### 23. Pocos colores: cada fila como diferencia con la de arriba
+
+En las capturas de 256 colores o menos, las filas van sin filtro. Probamos guardarlas también como
+la diferencia con la fila de arriba y quedarnos con lo que pesara menos. **Nunca ganó, en ninguna
+captura del banco: descartado.** La fila de arriba ya se aprovecha al buscar repeticiones.
+
 ### Dónde quedó
 
 | Captura | Windows | Antes | Ahora | Ahorro | Tiempo |
