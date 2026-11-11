@@ -10,6 +10,7 @@ use kata_ui::{
     access::Element,
     controls::{self, Caption, Control, Dock, HEIGHT, IconButton, Item, Slider, tip},
     figure::Figure,
+    logo,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
     theme::faded,
@@ -58,9 +59,18 @@ const GROW: f32 = 0.1;
 /// across it.
 const PILL_GAP: f32 = 8.0;
 const PILL_PADDING: f32 = 12.0;
-const PILL_RADIUS: f32 = 4.0;
 const PILL_RISE: f32 = 4.0;
 const PILL_BAND: f32 = 64.0;
+/// The island beside the dock, for the folder button: how wide, and how far from the
+/// dock.
+const ISLAND: f32 = 48.0;
+const ISLAND_GAP: f32 = 8.0;
+/// The check on the folder button: its size, where its middle is from the button's,
+/// the room the island keeps clear around it, and its stroke.
+const CHECK: (f32, f32) = (8.0, 6.5);
+const CHECK_AT: (f32, f32) = (6.5, 5.5);
+const CHECK_ROOM: f32 = 2.5;
+const CHECK_STROKE: f32 = 1.75;
 /// How far the tip that says the capture saved itself comes out from under the
 /// folder button.
 const TIP_RISE: f32 = 4.0;
@@ -181,6 +191,8 @@ pub struct Toolbar {
     /// That the capture saved itself, which the folder button says the first few
     /// times.
     saved: Option<Saved>,
+    /// How far the folder button's check is into drawing itself, in seconds.
+    check: Animation,
     /// The part on show with the keyboard focus.
     focus: Option<Part>,
     /// The window's size, in DIPs.
@@ -279,6 +291,7 @@ impl Toolbar {
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
             caption: Caption::new(fonts, strings.caption)?,
             saved: None,
+            check: Animation::idle(logo::CHECKING),
             focus: None,
             window: (0.0, 0.0),
             showing: tool,
@@ -310,12 +323,26 @@ impl Toolbar {
     /// The narrowest the window fits the toolbar in, in DIPs: the title bar's
     /// controls beside the caption buttons, and the widest capsule at the bottom.
     pub fn min_width(&self) -> f32 {
-        let title = EDGE + name::MIN + EDGE + IconButton::WIDTH + END + Caption::WIDTH;
+        let title = EDGE + name::MIN + END + Caption::WIDTH;
         let options = Tool::ALL
             .map(|tool| self.options_width(tool))
             .into_iter()
             .fold(0.0, f32::max);
-        title.max(self.tools.width().max(options) + 2.0 * EDGE)
+        // The dock stays centered, so the island beside it takes room at both sides.
+        let dock = self.tools.width() + 2.0 * (ISLAND_GAP + ISLAND);
+        title.max(dock.max(options) + 2.0 * EDGE)
+    }
+
+    /// The island beside the dock that holds the folder button: a capsule of its
+    /// own, as tall as the dock.
+    fn island(&self) -> Area {
+        let left = (self.window.0 + self.tools.width()) / 2.0 + ISLAND_GAP;
+        Area::new(left, self.dock_top(), ISLAND, self.tools.height())
+    }
+
+    /// The capture saved itself: the folder button's check draws itself again.
+    pub fn saved(&mut self) {
+        self.check = Animation::clock(logo::CHECKING);
     }
 
     /// The room the capsules take at the bottom of the window, in DIPs.
@@ -328,11 +355,15 @@ impl Toolbar {
     pub fn layout(&mut self, window: (f32, f32)) {
         self.window = window;
         self.caption.layout(window.0, TITLE_BAR);
-        let top = |height: f32| (TITLE_BAR - height) / 2.0;
-        let folder = self.caption.left() - END - IconButton::WIDTH;
-        self.folder.place(folder, top(IconButton::HEIGHT));
         let center = (window.0 / 2.0, TITLE_BAR / 2.0);
-        self.name.place(EDGE, folder - EDGE, center);
+        self.name.place(EDGE, self.caption.left() - END, center);
+        let island = self.island();
+        let inset = (ISLAND - IconButton::WIDTH) / 2.0;
+        self.folder.round(
+            island.left + inset,
+            island.top + inset,
+            island.height - 2.0 * inset,
+        );
 
         let (width, height) = window;
         let dock = (width - self.tools.width()) / 2.0;
@@ -374,6 +405,7 @@ impl Toolbar {
     pub fn covers(&self, point: Point) -> bool {
         self.part_at(point).is_some()
             || self.options_area(self.tool()).contains(point)
+            || self.island().contains(point)
             || (self.hint.target() > 0.0 && self.hint_area().contains(point))
     }
 
@@ -500,6 +532,7 @@ impl Toolbar {
         self.fade.is_running(now)
             || self.width.is_running(now)
             || self.hint.is_running(now)
+            || self.check.is_running(now)
             || (self.saved.as_ref()).is_some_and(|saved| saved.clock.is_running(now))
             || self
                 .parts()
@@ -609,26 +642,38 @@ impl Toolbar {
         });
     }
 
-    /// The folder button, beating and opening into a pill that names the folder,
-    /// room beside the name allowing.
+    /// The folder button on its island, with the check that says the capture is
+    /// saved. The first few times, the button beats and the island opens to name the
+    /// folder, room beside it allowing.
     fn draw_folder(&self, painter: &Painter, now: Instant) {
-        let Some(saved) = (self.saved.as_ref()).filter(|saved| saved.clock.is_running(now)) else {
-            return self.folder.draw(painter, now);
-        };
-        let seconds = saved.clock.value(now);
-        let button = self.folder.area();
-        let reach = saved.folder.width + PILL_GAP;
-        if reach <= button.left - EDGE - self.name.extent(now).right() {
-            self.draw_pill(painter, &saved.folder, &hints::pill(seconds, reach));
+        let island = self.island();
+        let saved = (self.saved.as_ref()).filter(|saved| saved.clock.is_running(now));
+        let pill = saved.and_then(|saved| {
+            let reach = saved.folder.width + PILL_GAP;
+            let fits = reach <= self.window.0 - EDGE - island.right();
+            fits.then(|| hints::pill(saved.clock.value(now), reach))
+        });
+        let reach = pill.as_ref().map_or(0.0, |pill| pill.reach);
+        let capsule = Area::new(island.left, island.top, island.width + reach, island.height);
+        painter.flyout(capsule, island.height / 2.0);
+        if let Some((saved, pill)) = saved.zip(pill.as_ref()) {
+            self.draw_pill(painter, &saved.folder, pill);
         }
+        let button = self.folder.area();
         let center = (button.left + button.width / 2.0, button.middle());
-        painter.grown(1.0, hints::pop(seconds), center, || {
+        let pop = saved.map_or(1.0, |saved| hints::pop(saved.clock.value(now)));
+        painter.grown(1.0, pop, center, || {
             self.folder.draw(painter, now);
+            // At the folder's foot, on a patch of the island that sets it apart.
+            let at = (center.0 + CHECK_AT.0, center.1 + CHECK_AT.1);
+            painter.circle(at, CHECK.0 / 2.0 + CHECK_ROOM, painter.palette.flyout);
+            let check = Area::new(at.0 - CHECK.0 / 2.0, at.1 - CHECK.1 / 2.0, CHECK.0, CHECK.1);
+            painter.check(check, CHECK_STROKE, self.check.value(now));
         });
     }
 
     /// The pill the folder button opens into, as `pill` says, with the `folder`'s
-    /// name ending by the button and rising into place and away.
+    /// name starting by the button and rising into place and away.
     fn draw_pill(&self, painter: &Painter, folder: &Label, pill: &hints::Pill) {
         if pill.fill <= 0.0 {
             return;
@@ -636,17 +681,18 @@ impl Toolbar {
         let palette = painter.palette;
         let button = self.folder.area();
         let area = Area::new(
-            button.left - pill.reach,
+            button.left,
             button.top,
             button.width + pill.reach,
             button.height,
         );
         let area = painter.align(area);
-        painter.fill(area, PILL_RADIUS, faded(palette.subtle_hover, pill.fill));
+        let radius = button.height / 2.0;
+        painter.fill(area, radius, faded(palette.subtle_hover, pill.fill));
         if pill.shown <= 0.0 {
             return;
         }
-        let left = button.left - folder.width - PILL_GAP + PILL_PADDING;
+        let left = button.right() + PILL_GAP - PILL_PADDING;
         let middle = button.middle() + PILL_RISE * pill.below;
         painter.clip(area, || {
             painter.text(folder, left, middle, faded(palette.text, pill.shown));

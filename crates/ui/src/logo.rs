@@ -53,6 +53,9 @@ const KINDLE: f32 = 0.1;
 const LIGHTING: f32 = 0.4;
 /// How long the logo takes to draw itself, in seconds.
 pub const DRAWING: f32 = 3.0 * STAGGER + TRACE + WARM;
+/// How long the check mark takes to draw itself, and to trace its line.
+pub const CHECKING: f32 = 0.7;
+const CHECK_TRACE: f32 = 0.25;
 
 /// A pen's stroke: quick to leave, gentle to land.
 const PEN: Easing = Easing::new(0.4, 0.0, 0.2, 1.0);
@@ -173,6 +176,60 @@ impl Painter<'_> {
                     self.context.DrawGeometry(&path, brush, stroke, &round);
                 }
             }
+        }
+    }
+
+    /// Kata's check mark in `area`, `stroke` wide, as it is `time` seconds into
+    /// drawing itself: traced like a corner of the logo, in the first of Kata's own
+    /// colors, and warming to its orange through the rest. From `CHECKING` on, it's
+    /// whole.
+    pub fn check(&self, area: Area, stroke: f32, time: f32) {
+        let palette = self.palette;
+        let time = if palette.contrast { CHECKING } else { time };
+        let traced = PEN.apply(progress(time, 0.0, CHECK_TRACE));
+        if traced <= 0.0 {
+            return;
+        }
+        let Ok(factory) = (unsafe { self.context.GetFactory() }) else {
+            return;
+        };
+        let Ok(round) = round_stroke(&factory) else {
+            return;
+        };
+        let at =
+            |x: f32, y: f32| Vector2::new(area.left + x * area.width, area.top + y * area.height);
+        let (start, turn, end) = (at(0.0, 0.55), at(0.36, 1.0), at(1.0, 0.0));
+        let (down, up) = ((turn - start).length(), (end - turn).length());
+        let length = traced * (down + up);
+        let path = (|| unsafe {
+            let path = factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            sink.BeginFigure(start, D2D1_FIGURE_BEGIN_HOLLOW);
+            sink.AddLine(start + (turn - start) * (length / down).min(1.0));
+            if length > down {
+                sink.AddLine(turn + (end - turn) * ((length - down) / up));
+            }
+            sink.EndFigure(D2D1_FIGURE_END_OPEN);
+            sink.Close()?;
+            Result::Ok(path)
+        })();
+        let Ok(path) = path else {
+            return;
+        };
+        let ink = if palette.contrast {
+            palette.text
+        } else {
+            // From color to color, as the logo's corners warm.
+            let colors = theme::signature(palette.light).map(|rgb| color(rgb, 1.0));
+            let warm = PEN.apply(progress(time, CHECK_TRACE, CHECKING - CHECK_TRACE));
+            let run = warm * (colors.len() - 1) as f32;
+            let step = (run as usize).min(colors.len() - 2);
+            mix(colors[step], colors[step + 1], run - step as f32)
+        };
+        unsafe {
+            let brush = self.solid(ink);
+            brush.SetOpacity(1.0);
+            self.context.DrawGeometry(&path, brush, stroke, &round);
         }
     }
 

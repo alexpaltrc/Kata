@@ -205,15 +205,6 @@ impl Name {
         self.room.1 - self.rest().right()
     }
 
-    /// The most room it takes now: the box, while it opens, is open or closes.
-    pub fn extent(&self, now: Instant) -> Area {
-        if self.is_editing() || self.open.value(now) > 0.0 {
-            self.opened()
-        } else {
-            self.rest()
-        }
-    }
-
     /// Opens the box, with the name selected.
     pub fn edit(&mut self) {
         let field = Field::new(name::name(&self.taken, &self.stem));

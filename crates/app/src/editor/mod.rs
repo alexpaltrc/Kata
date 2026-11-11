@@ -1716,6 +1716,7 @@ impl Editor {
             && !self.reframing_moves(now)
         {
             self.publish();
+            self.toolbar.saved();
         }
         self.show_saved(now);
         self.update_access();
