@@ -24,6 +24,93 @@ pub struct Settings {
     pub sound: bool,
     /// Where captures go, when it isn't the Pictures folder named after Kata.
     pub folder: Option<PathBuf>,
+    /// The color of the shapes and the steps: one of `INKS`, or past them, a hue of
+    /// the user's own.
+    pub ink: usize,
+    /// That hue, in degrees.
+    pub hue: usize,
+}
+
+/// The colors the shapes and the steps come in for free, as `0xRRGGBB`: Kata's
+/// orange first, and four as vivid and as easy to read white on.
+pub const INKS: [u32; 5] = [0xEC_5A22, 0xE0_3A44, 0xD0_3E96, 0x2F_6FEB, 0x1C_9A5A];
+
+/// The color of `hue`, in degrees, as Kata's ink wears it: vivid, and never so light
+/// that the white of a step's number gets lost on it.
+pub fn tinted(hue: f32) -> u32 {
+    const SATURATION: f32 = 0.86;
+    const LIGHTEST: f32 = 0.30;
+    let sector = (hue.rem_euclid(360.0)) / 60.0;
+    let share = 1.0 - (sector % 2.0 - 1.0).abs();
+    let (red, green, blue) = match sector as u32 {
+        0 => (1.0, share, 0.0),
+        1 => (share, 1.0, 0.0),
+        2 => (0.0, 1.0, share),
+        3 => (0.0, share, 1.0),
+        4 => (share, 0.0, 1.0),
+        _ => (1.0, 0.0, share),
+    };
+    let tone = |channel: f32, value: f32| value * (1.0 - SATURATION * (1.0 - channel));
+    let light = |value: f32| {
+        let linear = |channel: f32| tone(channel, value).powf(2.2);
+        0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    };
+    let mut value = 0.94_f32;
+    while light(value) > LIGHTEST {
+        value *= 0.98;
+    }
+    let byte = |channel: f32| (tone(channel, value) * 255.0).round() as u32;
+    byte(red) << 16 | byte(green) << 8 | byte(blue)
+}
+
+/// The color the shapes and the steps are drawn in, as `0xRRGGBB`.
+pub fn ink() -> u32 {
+    let settings = Settings::load();
+    match INKS.get(settings.ink) {
+        Some(&ink) => ink,
+        None => tinted(settings.hue as f32),
+    }
+}
+
+/// What Premium adds, each of which can be tried a few times for free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Perk {
+    Shortcut,
+    Color,
+    Joining,
+}
+
+impl Perk {
+    const ALL: [Self; 3] = [Self::Shortcut, Self::Color, Self::Joining];
+    /// How many times each can be tried without Premium.
+    const TRIES: usize = 3;
+
+    fn value(self) -> PCWSTR {
+        match self {
+            Self::Shortcut => w!("TriedShortcut"),
+            Self::Color => w!("TriedColor"),
+            Self::Joining => w!("TriedJoining"),
+        }
+    }
+
+    /// How many free tries are left, where they count: `None` with Premium, and
+    /// where Premium doesn't show yet, as everything is free there.
+    pub fn tries(self) -> Option<usize> {
+        let counted = channel::is_dev() && !premium();
+        counted.then(|| Self::TRIES - read(self.value(), 0).min(Self::TRIES))
+    }
+
+    /// Whether it can be used now.
+    pub fn allowed(self) -> bool {
+        self.tries() != Some(0)
+    }
+
+    /// Counts a use against the free tries, where they count.
+    pub fn used(self) {
+        if self.tries().is_some() {
+            write(self.value(), read(self.value(), 0) + 1);
+        }
+    }
 }
 
 impl Settings {
@@ -37,6 +124,8 @@ impl Settings {
             tool_names: read(w!("ToolNames"), 0) != 0,
             sound: read(w!("Sound"), 1) != 0,
             folder: registry::read_string(KEY, w!("Folder")).map(PathBuf::from),
+            ink: read(w!("Ink"), 0).min(INKS.len()),
+            hue: read(w!("InkHue"), 265) % 360,
         }
     }
 
@@ -46,6 +135,8 @@ impl Settings {
         write(w!("OpenEditor"), usize::from(self.open_editor));
         write(w!("ToolNames"), usize::from(self.tool_names));
         write(w!("Sound"), usize::from(self.sound));
+        write(w!("Ink"), self.ink);
+        write(w!("InkHue"), self.hue);
         match &self.folder {
             Some(folder) => registry::write_string(KEY, w!("Folder"), folder.as_os_str()),
             None => registry::delete(KEY, w!("Folder")),
@@ -109,6 +200,9 @@ pub fn set_premium(premium: bool) {
 /// Only Kata Dev offers it, to try the welcome again.
 pub fn forget_welcome() {
     registry::delete(KEY, w!("Premium"));
+    for perk in Perk::ALL {
+        registry::delete(KEY, perk.value());
+    }
     registry::delete(KEY, w!("Welcomed"));
     for hint in Hint::ALL {
         registry::delete(KEY, hint.value());

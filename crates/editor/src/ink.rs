@@ -1,10 +1,19 @@
-//! Kata's ink, for the steps and the figures: persimmon, edged in white, over a soft
-//! shadow.
+//! Kata's ink, for the steps and the figures: a color, persimmon unless another is
+//! chosen, edged in white, over a soft shadow.
 
 use crate::{Image, Rect};
 
-/// Kata's persimmon orange, as the image stores it: blue, green, red.
-const ORANGE: [f32; 3] = [34.0, 90.0, 236.0];
+/// A color of ink, as the image stores it: blue, green, red.
+pub type Color = [f32; 3];
+
+/// Kata's persimmon orange.
+pub const ORANGE: Color = [34.0, 90.0, 236.0];
+
+/// The ink that `rgb` names, as `0xRRGGBB`.
+pub fn color(rgb: u32) -> Color {
+    let [blue, green, red, _] = rgb.to_le_bytes();
+    [f32::from(blue), f32::from(green), f32::from(red)]
+}
 /// The shadow under a usual mark at 100 %: its reach and drop, and its darkness.
 const SHADOW_REACH: f32 = 4.0;
 const SHADOW_DROP: f32 = 1.0;
@@ -12,7 +21,8 @@ const SHADOW_DARKNESS: f32 = 0.3;
 
 /// How a mark is inked, in pixels.
 pub struct Ink {
-    /// The white edge around the orange.
+    color: Color,
+    /// The white edge around the color.
     edge: f32,
     /// How far the shadow reaches past the mark, and how far below it it falls.
     reach: f32,
@@ -21,9 +31,10 @@ pub struct Ink {
 
 impl Ink {
     /// The ink of a mark `size` times as big as a usual one at 100 %, edged there in
-    /// `edge` pixels of white.
-    pub fn new(size: f32, edge: f32) -> Self {
+    /// `edge` pixels of white, in `color`.
+    pub fn new(size: f32, edge: f32, color: Color) -> Self {
         Self {
+            color,
             edge: edge * size,
             reach: SHADOW_REACH * size,
             drop: SHADOW_DROP * size,
@@ -76,7 +87,7 @@ impl Ink {
                 for (channel, value) in pixel.iter_mut().enumerate() {
                     let mut color = f32::from(*value) * keep;
                     color += (255.0 - color) * edge;
-                    color += (ORANGE[channel] - color) * orange;
+                    color += (self.color[channel] - color) * orange;
                     color += (255.0 - color) * ink;
                     *value = (color + 0.5) as u8;
                 }

@@ -11,7 +11,9 @@ use std::{
 use kata_ui::{
     Graphics,
     access::Element,
-    controls::{self, Button, Caption, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
+    controls::{
+        self, Button, Caption, Control, HEIGHT, Hue, IconButton, Info, Shortcut, Swatches, Toggle,
+    },
     figure::Figure,
     logo,
     motion::{self, Animation, Easing},
@@ -20,7 +22,12 @@ use kata_ui::{
 };
 use windows::core::Result;
 
-use crate::{channel, hotkey::Hotkey, settings::Settings, strings::strings};
+use crate::{
+    channel,
+    hotkey::Hotkey,
+    settings::{INKS, Perk, Settings, tinted},
+    strings::strings,
+};
 pub use welcome::Ready;
 use welcome::{First, GLYPH};
 
@@ -41,7 +48,7 @@ const ORANGE: u32 = 0xEC_5A22;
 const ROW: f32 = 52.0;
 const HEADING: f32 = 36.0;
 /// How many settings each group has, from top to bottom.
-const GROUPS: [usize; 3] = [4, 2, 1];
+const GROUPS: [usize; 3] = [4, 3, 1];
 /// The glyph that leads a setting or the window's title, and the room after it.
 const ICON: f32 = 16.0;
 const ICON_GAP: f32 = 16.0;
@@ -71,7 +78,9 @@ const HINT_GAP: f32 = 12.0;
 const INFO_GAP: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 const MIN_WIDTH: f32 = 320.0;
-const CARDS: usize = 7;
+const CARDS: usize = 8;
+/// Between the colors and the hue beside them.
+const HUE_GAP: f32 = 8.0;
 
 /// In the order `numbered` counts them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -118,6 +127,8 @@ pub enum Part {
     ScreenKeys,
     OpenEditor,
     ToolNames,
+    Ink,
+    Hue,
     Sound,
     Folder,
     Startup,
@@ -195,6 +206,15 @@ pub struct Pages {
 
     back: IconButton,
     settings_title: Label,
+    /// The color of the shapes and the steps: its title, the colors to pick from, the
+    /// last of them the user's own, and that one's hue.
+    ink_title: Label,
+    ink: Swatches,
+    hue: Hue,
+    /// How many free tries are left of a shortcut and of a color of the user's own,
+    /// said under their titles where they count.
+    shortcut_tries: Option<Label>,
+    ink_tries: Option<Label>,
     group_titles: [Label; 3],
     /// The glyph that leads each setting, in the rows' order.
     row_icons: [Label; CARDS],
@@ -287,10 +307,23 @@ impl Pages {
                 fonts.icon('\u{E7E8}', ICON)?,
                 fonts.icon('\u{E70F}', ICON)?,
                 fonts.icon('\u{E8EC}', ICON)?,
+                fonts.icon('\u{E790}', ICON)?,
                 fonts.icon('\u{E8B7}', ICON)?,
             ],
             back: IconButton::new(fonts.icon('\u{E72B}', 12.0)?, text.back),
             settings_title: fonts.caption(text.settings)?,
+            ink_title: fonts.label(text.ink)?,
+            ink: Swatches::new(
+                (INKS.iter().zip(text.inks))
+                    .map(|(&ink, name)| (ink, name.to_owned()))
+                    .chain([(tinted(settings.hue as f32), text.own_ink.to_owned())])
+                    .collect(),
+                true,
+                settings.ink,
+            ),
+            hue: Hue::new(text.hue, tinted, settings.hue),
+            shortcut_tries: None,
+            ink_tries: None,
             shortcut_title: fonts.label(text.shortcut)?,
             shortcut: Shortcut::new(text.shortcut, Vec::new()),
             prompts: [
@@ -317,6 +350,7 @@ impl Pages {
         };
         pages.set_hotkey(settings.hotkey)?;
         pages.set_premium(crate::settings::premium())?;
+        pages.count_tries()?;
         Ok(pages)
     }
 
@@ -331,6 +365,7 @@ impl Pages {
             self.sound.width(),
             self.folder_title.width + PADDING + self.change_folder.width(),
             self.startup.width(),
+            self.ink_title.width + PADDING + Hue::WIDTH + HUE_GAP + self.ink.width(),
         ];
         let cards = rows.into_iter().fold(0.0, f32::max) + LEAD + 3.0 * PADDING;
         let title_bar = BACK + self.settings_title.width + PADDING + Caption::WIDTH;
@@ -363,8 +398,12 @@ impl Pages {
             startup,
             open_editor,
             tool_names,
+            ink,
             folder,
         ] = self.rows();
+        self.ink.place(ink.right() - PADDING, ink.middle());
+        let colors = ink.right() - PADDING - self.ink.width();
+        self.hue.place(colors - HUE_GAP, ink.middle());
         self.shortcut
             .place(shortcut.right() - PADDING, shortcut.middle());
         for (toggle, row) in [
@@ -399,6 +438,8 @@ impl Pages {
         let shown = |part: &Part| match part {
             Part::Premium => self.premium_card().is_some(),
             Part::GetPremium => !self.premium,
+            // A hue to pick only while the color is the user's own.
+            Part::Hue => self.ink.selected() == INKS.len(),
             _ => true,
         };
         parts(page).iter().copied().filter(shown).collect()
@@ -414,6 +455,37 @@ impl Pages {
     fn premium_card(&self) -> Option<Area> {
         let width = self.room.0 - 2.0 * PADDING;
         channel::is_dev().then(|| Area::new(PADDING, TITLE_BAR + CARD_TOP, width, CARD))
+    }
+
+    /// The color chosen for the shapes and the steps, as `Settings` keeps it, and
+    /// the hue of the user's own.
+    pub fn ink(&self) -> (usize, usize) {
+        (self.ink.selected(), self.hue.hue())
+    }
+
+    /// Goes back to the color at `ink`.
+    pub fn set_ink(&mut self, ink: usize) {
+        self.ink.select(ink);
+    }
+
+    /// Shows the hue on the color of the user's own, as it changes.
+    pub fn follow_hue(&mut self) {
+        self.ink
+            .set_color(INKS.len(), tinted(self.hue.hue() as f32));
+    }
+
+    /// Says how many free tries are left of what Premium adds here, where they
+    /// count.
+    pub fn count_tries(&mut self) -> Result<()> {
+        let text = strings();
+        let said = |perk: Perk| -> Result<Option<Label>> {
+            (perk.tries())
+                .map(|tries| self.fonts.caption(&text.tries(tries)))
+                .transpose()
+        };
+        self.shortcut_tries = said(Perk::Shortcut)?;
+        self.ink_tries = said(Perk::Color)?;
+        Ok(())
     }
 
     /// Says Premium is the user's, or isn't: its card and its page follow.
@@ -445,6 +517,7 @@ impl Pages {
         self.premium_adds = fonts.caption(heading)?;
         self.stay_free = Button::standard(fonts.label(way_on)?);
         self.premium = premium;
+        self.count_tries()?;
         self.layout(self.room)
     }
 
@@ -491,6 +564,8 @@ impl Pages {
             Part::ScreenKeys => &mut self.screen_keys,
             Part::OpenEditor => &mut self.open_editor,
             Part::ToolNames => &mut self.tool_names,
+            Part::Ink => &mut self.ink,
+            Part::Hue => &mut self.hue,
             Part::Sound => &mut self.sound,
             Part::Folder => &mut self.change_folder,
             Part::Startup => &mut self.startup,
@@ -513,6 +588,8 @@ impl Pages {
             Part::ScreenKeys => &self.screen_keys,
             Part::OpenEditor => &self.open_editor,
             Part::ToolNames => &self.tool_names,
+            Part::Ink => &self.ink,
+            Part::Hue => &self.hue,
             Part::Sound => &self.sound,
             Part::Folder => &self.change_folder,
             Part::Startup => &self.startup,
@@ -589,9 +666,20 @@ impl Pages {
                 for (row, icon) in rows.iter().zip(&self.row_icons) {
                     painter.text(icon, row.left + PADDING, row.middle(), palette.text);
                 }
-                let [shortcut, .., folder] = rows;
-                let left = shortcut.left + LEAD;
-                painter.text(&self.shortcut_title, left, shortcut.middle(), palette.text);
+                let [shortcut, .., ink, folder] = rows;
+                // A title, over how many free tries are left when they count.
+                let titled = |title: &Label, tries: &Option<Label>, row: Area| {
+                    let lines = title.height + tries.as_ref().map_or(0.0, |tries| tries.height);
+                    let top = row.middle() - lines / 2.0;
+                    let left = row.left + LEAD;
+                    painter.text(title, left, top + title.height / 2.0, palette.text);
+                    if let Some(tries) = tries {
+                        let middle = top + title.height + tries.height / 2.0;
+                        painter.text(tries, left, middle, palette.text_secondary);
+                    }
+                };
+                titled(&self.shortcut_title, &self.shortcut_tries, shortcut);
+                titled(&self.ink_title, &self.ink_tries, ink);
                 // The folder's title and path, one above the other.
                 let (title, path) = (&self.folder_title, &self.folder_path);
                 let top = folder.middle() - (title.height + path.height) / 2.0;
@@ -858,6 +946,9 @@ fn parts(page: Page) -> &'static [Part] {
             Part::Startup,
             Part::OpenEditor,
             Part::ToolNames,
+            // Before the colors, which it sits beside.
+            Part::Hue,
+            Part::Ink,
             Part::Folder,
         ],
     }

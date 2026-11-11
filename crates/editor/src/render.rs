@@ -8,7 +8,7 @@ use std::thread;
 
 use crate::document::radii;
 use crate::geometry::{RoundedRect, center, ellipse};
-use crate::{BLUR_LEVELS, Blur, Figure, Frame, Image, Rect, Spot, Step, figure, marker};
+use crate::{BLUR_LEVELS, Blur, Figure, Frame, Image, Rect, Spot, Step, figure, ink, marker};
 
 /// How far each blur level spreads every pixel, in pixels at 100 % scale: the
 /// standard deviation of the Gaussian blur it follows.
@@ -37,6 +37,8 @@ const BAND_ROWS: usize = 32;
 /// Keeps a rendering of the capture with its edits, redrawing only what changes.
 pub struct Renderer {
     scale: f32,
+    /// The color of the figures and the steps.
+    ink: ink::Color,
     /// How many rows the focus draws at once.
     cores: usize,
     /// Makes this session's blur grain unpredictable.
@@ -71,6 +73,7 @@ impl Renderer {
     pub fn new(image: &Image, scale: f32) -> Self {
         Self {
             scale,
+            ink: ink::ORANGE,
             cores: thread::available_parallelism().map_or(1, usize::from),
             seed: RandomState::new().hash_one(0),
             base: image.clone(),
@@ -91,6 +94,12 @@ impl Renderer {
             output: image.clone(),
             ..self.alike()
         };
+    }
+
+    /// Draws the figures and the steps in the color `rgb` names, as `0xRRGGBB`,
+    /// from the next change on.
+    pub fn set_ink(&mut self, rgb: u32) {
+        self.ink = ink::color(rgb);
     }
 
     /// Another renderer whose blurs show this one's grain, with no capture yet: to
@@ -278,13 +287,13 @@ impl Renderer {
         };
         self.light(area);
         if let Some(border) = self.focus.and_then(|spot| spot.border(bounds, self.scale)) {
-            figure::draw(&mut self.output, &border, area, self.cores);
+            figure::draw(&mut self.output, &border, area, self.cores, self.ink);
         }
         for figure in &self.figures {
-            figure::draw(&mut self.output, figure, area, self.cores);
+            figure::draw(&mut self.output, figure, area, self.cores, self.ink);
         }
         for (at, step) in self.steps.iter().enumerate() {
-            marker::draw(&mut self.output, step.rect, at + 1, area);
+            marker::draw(&mut self.output, step.rect, at + 1, area, self.ink);
         }
     }
 

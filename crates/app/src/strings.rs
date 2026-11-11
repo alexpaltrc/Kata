@@ -45,6 +45,16 @@ pub struct Strings {
     /// What assistive technologies call the window's buttons: minimize, maximize, close
     /// and restore.
     pub caption: [&'static str; 4],
+    /// The color of the shapes and the steps, in Settings: its title, what each
+    /// color is called, the one of the user's own, and its hue.
+    pub ink: &'static str,
+    pub inks: [&'static str; 5],
+    pub own_ink: &'static str,
+    pub hue: &'static str,
+    /// How many free tries are left of something Premium adds, before the number;
+    /// and what says there are none.
+    free_tries: &'static str,
+    no_tries: &'static str,
     /// What the settings' groups are called: capturing, editing and saving.
     pub groups: [&'static str; 3],
     pub exit: &'static str,
@@ -103,6 +113,14 @@ pub struct Strings {
 }
 
 impl Strings {
+    /// How many free tries are left of something Premium adds.
+    pub fn tries(&self, tries: usize) -> String {
+        match tries {
+            0 => self.no_tries.to_owned(),
+            _ => format!("{}{tries}", self.free_tries),
+        }
+    }
+
     pub fn percent(&self, value: f32) -> String {
         format!("{}{}", (value * 100.0).round(), self.percent)
     }
@@ -169,6 +187,12 @@ static SPANISH: Strings = Strings {
     settings: "Ajustes",
     back: "Atrás",
     caption: ["Minimizar", "Maximizar", "Cerrar", "Restaurar"],
+    ink: "Color de formas y pasos",
+    inks: ["Naranja", "Rojo", "Rosa", "Azul", "Verde"],
+    own_ink: "Tu color",
+    hue: "Tono",
+    free_tries: "A tu medida con Premium. Pruebas gratis: ",
+    no_tries: "A tu medida con Kata Premium",
     groups: ["Capturar", "Editar", "Guardar"],
     exit: "Salir",
     replay_welcome: "Repetir la bienvenida",
@@ -248,6 +272,12 @@ static ENGLISH: Strings = Strings {
     settings: "Settings",
     back: "Back",
     caption: ["Minimize", "Maximize", "Close", "Restore"],
+    ink: "Color of shapes and steps",
+    inks: ["Orange", "Red", "Pink", "Blue", "Green"],
+    own_ink: "Your color",
+    hue: "Hue",
+    free_tries: "Your own with Premium. Free tries: ",
+    no_tries: "Your own with Kata Premium",
     groups: ["Capture", "Edit", "Save"],
     exit: "Exit",
     replay_welcome: "Replay the welcome",

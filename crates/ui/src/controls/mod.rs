@@ -3,10 +3,12 @@
 mod button;
 mod caption;
 mod dock;
+mod hue;
 mod icon_button;
 mod info;
 mod shortcut;
 mod slider;
+mod swatches;
 pub mod tip;
 mod toggle;
 
@@ -15,10 +17,12 @@ use std::time::Instant;
 pub use button::Button;
 pub use caption::Caption;
 pub use dock::{Dock, Item};
+pub use hue::Hue;
 pub use icon_button::IconButton;
 pub use info::Info;
 pub use shortcut::Shortcut;
 pub use slider::Slider;
+pub use swatches::Swatches;
 pub use toggle::Toggle;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DOWN, VK_END, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_UP,

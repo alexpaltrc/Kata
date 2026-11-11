@@ -4,7 +4,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 use std::thread;
 
 use crate::geometry::{RoundedRect, center, ellipse, segment};
-use crate::ink::Ink;
+use crate::ink::{self, Color, Ink};
 use crate::{Figure, Form, Image, Rect};
 
 /// A usual figure's line, white edges included, beside a usual marker at 100 %.
@@ -42,10 +42,10 @@ pub fn change(old: Option<&Figure>, new: Option<&Figure>) -> Vec<Rect> {
     change
 }
 
-/// Draws `figure` over what `image` shows, only inside `area`, in bands of rows inked
-/// at once on `cores` cores.
-pub fn draw(image: &mut Image, figure: &Figure, area: Rect, cores: usize) {
-    let trace = Trace::new(figure);
+/// Draws `figure` in `color` over what `image` shows, only inside `area`, in bands of
+/// rows inked at once on `cores` cores.
+pub fn draw(image: &mut Image, figure: &Figure, area: Rect, cores: usize, color: Color) {
+    let trace = Trace::new(figure).inked(color);
     let parts: Vec<Rect> = (trace.parts().iter())
         .filter_map(|part| part.intersect(&area))
         .collect();
@@ -102,6 +102,12 @@ enum Path {
 }
 
 impl Trace {
+    /// The same trace, inked in `color`.
+    fn inked(mut self, color: Color) -> Self {
+        self.ink = Ink::new(self.half * 2.0 / LINE, EDGE, color);
+        self
+    }
+
     pub fn new(figure: &Figure) -> Self {
         let size = figure.line as f32 / LINE;
         let half = figure.line as f32 / 2.0;
@@ -118,7 +124,7 @@ impl Trace {
             Form::Arrow => arrow(figure, half),
         };
         Self {
-            ink: Ink::new(size, EDGE),
+            ink: Ink::new(size, EDGE, ink::ORANGE),
             half,
             rect,
             path,
@@ -346,7 +352,7 @@ mod tests {
                 line,
             };
             let mut ringed = image.clone();
-            draw(&mut ringed, &figure, bounds, 4);
+            draw(&mut ringed, &figure, bounds, 4, ink::ORANGE);
             let mut whole = image.clone();
             let trace = Trace::new(&figure);
             for part in trace

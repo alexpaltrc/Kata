@@ -324,6 +324,28 @@ impl<'a> Painter<'a> {
         }
     }
 
+    /// Fills `area`, rounded by `radius`, with `colors` evenly from its left edge to
+    /// its right.
+    pub fn spectrum(&self, area: Area, radius: f32, colors: &[D2D1_COLOR_F]) {
+        let last = colors.len().saturating_sub(1).max(1) as f32;
+        let stops: Vec<_> = (colors.iter().enumerate())
+            .map(|(index, &color)| D2D1_GRADIENT_STOP {
+                position: index as f32 / last,
+                color,
+            })
+            .collect();
+        let (from, to) = (
+            Vector2::new(area.left, area.middle()),
+            Vector2::new(area.right(), area.middle()),
+        );
+        if let Ok(brush) = self.gradient(&stops, from, to) {
+            unsafe {
+                self.context
+                    .FillRoundedRectangle(&rounded(area, radius), &brush);
+            }
+        }
+    }
+
     /// Paints `stops` evenly from `from` to `to`, and the ends' colors beyond.
     pub(crate) fn gradient(
         &self,

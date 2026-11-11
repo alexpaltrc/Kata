@@ -212,7 +212,8 @@ unsafe fn create(
         let title = channel::name();
         let hwnd = window::create(CLASS, title, window_proc, &work, client, !palette.light)?;
         let size = window::client_size(hwnd);
-        let renderer = Renderer::new(&capture.image, capture.scale);
+        let mut renderer = Renderer::new(&capture.image, capture.scale);
+        renderer.set_ink(settings::ink());
         let gpu = match Gpu::new(graphics, hwnd, size, renderer.output()) {
             Ok(gpu) => gpu,
             Err(error) => {

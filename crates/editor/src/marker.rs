@@ -4,7 +4,7 @@
 use Stroke::{Arc, Line};
 
 use crate::geometry::{distance, segment};
-use crate::ink::Ink;
+use crate::ink::{self, Color, Ink};
 use crate::{Image, Rect};
 
 /// The diameter the edge, the shadow and the digits are laid out for: a usual marker
@@ -21,12 +21,12 @@ const NUMBER_WIDTH: f32 = 0.66;
 
 /// Everything a marker in `rect` changes: its disc and shadow.
 pub fn footprint(rect: Rect) -> Rect {
-    rect.inflate(ink(rect).margin())
+    rect.inflate(ink(rect, ink::ORANGE).margin())
 }
 
-/// Draws the marker of step `number` in `rect`, over what `image` shows, only inside
-/// `area`.
-pub fn draw(image: &mut Image, rect: Rect, number: usize, area: Rect) {
+/// Draws the marker of step `number` in `rect`, in `color`, over what `image` shows,
+/// only inside `area`.
+pub fn draw(image: &mut Image, rect: Rect, number: usize, area: Rect, color: Color) {
     let Some(area) = footprint(rect).intersect(&area) else {
         return;
     };
@@ -36,7 +36,7 @@ pub fn draw(image: &mut Image, rect: Rect, number: usize, area: Rect) {
     );
     let radius = rect.width().min(rect.height()) as f32 / 2.0;
     let number = Number::new(number, center, 2.0 * radius);
-    ink(rect).paint(
+    ink(rect, color).paint(
         image,
         area,
         |point| distance(point, center) - radius,
@@ -45,8 +45,8 @@ pub fn draw(image: &mut Image, rect: Rect, number: usize, area: Rect) {
 }
 
 /// The ink of the marker in `rect`.
-fn ink(rect: Rect) -> Ink {
-    Ink::new(scale(rect), EDGE)
+fn ink(rect: Rect, color: Color) -> Ink {
+    Ink::new(scale(rect), EDGE, color)
 }
 
 /// A number laid out in a marker.

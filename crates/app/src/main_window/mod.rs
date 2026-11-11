@@ -53,7 +53,7 @@ use crate::{
     channel, export,
     hotkey::{self, Hotkey, Press},
     report,
-    settings::{self, Settings},
+    settings::{self, INKS, Perk, Settings},
     sound, startup,
 };
 pub use pages::{Page, Ready};
@@ -385,6 +385,12 @@ impl Main {
             self.tracking = window::track_mouse_leave(self.hwnd);
         }
         let changed = match self.pressed {
+            // The color of the user's own follows its hue as it's dragged.
+            Some(Part::Hue) => {
+                let changed = self.pages.control(Part::Hue).drag(point);
+                self.pages.follow_hue();
+                changed
+            }
             Some(part) => self.pages.control(part).drag(point),
             None => self.pages.hover(self.page, Some(point)),
         };
@@ -417,11 +423,26 @@ impl Main {
             return;
         };
         let _ = unsafe { ReleaseCapture() };
-        if self.pages.control(part).release(point) {
+        // A hue changes as it's dragged, and is kept once let go.
+        if self.pages.control(part).release(point) || part == Part::Hue {
             self.activated(part);
         }
         self.pages.hover(self.page, Some(point));
         self.invalidate();
+    }
+
+    /// Shows Premium, for something of its own that has no free tries left, with
+    /// the way back to Settings.
+    fn offer_premium(&mut self) {
+        self.premium_from = Page::Settings;
+        self.go(Page::Premium);
+    }
+
+    /// Says again how many free tries are left.
+    fn recount(&mut self) {
+        if let Err(error) = self.pages.count_tries() {
+            report("window", &error);
+        }
     }
 
     /// Drops the press in progress.
@@ -495,9 +516,32 @@ impl Main {
             Part::GoOn | Part::GetPremium => self.go(Page::Home),
             Part::Back => self.go(Page::Home),
             // Pressing the current shortcut mustn't start a capture.
+            // A shortcut of the user's own is Premium's, past its free tries.
+            Part::Shortcut if !Perk::Shortcut.allowed() => self.offer_premium(),
             Part::Shortcut => {
                 hotkey::unregister(self.owner);
                 self.pages.listen(Prompt::Press);
+            }
+            Part::Ink => {
+                let (ink, hue) = self.pages.ink();
+                let own = ink == INKS.len();
+                if own && !Perk::Color.allowed() {
+                    // A color of the user's own is Premium's, past its free tries.
+                    self.pages.set_ink(self.settings.ink);
+                    self.offer_premium();
+                } else {
+                    if own {
+                        Perk::Color.used();
+                    }
+                    (self.settings.ink, self.settings.hue) = (ink, hue);
+                    self.settings.save();
+                    self.recount();
+                }
+            }
+            Part::Hue => {
+                self.pages.follow_hue();
+                self.settings.hue = self.pages.ink().1;
+                self.settings.save();
             }
             Part::OpenEditor | Part::ToolNames | Part::Sound => {
                 self.settings.open_editor = self.pages.open_editor();
@@ -536,6 +580,10 @@ impl Main {
                     self.pages.listen(Prompt::InUse);
                 }
                 Press::Hotkey(hotkey) => {
+                    if hotkey != self.settings.hotkey {
+                        Perk::Shortcut.used();
+                        self.recount();
+                    }
                     self.settings.hotkey = hotkey;
                     self.settings.save();
                     if let Err(error) = self.pages.set_hotkey(hotkey) {
