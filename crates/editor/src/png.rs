@@ -50,7 +50,7 @@ impl Image {
         // Then: compression, filter method and interlacing, the only kinds there are.
         header.extend_from_slice(&[depth, kind, 0, 0, 0]);
 
-        let pixels = deflate::zlib(&rows);
+        let pixels = deflate::zlib(&rows, rows.len() / self.height() as usize);
         let mut png = Vec::with_capacity(pixels.len() + colors.len() + 64);
         png.extend_from_slice(&SIGNATURE);
         chunk(&mut png, b"IHDR", &header);
@@ -171,7 +171,9 @@ fn filtered_band(rgb: &[u8], row_len: usize, rows: Range<usize>) -> Vec<u8> {
             way.extend_from_slice(candidates[filter]);
         }
     }
-    let lightest = ways.into_iter().min_by_key(|way| deflate::weigh(way));
+    let lightest = ways
+        .into_iter()
+        .min_by_key(|way| deflate::weigh(way, 1 + row_len));
     lightest.expect("seven ways")
 }
 

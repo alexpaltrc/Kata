@@ -1,8 +1,8 @@
 # La compresión PNG de Kata
 
 Kata guarda cada captura como PNG con un compresor propio, escrito desde cero, **sin cambiar un
-solo píxel**. Frente al que trae Windows, en el banco de pruebas los archivos pesan **34 % menos
-de media**: entre 17 y 46 % en ventanas, más de 50 % con pocos colores y entre 8 y 10 % cuando hay
+solo píxel**. Frente al que trae Windows, en el banco de pruebas los archivos pesan **35,5 % menos
+de media**: entre 18 y 48 % en ventanas, más de 50 % con pocos colores y entre 8 y 11 % cuando hay
 fotos. Ninguna captura sale más grande que con Windows.
 
 Este documento cuenta por qué lo hicimos, cómo funciona, qué probamos (también lo que no
@@ -287,24 +287,88 @@ Así los códigos cambian donde cambia la imagen.
 **Decisión:** 256. Además, un bloque tan pequeño que no paga sus propios códigos usa los códigos
 fijos de DEFLATE: en un recorte pequeño ahorra unas decenas de bytes.
 
+### 15. Precios con los códigos de verdad
+
+El camino más barato se busca con precios estimados (la entropía de cada símbolo). Probamos
+ponerle los precios reales: el largo del código de Huffman que tendría cada símbolo.
+
+| Precios | Media | Tiempo |
+|---|---|---|
+| Estimados, 3 vueltas | 33,8 % | 1909 ms |
+| Reales desde la 2.ª vuelta, 3 vueltas | 33,7 % | 1948 ms |
+| Reales desde la 3.ª, 4 vueltas | 33,8 % | 2145 ms |
+| Estimados, 5 vueltas | 34,0 % | 2334 ms |
+
+**Descartado.** Los precios reales son enteros y pierden el matiz de los estimados. Más vueltas
+ganan dos décimas y cuestan un 22 % más de tiempo.
+
+### 16. Buscar menos dentro de una repetición buena
+
+Si en una posición ya hay una repetición larga, en la siguiente sigue valiendo, un byte más corta.
+Probamos buscar ahí con menos candidatos y reutilizar esa.
+
+| Umbral, candidatos | Media | Tiempo |
+|---|---|---|
+| Sin esto | 33,8 % | 2067 ms |
+| 16 bytes, la octava parte | 33,4 % | 1817 ms |
+| 8 bytes, la cuarta parte | 33,1 % | 1685 ms |
+| 4 bytes, la octava parte | 31,9 % | 1377 ms |
+
+**Descartado.** Es la misma cuenta de siempre: cada candidato que se deja de mirar se paga en
+tamaño. Ganar las dos cosas pide mirar mejor, no menos.
+
+### 17. La fila de arriba
+
+Una idea propia de las capturas. La búsqueda mira los 64 lugares más cercanos que empiezan igual;
+donde mucho se parece (un fondo liso, una tabla, un degradado), esos 64 quedan todos a pocos bytes
+y nunca llega a la fila de arriba, que está miles de bytes atrás y es donde de verdad se repite
+la imagen. Ahora, en cada posición, además de la búsqueda, se compara directamente con la fila de
+arriba, y si repite más que lo encontrado, es un candidato más. Cuesta una comparación.
+
+| Variante | Media | Peor caso | Tiempo |
+|---|---|---|---|
+| Sin la fila de arriba | 33,8 % | 8,2 % | 1670 ms |
+| Tomarla entera cuando es larga, sin buscar | 26,6 % | −4,3 % | 1663 ms |
+| **Como un candidato más** | **35,3 %** | **8,2 %** | **1658 ms** |
+| También dos filas arriba | 35,3 % | 8,2 % | 1887 ms |
+| También hasta cuatro | 35,3 % | 8,1 % | 1738 ms |
+
+**Adoptado**, como un candidato más. Tomarla entera sin buscar fue un error instructivo: en un
+fondo liso, repetir el byte de al lado cuesta muchos menos bits que repetir la fila de arriba,
+aunque sea igual de larga. Con ella, bajar la búsqueda a 32 candidatos da 34,8 % en 1452 ms: más
+compresión que antes y un 13 % más rápido; nos quedamos con 64.
+
+### 18. Pesar mejor cada franja
+
+Para elegir cómo filtrar cada franja se comprime rápido, con 8 candidatos por posición. Con la fila
+de arriba ya incluida:
+
+| Candidatos al pesar | Media | Tiempo |
+|---|---|---|
+| 8 | 35,3 % | 1658 ms |
+| **16** | **35,5 %** | **1664 ms** |
+| 32 | 35,5 % | 1721 ms |
+
+**Decisión:** 16.
+
 ### Dónde quedó
 
 | Captura | Windows | Antes | Ahora | Ahorro | Tiempo |
 |---|---|---|---|---|---|
-| Editor de código oscuro (2560×1440) | 188 693 | 121 798 | 107 744 | 42,9 % | 115 ms |
-| Recorte pequeño (680×100) | 5 717 | 3 018 | 2 792 | 51,2 % | 5 ms |
-| Escritorio con foto (2560×1440) | 3 406 662 | 3 327 329 | 3 128 020 | 8,2 % | 595 ms |
-| Diálogo de pocos colores (480×320) | 10 426 | 4 532 | 4 233 | 59,4 % | 6 ms |
-| Captura editada (1920×1080) | 163 766 | 135 995 | 120 297 | 26,5 % | 113 ms |
-| Ajustes con degradado (1920×1080) | 69 737 | 62 092 | 54 038 | 22,5 % | 66 ms |
-| Hoja de cálculo (1600×900) | 74 223 | 39 256 | 34 383 | 53,7 % | 48 ms |
-| Página web larga con fotos (1920×2400) | 1 353 874 | 1 305 386 | 1 217 516 | 10,1 % | 364 ms |
-| Ventana oscura en 4K (3840×2160) | 330 364 | 196 632 | 176 653 | 46,5 % | 113 ms |
-| Ventana clara sobre foto (2560×1440) | 502 807 | 472 549 | 418 634 | 16,7 % | 244 ms |
-| **Media** | | 26,7 % | | **33,8 %** | |
+| Editor de código oscuro (2560×1440) | 188 693 | 121 798 | 103 290 | 45,3 % | 109 ms |
+| Recorte pequeño (680×100) | 5 717 | 3 018 | 2 772 | 51,5 % | 5 ms |
+| Escritorio con foto (2560×1440) | 3 406 662 | 3 327 329 | 3 127 001 | 8,2 % | 614 ms |
+| Diálogo de pocos colores (480×320) | 10 426 | 4 532 | 4 132 | 60,4 % | 6 ms |
+| Captura editada (1920×1080) | 163 766 | 135 995 | 112 541 | 31,3 % | 104 ms |
+| Ajustes con degradado (1920×1080) | 69 737 | 62 092 | 52 066 | 25,3 % | 59 ms |
+| Hoja de cálculo (1600×900) | 74 223 | 39 256 | 33 001 | 55,5 % | 47 ms |
+| Página web larga con fotos (1920×2400) | 1 353 874 | 1 305 386 | 1 203 838 | 11,1 % | 378 ms |
+| Ventana oscura en 4K (3840×2160) | 330 364 | 196 632 | 172 151 | 47,9 % | 105 ms |
+| Ventana clara sobre foto (2560×1440) | 502 807 | 472 549 | 412 075 | 18,0 % | 238 ms |
+| **Media** | | 26,7 % | | **35,5 %** | |
 
-En bytes. El peor caso pasó de 2,3 a 8,2 %, y el ahorro sobre el peso total, de 7,2 a 13,8 %. El
-banco entero tarda 1670 ms, frente a 978 ms: 1,7 veces más, en segundo plano y con la captura ya
+En bytes. El peor caso pasó de 2,3 a 8,2 %, y el ahorro sobre el peso total, de 7,2 a 14,5 %. El
+banco entero tarda 1664 ms, frente a 978 ms: 1,7 veces más, en segundo plano y con la captura ya
 en el portapapeles.
 
 ## Datos para nerds
@@ -319,7 +383,8 @@ filas empaquetadas desde el bit más alto y sin filtro: los índices son nombres
 **RGB:** 8 bits por canal, en franjas de filas que suman unos 128 KB. Cada franja se filtra de
 siete maneras (None, Sub, Up, Average o Paeth en todas sus filas; o, fila por fila, el filtro que
 deja menos pares de bytes vecinos distintos, o el que deja los bytes más cerca de cero) y se queda
-con la que menos pesa tras una compresión rápida, de 8 candidatos por posición y sin afinar.
+con la que menos pesa tras una compresión rápida, de 16 candidatos por posición más la fila de
+arriba, y sin afinar.
 
 **DEFLATE:**
 
@@ -328,7 +393,7 @@ con la que menos pesa tras una compresión rápida, de 8 candidatos por posició
 | Ventana | 32 KiB, el máximo de DEFLATE |
 | Tramos | De 256 KiB, uno por núcleo a la vez; cada uno ve los 32 KiB anteriores |
 | Búsqueda | Cadenas hash sobre 4 bytes, con una tabla de 2¹⁵ entradas |
-| Candidatos por posición | 64; se guarda, para cada largo, la repetición más cercana |
+| Candidatos por posición | 64, más la fila de arriba; se guarda, para cada largo, la repetición más cercana |
 | Repetición que se toma entera | 128 bytes o más |
 | Lectura | El camino de menos bits por el tramo, tres veces: la primera con los precios de tomar siempre la repetición más larga, y cada una con los de la anterior |
 | Precios | La entropía de cada símbolo, en 1/32 de bit, entre 1 y 15 bits |
@@ -350,7 +415,7 @@ filtros de verdad, el camino más barato en bits, los bloques a medida y usar to
 herramientas: cinco filtros por fila y DEFLATE, que solo recuerda 32 KB hacia atrás. Quedan estas
 ideas, de más a menos prometedoras:
 
-- **Un buscador de repeticiones mejor.** Buscar más hondo sigue dando (128 candidatos: 33,8 %),
+- **Un buscador de repeticiones mejor.** Buscar más hondo sigue dando,
   pero cuesta tiempo. Una estructura que encuentre la repetición más larga sin recorrer
   candidatos uno a uno daría eso y más, por menos.
 - **Filtros fila por fila, probados de verdad.** Hoy se prueban por franjas. Probar cada fila con
@@ -358,8 +423,9 @@ ideas, de más a menos prometedoras:
 - **Colores:** paleta con filtros cuando convenga, índices de 8 bits frente a empaquetados, y
   grises con filtros frente a la paleta.
 - **Empezar antes:** comprimir mientras el editor está abierto, para que guardar sea instantáneo.
-- **Ideas sin garantía:** buscar primero en la fila de encima; el entrelazado en capturas muy
-  anchas.
+- **Más candidatos propios de una captura:** la fila de arriba funcionó; quedan por probar el
+  píxel de al lado en diagonal y la misma columna de otra ventana igual.
+- **Ideas sin garantía:** el entrelazado en capturas muy anchas.
 
 Cada experimento se mide con el banco y se anota en la bitácora, funcione o no. Una idea se queda
 solo si mejora la media sin dejar ninguna captura más grande que con Windows.

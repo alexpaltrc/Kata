@@ -4,9 +4,11 @@
 //! The data is read in spans, as many at once as there are cores. Each span is
 //! first read the quick way, taking the longest repeat at every step. What that
 //! reading costs then prices each literal and each repeat, and the span is read
-//! again for the cheapest way through it. Blocks end where the data changes, each
-//! with Huffman codes of its own, the shortest that fit DEFLATE's limits, found by
-//! package-merge; a block too small to pay for its codes uses DEFLATE's fixed ones.
+//! again for the cheapest way through it. The data comes in rows, a capture's, and
+//! the row above is always looked at: what repeats is often right there. Blocks
+//! end where the data changes, each with Huffman codes of its own, the shortest
+//! that fit DEFLATE's limits, found by package-merge; a block too small to pay for
+//! its codes uses DEFLATE's fixed ones.
 
 use std::ops::Range;
 
@@ -19,7 +21,7 @@ const MAX_MATCH: usize = 258;
 /// Earlier positions a search tries before settling for the best so far.
 const MAX_CHAIN: usize = 64;
 /// Earlier positions a search tries when the answer is only weighed.
-const QUICK_CHAIN: usize = 8;
+const QUICK_CHAIN: usize = 16;
 /// A repeat this long ends the search, and is taken whole.
 const NICE_MATCH: usize = 128;
 /// Positions are chained by their first four bytes: chaining by three finds more
@@ -45,8 +47,9 @@ const CODE_LENGTH_ORDER: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
 ];
 
-/// `data` compressed into a zlib stream.
-pub fn zlib(data: &[u8]) -> Vec<u8> {
+/// `data` compressed into a zlib stream. It comes in rows `row` bytes long, or in
+/// none if `row` is 0: a row often repeats the one above it.
+pub fn zlib(data: &[u8], row: usize) -> Vec<u8> {
     let mut bits = Bits::default();
     // DEFLATE with a 32 KiB window; the second byte makes the pair a multiple of 31.
     bits.out.extend_from_slice(&[0x78, 0x9C]);
@@ -57,7 +60,7 @@ pub fn zlib(data: &[u8]) -> Vec<u8> {
         .collect();
     // A wave at a time, so only as many spans as cores are ever held as tokens.
     for wave in spans.chunks(parallel::width()) {
-        for tokens in parallel::each(wave.len(), |span| read(data, wave[span].clone())) {
+        for tokens in parallel::each(wave.len(), |span| read(data, wave[span].clone(), row)) {
             blocks.feed(&tokens);
         }
     }
@@ -68,13 +71,19 @@ pub fn zlib(data: &[u8]) -> Vec<u8> {
 }
 
 /// Roughly how many bits `data` compresses to, found the quick way: enough to tell
-/// which of several ways of writing the same pixels compresses best.
-pub fn weigh(data: &[u8]) -> u64 {
-    let mut chains = Chains::new(data, 0..data.len());
+/// which of several ways of writing the same pixels compresses best. Its rows are
+/// `row` bytes long.
+pub fn weigh(data: &[u8], row: usize) -> u64 {
+    let mut chains = Chains::new(data, 0..data.len(), row);
     let mut counts = Counts::default();
     let mut pos = 0;
     while pos < data.len() {
-        let (length, distance) = chains.find(pos, QUICK_CHAIN);
+        let (mut length, mut distance) = chains.find(pos, QUICK_CHAIN);
+        // The row above, where the search stops short of it.
+        let above = chains.above(pos);
+        if above > length {
+            (length, distance) = (above, row);
+        }
         if length < MIN_MATCH {
             counts.add(Token::literal(data[pos]));
             pos += 1;
@@ -93,8 +102,8 @@ pub fn weigh(data: &[u8]) -> u64 {
 /// looked up once; then it's read by taking the longest at each step, and read
 /// again, each time for the cheapest way through at the prices of the reading
 /// before.
-fn read(data: &[u8], span: Range<usize>) -> Vec<Token> {
-    let repeats = Repeats::new(data, span.clone());
+fn read(data: &[u8], span: Range<usize>, row: usize) -> Vec<Token> {
+    let repeats = Repeats::new(data, span.clone(), row);
     let mut counts = repeats.longest(data);
     let mut best: Option<(u64, Vec<Token>)> = None;
     for _ in 0..ROUNDS {
@@ -123,18 +132,26 @@ struct Repeats {
 }
 
 impl Repeats {
-    fn new(data: &[u8], span: Range<usize>) -> Self {
-        let mut chains = Chains::new(data, span.clone());
+    fn new(data: &[u8], span: Range<usize>, row: usize) -> Self {
+        let mut chains = Chains::new(data, span.clone(), row);
         let mut starts = Vec::with_capacity(span.len() + 1);
         let mut found = Vec::new();
         let mut pos = span.start;
         while pos < span.end {
             starts.push(found.len() as u32);
             let mut most = 0;
+            // The row above too: where the search stops short of it, it's one more.
             chains.search(pos, MAX_CHAIN, |length, distance| {
                 found.push((length as u16, distance as u16));
                 most = length;
             });
+            // The row above too: in a capture, what repeats is often right there,
+            // farther back than the search gets where much else looks alike.
+            let above = chains.above(pos);
+            if above > most && above >= MIN_MATCH {
+                found.push((above as u16, row as u16));
+                most = above;
+            }
             pos += 1;
             if most >= NICE_MATCH {
                 // So long a repeat is taken whole: nothing inside it is looked up.
@@ -381,6 +398,8 @@ impl Prices {
 /// Every earlier position, chained by the hash of the bytes starting there.
 struct Chains<'a> {
     data: &'a [u8],
+    /// How long a row is, or 0 if the data has none.
+    row: usize,
     /// Where repeats have to end.
     end: usize,
     /// The latest position with each hash.
@@ -390,10 +409,13 @@ struct Chains<'a> {
 }
 
 impl<'a> Chains<'a> {
-    /// The chains to read `span` with: what comes just before it is already in.
-    fn new(data: &'a [u8], span: Range<usize>) -> Self {
+    /// The chains to read `span` with, of data in rows `row` bytes long: what comes
+    /// just before it is already in.
+    fn new(data: &'a [u8], span: Range<usize>, row: usize) -> Self {
         let mut chains = Self {
             data,
+            // A row too long to reach back to has none above it, as far as repeats go.
+            row: if row <= WINDOW { row } else { 0 },
             end: span.end,
             head: vec![NONE; 1 << HASH_BITS],
             prev: vec![NONE; WINDOW],
@@ -402,6 +424,15 @@ impl<'a> Chains<'a> {
             chains.insert(pos);
         }
         chains
+    }
+
+    /// How much of what starts at `pos` repeats the row above.
+    fn above(&self, pos: usize) -> usize {
+        if self.row == 0 || pos < self.row {
+            return 0;
+        }
+        let max = (self.end - pos).min(MAX_MATCH);
+        match_length(self.data, pos - self.row, pos, max)
     }
 
     fn hash(&self, pos: usize) -> usize {
@@ -976,7 +1007,7 @@ mod tests {
     #[test]
     fn repeats_shrink_the_stream() {
         let data = b"Kata ".repeat(10_000);
-        let stream = zlib(&data);
+        let stream = zlib(&data, 0);
         assert_eq!(stream[..2], [0x78, 0x9C]);
         assert!(stream.len() < 200, "{} bytes", stream.len());
     }
