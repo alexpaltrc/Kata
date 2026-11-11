@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use kata_editor::{BLUR_LEVELS, STEP_SIZES, ZOOMS};
 use windows::core::{PCWSTR, w};
 
-use crate::{hotkey::Hotkey, registry};
+use crate::{channel, hotkey::Hotkey, registry};
 
 const KEY: PCWSTR = w!(r"Software\Kata");
 
@@ -109,9 +109,21 @@ pub fn welcome_done() -> bool {
     first
 }
 
-/// Forgets the welcome and its hints, so Kata greets as on its first day. Only
-/// Kata Dev offers it, to try the welcome again.
+/// Whether Premium is the user's. Until the Store sells it, only Kata Dev can say
+/// so, to try how it shows.
+pub fn premium() -> bool {
+    channel::is_dev() && read(w!("Premium"), 0) != 0
+}
+
+/// Remembers whether Premium is the user's.
+pub fn set_premium(premium: bool) {
+    write(w!("Premium"), usize::from(premium));
+}
+
+/// Forgets the welcome, its hints and Premium, so Kata greets as on its first day.
+/// Only Kata Dev offers it, to try the welcome again.
 pub fn forget_welcome() {
+    registry::delete(KEY, w!("Premium"));
     registry::delete(KEY, w!("Welcomed"));
     for hint in Hint::ALL {
         registry::delete(KEY, hint.value());

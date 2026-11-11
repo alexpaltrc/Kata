@@ -82,7 +82,9 @@ Cada una se repite hasta que se usa una vez (renombrar, abrir la carpeta, arrast
 
 Al cerrar el editor de la primera captura, la ventana principal vuelve con **Lista**. La captura llega como la tarjeta del arrastre: sube, despega inclinada y la cruza el destello. Debajo, «Lista en 0,09 s», lo que tardó esa captura en aparecer desde que se pidió, y «Y pesa un 41 % menos que con Windows», medido guardando esa misma captura también con el codificador de Windows. Si esa cuenta aún no termina, la línea llega en cuanto lo hace, y si la diferencia no llega al medio por ciento, no se dice. Luego, el ajuste **Haz de Kata tu app de capturas**, con «Las teclas de captura de Windows, como Impr Pant, abrirán Kata» debajo, y **Continuar**, con «Todo se queda en tu equipo» debajo. Con el editor apagado, Lista llega en cuanto se guarda la captura.
 
-Después viene **Premium**: «Todo esto es gratis», con el destello, y «Para siempre y sin límites». Luego, en una tarjeta, lo que Premium añade (un atajo a tu medida, tus colores en formas y pasos, dibujo a mano alzada), una línea tras otra, cada una con su icono en un color de firma. Al final, **Seguir gratis** y **Obtener Premium**, lado a lado y del mismo tamaño y peso. Se cierra con la X de la ventana, y `Esc` lleva al inicio. Mientras Kata no se vende, Premium solo aparece en Kata Dev y los dos botones llevan al inicio: la compra aún no está conectada.
+Después viene **Premium**: «Todo esto es gratis», con el destello, y «Para siempre y sin límites». Luego, en una tarjeta, lo que Premium añade (un atajo a tu medida, tus colores en formas y pasos, varias capturas juntas en una), una línea tras otra, cada una con su icono en un color de firma. Al final, **Seguir gratis** y **Obtener Premium**, lado a lado y del mismo tamaño y peso. Se cierra con la X de la ventana, y `Esc` lleva al inicio. Mientras Kata no se vende, Premium solo aparece en Kata Dev, y la compra aún no está conectada: allí, **Obtener Premium** solo lo da por comprado, para ver cómo se muestra, y «Repetir la bienvenida» lo olvida.
+
+En Ajustes, arriba de todo, una tarjeta lleva a esta página: una corona, «Kata Premium», «Un solo pago, tuyo para siempre» y el botón **Obtener**. Con Premium ya comprado, la tarjeta dice «Eres Premium» y «De por vida. Gracias por apoyar a Kata.», la corona toma el naranja de Kata y la tarjeta lleva un borde con los colores de firma; su botón, **Ver**, abre la página, que entonces da las gracias («Gracias por ser Premium», «Es tuyo de por vida») y, bajo «Ya puedes usar», dice dónde está cada función. El dibujo a mano alzada se descartó.
 
 ## Icono
 
@@ -105,7 +107,7 @@ Kata no se vende hasta tener la bienvenida y al menos cinco idiomas: español, i
 - **Lo gratis queda completo para el día a día**, sin sentirse obligado a pagar, incluido Kata como app de capturas de Windows (`Impr Pant`). Lo premium es lo que personaliza o va más allá:
   - **Atajo a medida.** Gratis, 3 o 4 a elegir.
   - **Colores a medida** en formas y pasos. Gratis, de 3 a 5.
-  - **Dibujo a mano alzada.**
+  - **Juntar varias capturas en una.**
 - **Precio justo en cada país.** El precio de referencia se ajusta al poder adquisitivo de cada país con una sola cifra pública para todos: el nivel de precios del Banco Mundial (indicador `PA.NUS.PPPC.RF`, cuánto cuestan las cosas allí comparado con Estados Unidos). Partner Center permite fijar un precio distinto en cada mercado; se redondea a un precio que se lea bien en la moneda local.
 
 ## Fuera de alcance por ahora

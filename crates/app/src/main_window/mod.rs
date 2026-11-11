@@ -183,6 +183,7 @@ unsafe fn create(
             transition: Animation::idle(1.0),
             direction: 1.0,
             pressed: None,
+            premium_from: Page::Home,
             tracking: false,
             access: Access::new(hwnd),
         };
@@ -251,6 +252,8 @@ struct Main {
     direction: f32,
     /// The control the left button went down on.
     pressed: Option<Part>,
+    /// The page Premium's way on leads back to: Settings, when it came from there.
+    premium_from: Page,
     /// Whether Windows will say when the pointer leaves.
     tracking: bool,
     access: Access,
@@ -339,7 +342,7 @@ impl Main {
                 return Some(result);
             }
             access::ACT => {
-                if let Some(part) = pages::part(self.page, wparam.0)
+                if let Some(part) = self.pages.part(self.page, wparam.0)
                     && self.pressed.is_none()
                 {
                     if part != Part::Shortcut {
@@ -472,8 +475,24 @@ impl Main {
             Part::OpenSettings => self.go(Page::Settings),
             // Premium shows in Kata Dev only, until Kata is for sale.
             Part::GoOn if channel::is_dev() => self.go(Page::Premium),
-            // Buying isn't there yet: both ways go on for free.
-            Part::GoOn | Part::StayFree | Part::GetPremium => self.go(Page::Home),
+            Part::Premium => {
+                self.premium_from = Page::Settings;
+                self.go(Page::Premium);
+            }
+            // Buying isn't there yet: in Kata Dev, getting Premium only shows how it
+            // would be to have it.
+            Part::GetPremium if channel::is_dev() => {
+                settings::set_premium(true);
+                if let Err(error) = self.pages.set_premium(true) {
+                    report("window", &error);
+                }
+                self.go(Page::Premium);
+            }
+            Part::StayFree => {
+                let back = std::mem::replace(&mut self.premium_from, Page::Home);
+                self.go(back);
+            }
+            Part::GoOn | Part::GetPremium => self.go(Page::Home),
             Part::Back => self.go(Page::Home),
             // Pressing the current shortcut mustn't start a capture.
             Part::Shortcut => {

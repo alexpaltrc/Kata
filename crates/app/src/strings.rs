@@ -27,8 +27,17 @@ pub struct Strings {
     pub forever: &'static str,
     pub premium_adds: &'static str,
     pub perks: [&'static str; 3],
+    /// Where to find each perk, once Premium is the user's.
+    pub perk_guides: [&'static str; 3],
     pub stay_free: &'static str,
     pub get_premium: &'static str,
+    /// Premium's card in Settings: what it's called, what it costs in a line, and the
+    /// way to its page. Then the same, once it's the user's.
+    pub premium_card: [&'static str; 3],
+    pub premium_owned: [&'static str; 3],
+    /// Premium's page once it's the user's: the thanks, how long it lasts, the
+    /// heading over what it unlocked, and the way on.
+    pub premium_thanks: [&'static str; 4],
     pub new_capture: &'static str,
     pub open_captures: &'static str,
     pub settings: &'static str,
@@ -141,10 +150,27 @@ static SPANISH: Strings = Strings {
     perks: [
         "Un atajo a tu medida",
         "Tus colores en formas y pasos",
-        "Dibujo a mano alzada",
+        "Varias capturas juntas en una",
+    ],
+    perk_guides: [
+        "En Ajustes, haz clic en el atajo y pulsa el tuyo",
+        "En el editor, entre las opciones de Formas y de Pasos",
+        "Arrastra otra captura a un borde del editor",
     ],
     stay_free: "Seguir gratis",
     get_premium: "Obtener Premium",
+    premium_card: ["Kata Premium", "Un solo pago, tuyo para siempre", "Obtener"],
+    premium_owned: [
+        "Eres Premium",
+        "De por vida. Gracias por apoyar a Kata.",
+        "Ver",
+    ],
+    premium_thanks: [
+        "Gracias por ser Premium",
+        "Es tuyo de por vida",
+        "Ya puedes usar",
+        "Listo",
+    ],
     new_capture: "Nuevo recorte",
     open_captures: "Abrir capturas",
     settings: "Ajustes",
@@ -207,10 +233,27 @@ static ENGLISH: Strings = Strings {
     perks: [
         "A shortcut of your own",
         "Your colors in shapes and steps",
-        "Freehand drawing",
+        "Several captures joined into one",
+    ],
+    perk_guides: [
+        "In Settings, click the shortcut and press yours",
+        "In the editor, among the options of Shapes and Steps",
+        "Drag another capture to an edge of the editor",
     ],
     stay_free: "Continue for free",
     get_premium: "Get Premium",
+    premium_card: ["Kata Premium", "One payment, yours forever", "Get"],
+    premium_owned: [
+        "You're Premium",
+        "For life. Thank you for supporting Kata.",
+        "View",
+    ],
+    premium_thanks: [
+        "Thank you for going Premium",
+        "It's yours for life",
+        "Now yours to use",
+        "Done",
+    ],
     new_capture: "New capture",
     open_captures: "Open captures",
     settings: "Settings",

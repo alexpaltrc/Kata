@@ -39,6 +39,8 @@ const GO_ON_GAP: f32 = 24.0;
 const PERKS_GAP: f32 = 24.0;
 const ADDS_GAP: f32 = 4.0;
 const PERK_ROW: f32 = 32.0;
+/// A perk's row once Premium is the user's, with where to find it under it.
+const GUIDED_ROW: f32 = 48.0;
 pub(super) const GLYPH: f32 = 16.0;
 const GLYPH_GAP: f32 = 12.0;
 const PERKS_END: f32 = 8.0;
@@ -132,7 +134,7 @@ impl Pages {
         go_on.place(centered(go_on.width()), setting.bottom() + GO_ON_GAP);
 
         let heading = PADDING + self.premium_adds.height + ADDS_GAP;
-        let perks = heading + self.perks.len() as f32 * PERK_ROW + PERKS_END;
+        let perks = heading + self.perks.len() as f32 * self.perk_row() + PERKS_END;
         let above = self.all_free.height + LINE_GAP + self.forever.height + PERKS_GAP;
         self.premium_top = top(above + perks + CHOICE_GAP + HEIGHT);
         self.perks_card = Area::new(
@@ -141,9 +143,11 @@ impl Pages {
             room.0 - 2.0 * PADDING,
             perks,
         );
-        // As wide as each other, so neither way on weighs more.
+        // As wide as each other, so neither way on weighs more. Once Premium is the
+        // user's, there's one way on, alone.
+        let ways = if self.premium { 1.0 } else { 2.0 };
         let width = self.stay_free.width().max(self.get_premium.width());
-        let left = centered(2.0 * width + BUTTON_GAP);
+        let left = centered(ways * width + (ways - 1.0) * BUTTON_GAP);
         let top = self.perks_card.bottom() + CHOICE_GAP;
         for (index, button) in [&mut self.stay_free, &mut self.get_premium]
             .into_iter()
@@ -152,6 +156,11 @@ impl Pages {
             button.widen(width);
             button.place(left + index as f32 * (width + BUTTON_GAP), top);
         }
+    }
+
+    /// How tall each of Premium's perks is.
+    fn perk_row(&self) -> f32 {
+        if self.premium { GUIDED_ROW } else { PERK_ROW }
     }
 
     /// The width the welcome's pages need inside a card: Ready's setting, and
@@ -285,7 +294,12 @@ impl Pages {
             painter.text(adds, left, top + adds.height / 2.0, palette.text_secondary);
             let top = top + adds.height + ADDS_GAP;
             for (index, (glyph, perk)) in self.perks.iter().enumerate() {
-                let middle = top + (index as f32 + 0.5) * PERK_ROW;
+                let row = self.perk_row();
+                let middle = top + (index as f32 + 0.5) * row;
+                // Once Premium is the user's, each perk says where to find it.
+                let guide = self.premium.then(|| &self.perk_guides[index]);
+                let lines = perk.height + guide.map_or(0.0, |guide| guide.height);
+                let first = middle - lines / 2.0 + perk.height / 2.0;
                 let start = PERKS + (index + 1) as f32 * PERK;
                 // In a contrast theme, the system's colors.
                 let ink = if palette.contrast {
@@ -294,14 +308,21 @@ impl Pages {
                     color(colors[index], 1.0)
                 };
                 self.rise(painter, start, now, || {
-                    painter.text(glyph, left + (GLYPH - glyph.width) / 2.0, middle, ink);
-                    painter.text(perk, left + GLYPH + GLYPH_GAP, middle, palette.text);
+                    painter.text(glyph, left + (GLYPH - glyph.width) / 2.0, first, ink);
+                    let left = left + GLYPH + GLYPH_GAP;
+                    painter.text(perk, left, first, palette.text);
+                    if let Some(guide) = guide {
+                        let below = first + (perk.height + guide.height) / 2.0;
+                        painter.text(guide, left, below, palette.text_secondary);
+                    }
                 });
             }
         });
         self.rise(painter, CHOICE, now, || {
             self.stay_free.draw(painter, now);
-            self.get_premium.draw(painter, now);
+            if !self.premium {
+                self.get_premium.draw(painter, now);
+            }
         });
     }
 

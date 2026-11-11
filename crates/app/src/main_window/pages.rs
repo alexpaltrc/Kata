@@ -12,9 +12,11 @@ use kata_ui::{
     Graphics,
     access::Element,
     controls::{self, Button, Caption, Control, HEIGHT, IconButton, Info, Shortcut, Toggle},
+    figure::Figure,
     logo,
     motion::{self, Animation, Easing},
     paint::{Area, Fonts, Label, Painter, Point},
+    theme::color,
 };
 use windows::core::Result;
 
@@ -30,6 +32,11 @@ const BAR_GAP: f32 = 8.0;
 /// Around the cards, and inside them.
 const PADDING: f32 = 16.0;
 const CARD: f32 = 64.0;
+/// Above and below Premium's card in Settings; the rim that says it's the user's;
+/// and Kata's orange, for its crown.
+const CARD_TOP: f32 = 8.0;
+const RIM: f32 = 1.5;
+const ORANGE: u32 = 0xEC_5A22;
 /// A setting's row in its group's card, and the room above a group, with its title.
 const ROW: f32 = 52.0;
 const HEADING: f32 = 36.0;
@@ -105,6 +112,7 @@ pub enum Part {
     Capture,
     OpenSettings,
     Back,
+    Premium,
     Shortcut,
     ScreenKeysInfo,
     ScreenKeys,
@@ -158,11 +166,21 @@ pub struct Pages {
     premium_adds: Label,
     /// Each perk's glyph, and what it says.
     perks: [(Label, Label); 3],
+    /// Where to find each perk, said under it once Premium is the user's.
+    perk_guides: [Label; 3],
     perks_card: Area,
     stay_free: Button,
     get_premium: Button,
     /// Where Premium's parts start.
     premium_top: f32,
+
+    /// Whether Premium is the user's; and its card in Settings: a crown, what it
+    /// is in two lines, and the way to its page.
+    premium: bool,
+    crown: Figure,
+    premium_title: Label,
+    premium_line: Label,
+    premium_button: Button,
 
     title: Label,
     capture: Button,
@@ -234,12 +252,22 @@ impl Pages {
             perks: [
                 (fonts.icon('\u{E765}', GLYPH)?, fonts.label(text.perks[0])?),
                 (fonts.icon('\u{E790}', GLYPH)?, fonts.label(text.perks[1])?),
-                (fonts.icon('\u{E76D}', GLYPH)?, fonts.label(text.perks[2])?),
+                (fonts.icon('\u{E7C4}', GLYPH)?, fonts.label(text.perks[2])?),
+            ],
+            perk_guides: [
+                fonts.caption(text.perk_guides[0])?,
+                fonts.caption(text.perk_guides[1])?,
+                fonts.caption(text.perk_guides[2])?,
             ],
             perks_card: Area::default(),
             stay_free: Button::standard(fonts.label(text.stay_free)?),
             get_premium: Button::standard(fonts.label(text.get_premium)?),
             premium_top: 0.0,
+            premium: false,
+            crown: crown(graphics)?,
+            premium_title: fonts.label("")?,
+            premium_line: fonts.caption("")?,
+            premium_button: Button::new(fonts.label("")?),
             title: fonts.caption(channel::name())?,
             capture: Button::new(fonts.label(text.new_capture)?),
             open_settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, text.settings),
@@ -288,6 +316,7 @@ impl Pages {
             fonts,
         };
         pages.set_hotkey(settings.hotkey)?;
+        pages.set_premium(crate::settings::premium())?;
         Ok(pages)
     }
 
@@ -306,6 +335,8 @@ impl Pages {
         let cards = rows.into_iter().fold(0.0, f32::max) + LEAD + 3.0 * PADDING;
         let title_bar = BACK + self.settings_title.width + PADDING + Caption::WIDTH;
         let height = self.rows()[CARDS - 1].bottom() + PADDING;
+        let premium = LEAD + self.premium_title.width.max(self.premium_line.width);
+        let cards = cards.max(premium + self.premium_button.width() + 3.0 * PADDING);
         (MIN_WIDTH.max(cards).max(title_bar + PADDING), height)
     }
 
@@ -351,16 +382,75 @@ impl Pages {
         let below_title = Area::new(EDGE, TITLE_BAR, room.0 - 2.0 * EDGE, room.1 - TITLE_BAR);
         self.screen_keys_info
             .place(left, screen_keys.middle(), below_title);
+        if let Some(card) = self.premium_card() {
+            let button = &mut self.premium_button;
+            let left = card.right() - PADDING - button.width();
+            button.place(left, card.middle() - HEIGHT / 2.0);
+        }
         let change = &mut self.change_folder;
         let left = folder.right() - PADDING - change.width();
         change.place(left, folder.middle() - HEIGHT / 2.0);
         self.trim_folder()
     }
 
+    /// `page`'s parts on show: Premium's card only where Premium shows, and the way
+    /// to get it only until it's got.
+    fn parts(&self, page: Page) -> Vec<Part> {
+        let shown = |part: &Part| match part {
+            Part::Premium => self.premium_card().is_some(),
+            Part::GetPremium => !self.premium,
+            _ => true,
+        };
+        parts(page).iter().copied().filter(shown).collect()
+    }
+
+    /// `page`'s part with the number `describe` gave it.
+    pub fn part(&self, page: Page, number: usize) -> Option<Part> {
+        (self.parts(page).into_iter()).find(|&part| part as usize == number)
+    }
+
+    /// Premium's card, at the top of Settings, where Premium shows: in Kata Dev
+    /// only, until Kata is for sale.
+    fn premium_card(&self) -> Option<Area> {
+        let width = self.room.0 - 2.0 * PADDING;
+        channel::is_dev().then(|| Area::new(PADDING, TITLE_BAR + CARD_TOP, width, CARD))
+    }
+
+    /// Says Premium is the user's, or isn't: its card and its page follow.
+    pub fn set_premium(&mut self, premium: bool) -> Result<()> {
+        let text = strings();
+        let fonts = &self.fonts;
+        let card = if premium {
+            text.premium_owned
+        } else {
+            text.premium_card
+        };
+        self.premium_title = fonts.label(card[0])?;
+        self.premium_line = fonts.caption(card[1])?;
+        self.premium_button = match premium {
+            true => Button::standard(fonts.label(card[2])?),
+            false => Button::new(fonts.label(card[2])?),
+        };
+        let [title, line, heading, way_on] = match premium {
+            true => text.premium_thanks,
+            false => [
+                text.all_free,
+                text.forever,
+                text.premium_adds,
+                text.stay_free,
+            ],
+        };
+        self.all_free = fonts.title(title)?;
+        self.forever = fonts.label(line)?;
+        self.premium_adds = fonts.caption(heading)?;
+        self.stay_free = Button::standard(fonts.label(way_on)?);
+        self.premium = premium;
+        self.layout(self.room)
+    }
+
     pub fn part_at(&self, page: Page, point: Point) -> Option<Part> {
-        parts(page)
-            .iter()
-            .copied()
+        self.parts(page)
+            .into_iter()
             .find(|&part| self.get(part).contains(point))
     }
 
@@ -368,7 +458,7 @@ impl Pages {
     /// its part.
     pub fn describe(&self, page: Page) -> Vec<Element> {
         let mut elements = Vec::new();
-        for &part in parts(page) {
+        for part in self.parts(page) {
             self.get(part).describe(part as usize, &mut elements);
         }
         self.caption.describe(&mut elements);
@@ -395,6 +485,7 @@ impl Pages {
             Part::Capture => &mut self.capture,
             Part::OpenSettings => &mut self.open_settings,
             Part::Back => &mut self.back,
+            Part::Premium => &mut self.premium_button,
             Part::Shortcut => &mut self.shortcut,
             Part::ScreenKeysInfo => &mut self.screen_keys_info,
             Part::ScreenKeys => &mut self.screen_keys,
@@ -416,6 +507,7 @@ impl Pages {
             Part::Capture => &self.capture,
             Part::OpenSettings => &self.open_settings,
             Part::Back => &self.back,
+            Part::Premium => &self.premium_button,
             Part::Shortcut => &self.shortcut,
             Part::ScreenKeysInfo => &self.screen_keys_info,
             Part::ScreenKeys => &self.screen_keys,
@@ -437,7 +529,7 @@ impl Pages {
             let spring = Easing::SPRING;
             self.framing = self.framing.retarget(framed, motion::NORMAL, spring);
         }
-        parts(page).iter().fold(false, |changed, &part| {
+        self.parts(page).into_iter().fold(false, |changed, part| {
             let point = point.filter(|_| under == Some(part));
             self.control(part).hover(point) | changed
         })
@@ -456,7 +548,7 @@ impl Pages {
     pub fn draw(&self, page: Page, painter: &Painter, now: Instant) {
         let palette = painter.palette;
         let controls = || {
-            for &part in parts(page) {
+            for part in self.parts(page) {
                 self.get(part).draw(painter, now);
             }
         };
@@ -474,6 +566,9 @@ impl Pages {
             }
             Page::Settings => {
                 painter.text(&self.settings_title, BACK, self.title_row, palette.text);
+                if let Some(card) = self.premium_card() {
+                    self.draw_premium_card(painter, card);
+                }
                 let rows = self.rows();
                 let mut first = 0;
                 for (count, title) in GROUPS.into_iter().zip(&self.group_titles) {
@@ -514,6 +609,33 @@ impl Pages {
         if page == Page::Settings {
             self.screen_keys_info.draw_tip(painter, now);
         }
+    }
+
+    /// Premium's card: a crown, what Premium is in two lines, and the way to its
+    /// page. Once Premium is the user's, the crown takes Kata's orange and the card
+    /// a rim in Kata's own colors.
+    fn draw_premium_card(&self, painter: &Painter, card: Area) {
+        let palette = painter.palette;
+        let card = painter.align(card);
+        painter.fill(card, RADIUS, palette.card);
+        painter.stroke(card, RADIUS, painter.border(), palette.control_stroke);
+        let owned = self.premium && !palette.contrast;
+        if owned {
+            painter.rim(card, RADIUS, RIM, 1.0);
+        }
+        let ink = if owned {
+            color(ORANGE, 1.0)
+        } else {
+            palette.text
+        };
+        let crown = (card.left + PADDING, card.middle() - ICON / 2.0);
+        painter.figure(&self.crown, crown, ink);
+        let (title, line) = (&self.premium_title, &self.premium_line);
+        let top = card.middle() - (title.height + line.height) / 2.0;
+        let left = card.left + LEAD;
+        painter.text(title, left, top + title.height / 2.0, palette.text);
+        let middle = top + title.height + line.height / 2.0;
+        painter.text(line, left, middle, palette.text_secondary);
     }
 
     /// The shortcut, centered under `button`.
@@ -585,14 +707,14 @@ impl Pages {
     /// Moves the keyboard focus to `page`'s next control, or the previous one if
     /// `back`.
     pub fn tab(&mut self, page: Page, back: bool) {
-        let parts = parts(page);
+        let parts = self.parts(page);
         let focusable = |index: usize| self.get(parts[index]).is_focusable();
         self.focus = controls::tab(parts.len(), self.focus, back, focusable);
     }
 
     /// The control on `page` with the keyboard focus.
     pub fn focused(&self, page: Page) -> Option<Part> {
-        let &part = parts(page).get(self.focus?)?;
+        let part = *self.parts(page).get(self.focus?)?;
         self.get(part).is_focusable().then_some(part)
     }
 
@@ -608,9 +730,10 @@ impl Pages {
     pub fn is_animating(&self, page: Page, now: Instant) -> bool {
         (page.is_welcome() && self.welcome_animating(page, now))
             || self.framing.is_running(now)
-            || parts(page)
-                .iter()
-                .any(|&part| self.get(part).is_animating(now))
+            || self
+                .parts(page)
+                .into_iter()
+                .any(|part| self.get(part).is_animating(now))
     }
 
     pub fn set_hotkey(&mut self, hotkey: Hotkey) -> Result<()> {
@@ -679,7 +802,10 @@ impl Pages {
     fn rows(&self) -> [Area; CARDS] {
         let width = self.room.0 - 2.0 * PADDING;
         let mut rows = [Area::default(); CARDS];
-        let (mut row, mut top) = (0, TITLE_BAR - PADDING);
+        let above = self
+            .premium_card()
+            .map_or(TITLE_BAR, |card| card.bottom() + CARD_TOP);
+        let (mut row, mut top) = (0, above - PADDING);
         for count in GROUPS {
             top += HEADING;
             for _ in 0..count {
@@ -701,12 +827,18 @@ impl Pages {
     }
 }
 
-/// `page`'s part with the number `describe` gave it.
-pub fn part(page: Page, number: usize) -> Option<Part> {
-    parts(page)
-        .iter()
-        .copied()
-        .find(|&part| part as usize == number)
+/// A crown, `ICON` DIPs square: what Premium is drawn as.
+fn crown(graphics: &Graphics) -> Result<Figure> {
+    Figure::new(graphics, |pen| {
+        pen.start((1.5, 4.5));
+        pen.line((5.0, 8.0));
+        pen.line((8.0, 2.5));
+        pen.line((11.0, 8.0));
+        pen.line((14.5, 4.5));
+        pen.line((13.5, 13.5));
+        pen.line((2.5, 13.5));
+        pen.close();
+    })
 }
 
 fn parts(page: Page) -> &'static [Part] {
@@ -717,6 +849,7 @@ fn parts(page: Page) -> &'static [Part] {
         Page::Home => &[Part::Capture, Part::OpenSettings],
         Page::Settings => &[
             Part::Back,
+            Part::Premium,
             Part::Shortcut,
             // Before its setting, which it sits on.
             Part::ScreenKeysInfo,
