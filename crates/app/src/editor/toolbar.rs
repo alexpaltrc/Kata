@@ -26,8 +26,8 @@ use crate::{settings::EditorSettings, strings::strings};
 
 /// Between the window's edges and the controls, and between related controls.
 const EDGE: f32 = 12.0;
-/// Between the last control and the caption buttons.
-const END: f32 = 16.0;
+/// Between the settings button and the caption buttons, as in the main window.
+const BAR_GAP: f32 = 8.0;
 /// Between the window's bottom edge and the dock.
 const BOTTOM: f32 = 12.0;
 /// Between the dock and the options above it.
@@ -134,6 +134,7 @@ pub enum Part {
     Form,
     Crop,
     Name,
+    Settings,
     Add,
     Folder,
 }
@@ -181,6 +182,8 @@ pub struct Toolbar {
     forms: Dock,
     name: Name,
     folder: IconButton,
+    /// Opens Kata's settings, from the end of the title bar.
+    settings: IconButton,
     /// Takes another capture, from its island before the dock; and its glyph, which
     /// goes with the pointer that drags it.
     add: IconButton,
@@ -257,6 +260,7 @@ impl Toolbar {
             forms: Dock::arced(forms, settings.form),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
+            settings: IconButton::new(fonts.icon('\u{E713}', 16.0)?, strings.settings),
             add: IconButton::new(fonts.icon('\u{E710}', 16.0)?, strings.new_capture),
             caption: Caption::new(fonts, strings.caption)?,
             plus: fonts.icon('\u{E710}', 16.0)?,
@@ -288,7 +292,7 @@ impl Toolbar {
     /// The narrowest the window fits the toolbar in, in DIPs: the title bar's
     /// controls beside the caption buttons, and the widest capsule at the bottom.
     pub fn min_width(&self) -> f32 {
-        let title = EDGE + name::MIN + END + Caption::WIDTH;
+        let title = EDGE + name::MIN + EDGE + IconButton::WIDTH + BAR_GAP + Caption::WIDTH;
         let options = Tool::ALL
             .map(|tool| self.options_width(tool))
             .into_iter()
@@ -339,7 +343,11 @@ impl Toolbar {
         self.window = window;
         self.caption.layout(window.0, TITLE_BAR);
         let center = (window.0 / 2.0, TITLE_BAR / 2.0);
-        self.name.place(EDGE, self.caption.left() - END, center);
+        // Before the caption buttons, and a button of its own, as in the main window.
+        let settings = self.caption.left() - BAR_GAP - IconButton::WIDTH;
+        self.settings
+            .place(settings, (TITLE_BAR - IconButton::HEIGHT) / 2.0);
+        self.name.place(EDGE, settings - EDGE, center);
         let island = self.island();
         let inset = (ISLAND - IconButton::WIDTH) / 2.0;
         self.folder.round(
@@ -428,6 +436,7 @@ impl Toolbar {
             Part::Form => &mut self.forms,
             Part::Crop => &mut self.crop,
             Part::Name => &mut self.name,
+            Part::Settings => &mut self.settings,
             Part::Add => &mut self.add,
             Part::Folder => &mut self.folder,
         }
@@ -888,7 +897,7 @@ impl Toolbar {
         if self.hint.target() > 0.0 {
             parts.push(Part::Crop);
         }
-        parts.extend([Part::Name, Part::Add, Part::Folder]);
+        parts.extend([Part::Name, Part::Settings, Part::Add, Part::Folder]);
         parts
     }
 
@@ -899,6 +908,7 @@ impl Toolbar {
             Part::Form => &self.forms,
             Part::Crop => &self.crop,
             Part::Name => &self.name,
+            Part::Settings => &self.settings,
             Part::Add => &self.add,
             Part::Folder => &self.folder,
         }

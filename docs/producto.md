@@ -53,7 +53,8 @@ El botón **Nuevo recorte** y, debajo, las teclas que inician una captura, como 
 La barra de título mide 48 píxeles de alto, la más alta de las dos que usa Windows 11, igual que la del editor. El título, el engranaje, la flecha de volver y los botones de la ventana comparten la misma línea, en su centro. Los botones de minimizar, maximizar y cerrar los dibuja Kata, del alto de la barra; Windows los sigue reconociendo, así que al dejar el cursor sobre Maximizar salen los diseños de acople.
 
 - Se abre al iniciar Kata. Si Kata ya está en la bandeja, abrirlo otra vez la muestra.
-- **Nuevo recorte** cierra la ventana antes de capturar, para que no salga en la captura.
+- **Nuevo recorte** cierra la ventana antes de capturar, para que no salga en la captura, y la ventana vuelve después: al cerrar el editor de esa captura, al guardarse si el editor está apagado, o enseguida si la captura se cancela. Así nadie se queda sin ventana a la que volver. Una captura tomada con el atajo o desde la bandeja no abre la ventana.
+- **Ajustes siempre a mano:** el engranaje está en la ventana principal y también en la barra de título del editor, en el mismo sitio y con el mismo botón; desde el editor abre la ventana principal en Ajustes. También está en el menú de la bandeja.
 
 ## Ajustes
 
@@ -72,7 +73,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 
 ## Bienvenida
 
-Hasta la primera captura, la ventana principal abre con la bienvenida. El icono se dibuja solo: cada esquina se traza en un color de firma, una tras otra, y se calienta hasta el naranja de Kata pasando por los colores que siguen al suyo; luego se enciende el centro. Llegan «Hola, soy Kata» y «Gratis y sin límites», el botón **Toma tu primera captura** con el atajo debajo, y el destello cruza el saludo. Si se cierra sin capturar, vuelve a aparecer la próxima vez.
+Hasta la primera captura, la ventana principal abre con la bienvenida. El icono se dibuja solo: cada esquina se traza en un color de firma, una tras otra, y se calienta hasta el naranja de Kata pasando por los colores que siguen al suyo; luego se enciende el centro. Llegan «Hola, soy Kata» y «Gratis y sin límites», el botón **Toma tu primera captura** con el atajo debajo, y el destello cruza el saludo. Si se cierra sin capturar, vuelve a aparecer la próxima vez. Si la primera captura se cancela o falla, la bienvenida vuelve sola: el botón que la pidió nunca deja a nadie sin ventana.
 
 En los primeros editores, tres señales, de una en una:
 

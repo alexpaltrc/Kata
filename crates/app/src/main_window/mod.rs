@@ -490,7 +490,7 @@ impl Main {
         match part {
             // The window gets out of the way of the capture.
             Part::Capture | Part::FirstCapture => unsafe {
-                let _ = PostMessageW(Some(self.owner), crate::CAPTURE, WPARAM(0), LPARAM(0));
+                let _ = PostMessageW(Some(self.owner), crate::CAPTURE, WPARAM(1), LPARAM(0));
                 let _ = PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
             },
             Part::OpenSettings => self.go(Page::Settings),

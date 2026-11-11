@@ -48,7 +48,8 @@ use windows::{
 
 /// Shows the main window. Starting Kata again sends it to the Kata running.
 pub const SHOW: u32 = WM_APP + 2;
-/// Starts a capture, from the main window.
+/// Starts a capture, for a window. With a nonzero `WPARAM`, the main window asks,
+/// and comes back once the capture is done with, or given up.
 pub const CAPTURE: u32 = WM_APP + 3;
 /// The capture shortcut, or whether Kata takes the screenshot keys, changed.
 pub const KEYS_CHANGED: u32 = WM_APP + 4;
@@ -61,6 +62,8 @@ pub const EDITED: u32 = WM_APP + 6;
 pub const WEIGHED: u32 = WM_APP + 7;
 /// Something of Premium's was asked for with no free tries left: Premium shows.
 pub const OFFER: u32 = WM_APP + 8;
+/// The editor asks for the settings: the main window shows them.
+pub const SETTINGS: u32 = WM_APP + 9;
 const CLASS: PCWSTR = w!("Kata");
 /// Captures started from the tray or the main window wait for it to fade away first.
 const CAPTURE_TIMER: usize = 1;
@@ -192,6 +195,9 @@ struct App {
     taskbar_created: u32,
     /// Kata's first capture, until the welcome's Ready shows it.
     first: Option<First>,
+    /// Whether the main window asked for the capture under way, and comes back
+    /// after it.
+    home: bool,
 }
 
 /// What the welcome's Ready says about the first capture, as it comes in.
@@ -218,16 +224,20 @@ impl App {
             screen_keys: settings.screen_keys.then(|| screen_keys::take(hwnd)),
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
             first: None,
+            home: false,
         })
     }
 
     fn handle(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> bool {
         match message {
-            WM_HOTKEY | SCREEN_KEY => self.capture(),
+            WM_HOTKEY | SCREEN_KEY => {
+                self.home = false;
+                self.capture();
+            }
             tray::MESSAGE => match tray::event(wparam, lparam) {
-                Some(tray::Event::Activate) => self.capture_soon(),
+                Some(tray::Event::Activate) => self.capture_for(false),
                 Some(tray::Event::Menu { x, y }) => match self.tray.menu(x, y) {
-                    Some(tray::Command::Capture) => self.capture_soon(),
+                    Some(tray::Command::Capture) => self.capture_for(false),
                     Some(tray::Command::OpenFolder) => export::open_folder(),
                     Some(tray::Command::Settings) => self.show(Page::Settings),
                     Some(tray::Command::ReplayWelcome) => {
@@ -241,7 +251,8 @@ impl App {
             },
             SHOW => self.show(Page::Home),
             OFFER => self.show(Page::Premium),
-            CAPTURE => self.capture_soon(),
+            SETTINGS => self.show(Page::Settings),
+            CAPTURE => self.capture_for(wparam.0 != 0),
             KEYS_CHANGED => {
                 let settings = Settings::load();
                 self.tray.set_shortcut(&settings.hotkey.label());
@@ -257,6 +268,9 @@ impl App {
                     if !editor::is_open() {
                         self.ready();
                     }
+                } else if !editor::is_open() {
+                    // The main window asked for that capture: it comes back.
+                    self.show(Page::Home);
                 }
             }
             WEIGHED => {
@@ -293,14 +307,15 @@ impl App {
             Ok(shot) => shot,
             Err(error) => {
                 report("capture", &error);
-                editor::resume();
+                self.given_up();
                 return;
             }
         };
         let Some((area, image, shown)) = overlay::select(&shot) else {
-            editor::resume();
+            self.given_up();
             return;
         };
+        let home = std::mem::take(&mut self.home);
         // An editor that asked for it to dock takes it.
         if editor::take(&image) {
             if Settings::load().sound {
@@ -333,7 +348,8 @@ impl App {
                 self.hwnd,
                 capture,
                 settings.tool_names,
-                first,
+                // The window that asked for it hears when the editor closes.
+                first || home,
             );
         } else {
             let thumbnail = first.then(|| Thumbnail::of(&capture.image));
@@ -342,8 +358,26 @@ impl App {
             if let Some(first) = &mut self.first {
                 first.thumbnail = thumbnail;
                 self.ready();
+            } else if home {
+                self.show(Page::Home);
             }
         }
+    }
+
+    /// No capture came of the one under way: whoever asked for it comes back, the
+    /// editor that got out of its way or the main window.
+    fn given_up(&mut self) {
+        editor::resume();
+        if std::mem::take(&mut self.home) {
+            self.show(Page::Home);
+        }
+    }
+
+    /// Starts a capture in a moment: for the main window, which comes back after
+    /// it, if `home`.
+    fn capture_for(&mut self, home: bool) {
+        self.home = home;
+        self.capture_soon();
     }
 
     /// Shows the welcome's Ready with the first capture, once it's left.

@@ -1222,6 +1222,10 @@ impl Editor {
             Part::Crop => self.crop(),
             Part::Name => self.start_naming(),
             Part::Add => self.add_capture(None),
+            Part::Settings => {
+                let settings = crate::SETTINGS;
+                let _ = unsafe { PostMessageW(Some(self.owner), settings, WPARAM(0), LPARAM(0)) };
+            }
             Part::Folder => {
                 settings::hinted(Hint::Saved, true);
                 self.output.show();
