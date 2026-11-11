@@ -39,6 +39,7 @@ Reglas:
 - **El nombre** va arriba, al centro del editor. Con un clic se escribe; la fecha y la hora se quedan delante, para que todas las capturas, con nombre o sin él, se ordenen solas por antigüedad: `2026-11-03 14.32.05 - Pedidos.png`. El archivo cambia de nombre al terminar (Intro, un clic fuera o al cerrar el editor). Esc deja el de antes, y un nombre vacío vuelve a la fecha y la hora. Sin nombre, tras la fecha dice «Ponle nombre», en gris. Al pasar el cursor aparecen un asa de puntos a la izquierda (se arrastra) y un lápiz a la derecha (se renombra). Al abrir el editor lo cruza un destello de colores (azul, violeta, rosa y naranja, siempre los mismos, luminosos en el tema oscuro y más intensos en el claro), para que se note que está ahí, y otra vez al cambiarlo.
 - **Arrastrar la captura:** el nombre, arrastrado, lleva el archivo a una carpeta, un documento, un chat o un correo. Se copia: la captura conserva el suyo. Al primer movimiento, la captura despega: se vuelve una tarjeta pequeña de esquinas redondeadas, apenas inclinada, y vuela hasta el cursor mientras la cruza el destello del nombre. La tarjeta lleva el sello de Kata: una sombra honda y suave, un brillo leve y un borde fino con los colores del destello. Desde ahí viaja con el cursor, también sobre el editor; mientras tanto, la captura se hunde y se atenúa un poco, y vuelve al soltar. Si se suelta sobre el editor o se cancela con Esc, la tarjeta vuelve volando a la captura.
 - **El botón de la carpeta** va abajo, en una isla propia junto a la barra de herramientas: es parte de la barra, pero no una herramienta. Abre la carpeta de las capturas, con esta seleccionada. Al pie de la carpeta, un check dice que la captura está guardada: con cada guardado se vuelve a trazar, en el primero de los colores de firma, y se calienta hasta el naranja de Kata, como las esquinas del icono. Dura 0,7 s y no dice nada más: quien edita mucho solo ve un trazo breve.
+- **El botón «+»** va en otra isla, antes de la barra: toma otra captura, con el editor fuera de su camino, igual que el atajo. Arrastrado sobre la captura, ilumina el lugar donde aterrizaría una nueva, como al arrastrar una imagen desde el Explorador; al soltarlo ahí, Kata toma la captura y esta llega a ese lugar como una tarjeta desde el cursor. Si la captura se cancela, el editor vuelve. Juntar capturas es de Premium.
 - **Deshacer** funciona mientras el editor está abierto. Al cerrarlo, los cambios quedan fijos en el archivo.
 
 ## Bandeja
@@ -64,6 +65,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 | Haz de Kata tu app de capturas | Desactivado | Las teclas de captura de Windows, `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`) y `Win + Mayús + S`, abren el recorte de Kata en vez de Recortes. Se llama igual que en Lista. Apagado, vuelven a Windows al instante. Lo explica el icono «i» de al lado, al dejar el cursor quieto encima. |
 | Abrir el editor al capturar | Activado | Apagado, la captura solo se copia y se guarda. |
 | Mostrar los nombres de las herramientas | Desactivado | El nombre de cada herramienta, siempre a la vista debajo de su icono. |
+| Color de formas y pasos | Naranja | Cinco colores listos: naranja, rojo, rosa, azul y verde, igual de vivos y con el blanco del número siempre legible. El sexto es de Premium: un tono a elegir entre todos, con un deslizador, que Kata mantiene vivo y nunca tan claro que el número se pierda. Vale para las capturas que se editen después. |
 | Sonido | Activado | Al encenderlo suena, para oírlo. |
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |
 | Iniciar con Windows | Desactivado | Kata arranca en la bandeja, sin abrir ventanas. |
@@ -95,7 +97,7 @@ Cuatro esquinas que enmarcan un área iluminada: una captura y su Foco. En el na
 - **Compresión: lo que sigue.** Lo más prometedor del plan ya está hecho; las ideas que quedan, en [compresion.md](compresion.md#lo-que-sigue).
 - **Bienvenida (onboarding).** Sus cinco fases (hola, la primera captura, el editor, Lista y Premium) están hechas: ver [Bienvenida](#bienvenida). Falta que Alex las pruebe y conectar «Obtener Premium» con la compra en la Store.
 - **Más idiomas:** al menos cinco antes de vender, y atajos que funcionen con cualquier distribución de teclado.
-- **Juntar capturas: lo que sigue.** Pegar con `Ctrl + V` una captura para juntarla y que la ventana crezca con la composición. Juntar capturas es del Premium (decidido); falta cerrarlo cuando la compra esté conectada.
+- **Juntar capturas: lo que sigue.** Pegar con `Ctrl + V` una captura para juntarla y que la ventana crezca con la composición.
 - **Grabar video, a futuro.** Antes de decidir nada, analizar si Kata podría grabar la pantalla: qué permite Windows, si la app seguiría siendo igual de ligera y rápida, y si no la desvía de su enfoque (capturas para manuales). Con eso, Alex decide.
 - **Ajustes: cómo se llega y dónde está el engranaje.** Hay quien nunca usa la bandeja, y el engranaje de la ventana principal puede estar mejor puesto. Van de la mano: Alex y Claude evalúan juntos la forma más natural de llegar a Ajustes.
 
@@ -105,9 +107,10 @@ Kata no se vende hasta tener la bienvenida y al menos cinco idiomas: español, i
 
 - **Un solo Premium, en la Microsoft Store**, que desbloquea todo de una vez: unos 10 USD en un pago único, o unos 5 USD al año. El pago único es la opción que conviene.
 - **Lo gratis queda completo para el día a día**, sin sentirse obligado a pagar, incluido Kata como app de capturas de Windows (`Impr Pant`). Lo premium es lo que personaliza o va más allá:
-  - **Atajo a medida.** Gratis, 3 o 4 a elegir.
-  - **Colores a medida** en formas y pasos. Gratis, de 3 a 5.
+  - **Atajo a medida.** Gratis, el que viene y `Impr Pant` con Kata como app de capturas.
+  - **Color a medida** en formas y pasos. Gratis, cinco.
   - **Juntar varias capturas en una.**
+- **Probar antes de pagar.** Cada una de las tres se puede usar gratis tres veces, sin registro ni reloj: elegir un atajo propio, elegir un color propio y juntar una captura. Ajustes dice cuántas pruebas quedan bajo el atajo y el color. Al acabarse, usarla lleva a la página de Premium. Mientras Kata no se vende, las pruebas solo cuentan en Kata Dev; en Kata todo es gratis.
 - **Precio justo en cada país.** El precio de referencia se ajusta al poder adquisitivo de cada país con una sola cifra pública para todos: el nivel de precios del Banco Mundial (indicador `PA.NUS.PPPC.RF`, cuánto cuestan las cosas allí comparado con Estados Unidos). Partner Center permite fijar un precio distinto en cada mercado; se redondea a un precio que se lea bien en la moneda local.
 
 ## Fuera de alcance por ahora

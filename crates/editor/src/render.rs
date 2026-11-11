@@ -6,13 +6,13 @@ use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::thread;
 
-use crate::document::radii;
-use crate::geometry::{RoundedRect, center, ellipse};
-use crate::{BLUR_LEVELS, Blur, Figure, Frame, Image, Rect, Spot, Step, figure, ink, marker};
+use crate::geometry::{RoundedRect, center};
+use crate::{Blur, Figure, Image, Rect, Spot, Step, figure, ink, marker};
 
-/// How far each blur level spreads every pixel, in pixels at 100 % scale: the
-/// standard deviation of the Gaussian blur it follows.
-const BLUR_SIZES: [f32; BLUR_LEVELS] = [10.0, 16.0, 26.0];
+/// How far a blur spreads every pixel, in pixels at 100 % scale: the standard
+/// deviation of the Gaussian blur it follows. Far enough that nothing under it can
+/// be read.
+const BLUR_SIZE: f32 = 26.0;
 /// A blur first averages the image into cells this many times smaller than its
 /// spread, so a strong blur costs no more than a soft one. Bigger cells would let fine
 /// detail, such as text, mottle the blur.
@@ -62,9 +62,8 @@ struct Patch {
     pixels: Image,
 }
 
-/// The image blurred all over at a blur level.
+/// The image blurred all over, for what's around a focus.
 struct Haze {
-    level: usize,
     pixels: Image,
 }
 
@@ -159,17 +158,15 @@ impl Renderer {
             }
         }
 
-        // Around a focus that blurs, the haze follows `base`, and a change in it
-        // spreads to the cells beside.
-        let level = focus.and_then(|spot| spot.blur);
+        // Around a focus, the haze follows `base`, and a change in it spreads to the
+        // cells beside.
         let mut dirty = stale.clone();
-        if self.haze.as_ref().map(|haze| haze.level) != level {
-            self.haze = level.map(|level| Haze {
-                level,
+        if self.haze.is_some() != focus.is_some() {
+            self.haze = focus.map(|_| Haze {
                 pixels: blurred(
                     &self.base,
                     bounds,
-                    Kernel::new(level, self.scale),
+                    Kernel::new(self.scale),
                     self.seed,
                     self.cores,
                 ),
@@ -177,8 +174,8 @@ impl Renderer {
         } else if self.haze.is_some() {
             dirty = stale.iter().map(|&area| self.rehaze(area)).collect();
         }
-        // Showing, hiding or blurring around the focus changes the whole image.
-        if self.focus.map(|spot| spot.blur) != focus.map(|spot| spot.blur) {
+        // Showing or hiding the focus changes the whole image.
+        if self.focus.is_some() != focus.is_some() {
             dirty = vec![bounds];
         } else if let Some(old) = self.focus
             && let Some(new) = focus
@@ -226,7 +223,7 @@ impl Renderer {
 
     fn patch(&self, image: &Image, blur: Blur) -> Option<Patch> {
         let area = blur.rect.intersect(&image.bounds())?;
-        let kernel = Kernel::new(blur.level, self.scale);
+        let kernel = Kernel::new(self.scale);
         Some(Patch {
             blur,
             area,
@@ -240,7 +237,7 @@ impl Renderer {
         let Some(haze) = &mut self.haze else {
             return area;
         };
-        let kernel = Kernel::new(haze.level, self.scale);
+        let kernel = Kernel::new(self.scale);
         let (cell, reach) = (kernel.cell as i32, (kernel.reach() * kernel.cell) as i32);
         let bounds = self.base.bounds();
         // On the image's grid of cells, as the haze was blurred all at once.
@@ -272,23 +269,17 @@ impl Renderer {
             0
         };
         let lit = spot.lit(bounds).inflate(reach + 1);
-        let border = spot.border(bounds, self.scale);
-        let ink = figure::change(None, border.as_ref());
-        let all = ink.iter().fold(lit, |all, part| all.union(part));
-        all.intersect(&bounds).unwrap_or_default()
+        lit.intersect(&bounds).unwrap_or_default()
     }
 
-    /// Redraws `area` of the output: `base` in the focus's light, with its border, the
-    /// figures and then the steps on top.
+    /// Redraws `area` of the output: `base` in the focus's light, with the figures
+    /// and then the steps on top.
     fn compose(&mut self, area: Rect) {
         let bounds = self.base.bounds();
         let Some(area) = area.intersect(&bounds) else {
             return;
         };
         self.light(area);
-        if let Some(border) = self.focus.and_then(|spot| spot.border(bounds, self.scale)) {
-            figure::draw(&mut self.output, &border, area, self.cores, self.ink);
-        }
         for figure in &self.figures {
             figure::draw(&mut self.output, figure, area, self.cores, self.ink);
         }
@@ -332,9 +323,9 @@ impl Renderer {
 struct Light {
     /// Where the magnified area shows.
     lit: Rect,
-    edge: Edge,
+    edge: RoundedRect,
     /// The shadow under a magnified area, and its reach.
-    shadow: Option<(Edge, f32)>,
+    shadow: Option<(RoundedRect, f32)>,
     /// Where each column and row of `lit` reads from.
     columns: Vec<Tap>,
     rows: Vec<Tap>,
@@ -343,12 +334,7 @@ struct Light {
 impl Light {
     fn new(spot: Spot, bounds: Rect, scale: f32) -> Self {
         let lit = spot.lit(bounds);
-        let edge = |rect: Rect| match spot.frame {
-            Frame::Ellipse => Edge::Oval(center(rect), radii(rect)),
-            Frame::Soft | Frame::Rectangle => {
-                Edge::Round(RoundedRect::new(rect, spot.corner(bounds, scale)))
-            }
-        };
+        let edge = |rect: Rect| RoundedRect::new(rect, Spot::corner(scale));
         let shadow = (spot.zoom > 1.0).then(|| {
             let dropped = lit.offset(0, (SHADOW_DROP * scale).round() as i32);
             (edge(dropped), SHADOW_REACH * scale)
@@ -419,28 +405,10 @@ impl Light {
         if !(lit.top..lit.bottom).contains(&y) {
             return 0..0;
         }
-        let (left, right) = match &self.edge {
-            Edge::Round(shape) => {
-                let corner = shape.radius.ceil() as i32;
-                let clear = (lit.top + corner..lit.bottom - corner).contains(&y);
-                let inset = if clear { 0 } else { corner };
-                (lit.left + inset, lit.right - inset)
-            }
-            Edge::Oval(center, radii) => {
-                // Inside this smaller ellipse, every pixel lies half a pixel in or more,
-                // so it's fully lit.
-                let shrink = 1.0 - 0.5 / radii.0.min(radii.1);
-                let (across, down) = (radii.0 * shrink, radii.1 * shrink);
-                let dy = y as f32 + 0.5 - center.1;
-                if shrink <= 0.0 || dy.abs() >= down {
-                    return 0..0;
-                }
-                let half = across * (1.0 - (dy / down).powi(2)).sqrt();
-                let left = (center.0 - half - 0.5).ceil() as i32;
-                let right = (center.0 + half - 0.5).floor() as i32 + 1;
-                (left.max(lit.left), right.min(lit.right))
-            }
-        };
+        let corner = self.edge.radius.ceil() as i32;
+        let clear = (lit.top + corner..lit.bottom - corner).contains(&y);
+        let inset = if clear { 0 } else { corner };
+        let (left, right) = (lit.left + inset, lit.right - inset);
         left..right.max(left)
     }
 
@@ -496,23 +464,6 @@ impl Light {
     }
 }
 
-/// The edge of a lit area or of its shadow.
-enum Edge {
-    Round(RoundedRect),
-    /// An ellipse's center and radii.
-    Oval((f32, f32), (f32, f32)),
-}
-
-impl Edge {
-    /// How far `point` lies outside the edge; negative inside.
-    fn distance(&self, point: (f32, f32)) -> f32 {
-        match self {
-            Self::Round(shape) => shape.distance(point),
-            Self::Oval(center, radii) => ellipse(point, *center, *radii),
-        }
-    }
-}
-
 /// Where a magnified column or row reads from: between `near` and `far`, `weight`
 /// 256ths of the way.
 #[derive(Clone, Copy)]
@@ -565,9 +516,9 @@ struct Kernel {
 }
 
 impl Kernel {
-    /// The kernel for blur `level` at display `scale`.
-    fn new(level: usize, scale: f32) -> Self {
-        let size = BLUR_SIZES[level] * scale;
+    /// The kernel for a blur at display `scale`.
+    fn new(scale: f32) -> Self {
+        let size = BLUR_SIZE * scale;
         let cell = (size / CELLS_PER_SIZE).round().max(1.0) as usize;
         let side = cell as f32;
         // Averaging into cells and blending them back blur a little too, and the
@@ -832,7 +783,7 @@ mod tests {
     }
 
     fn blur(rect: Rect) -> Blur {
-        Blur { rect, level: 0 }
+        Blur { rect }
     }
 
     #[test]
@@ -900,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn blur_spreads_as_far_as_its_level_says() {
+    fn blur_spreads_as_far_as_it_says() {
         // An edge from black to white: a Gaussian blur's spread is half the distance
         // its ramp takes from 16 % to 84 % of the way.
         let width = 400;
@@ -908,50 +859,26 @@ mod tests {
             .flat_map(|at| [if at % width < width / 2 { 0 } else { 255 }; 4])
             .collect();
         let image = Image::new(width as u32, 100, pixels);
-        for (level, size) in BLUR_SIZES.iter().enumerate() {
-            let blurred = blurred(&image, image.bounds(), Kernel::new(level, 1.0), 7, 4);
-            // Down a column, the grain averages out.
-            let column = |x: i32| {
-                (0..100)
-                    .map(|y| f32::from(pixel(&blurred, x, y)[0]))
-                    .sum::<f32>()
-                    / 100.0
-            };
-            let reach = |share: f32| (0..width).find(|&x| column(x) >= share * 255.0);
-            let spread = (reach(0.8413).unwrap() - reach(0.1587).unwrap()) as f32 / 2.0;
-            assert!(
-                (spread - size).abs() <= size * 0.1,
-                "level {level}: {spread}"
-            );
-        }
-    }
-
-    #[test]
-    fn focus_dims_around_and_keeps_inside() {
-        let image = stripes();
-        let mut renderer = Renderer::new(&image, 1.0);
-        let focus = Spot {
-            rect: Rect::new(10, 10, 50, 40),
-            zoom: 1.0,
-            blur: None,
-            frame: Frame::Soft,
+        let blurred = blurred(&image, image.bounds(), Kernel::new(1.0), 7, 4);
+        // Down a column, the grain averages out.
+        let column = |x: i32| {
+            (0..100)
+                .map(|y| f32::from(pixel(&blurred, x, y)[0]))
+                .sum::<f32>()
+                / 100.0
         };
-        renderer.update(&image, &[], Some(focus), &[], &[]);
-        let output = renderer.output();
-        assert_eq!(pixel(output, 1, 1), [128, 128, 128, 255]);
-        assert_eq!(pixel(output, 30, 20), pixel(&image, 30, 20));
-        assert_eq!(pixel(output, 31, 20), pixel(&image, 31, 20));
+        let reach = |share: f32| (0..width).find(|&x| column(x) >= share * 255.0);
+        let spread = (reach(0.8413).unwrap() - reach(0.1587).unwrap()) as f32 / 2.0;
+        assert!((spread - BLUR_SIZE).abs() <= BLUR_SIZE * 0.1, "{spread}");
     }
 
     #[test]
-    fn focus_can_blur_around_too() {
+    fn focus_dims_and_blurs_around_and_keeps_inside() {
         let image = stripes();
         let mut renderer = Renderer::new(&image, 1.0);
         let focus = Spot {
             rect: Rect::new(10, 10, 50, 40),
             zoom: 1.0,
-            blur: Some(0),
-            frame: Frame::Soft,
         };
         renderer.update(&image, &[], Some(focus), &[], &[]);
         let output = renderer.output();
@@ -973,8 +900,6 @@ mod tests {
         let focus = Spot {
             rect: Rect::new(24, 16, 40, 32),
             zoom: 2.0,
-            blur: None,
-            frame: Frame::Soft,
         };
         renderer.update(&image, &[], Some(focus), &[], &[]);
         // The lit area spans columns 16..48 around the same center, and each column
@@ -987,48 +912,6 @@ mod tests {
     }
 
     #[test]
-    fn a_framed_focus_is_edged_in_ink() {
-        let white = [255; 4].repeat(100 * 100);
-        let image = Image::new(100, 100, white);
-        for frame in [Frame::Rectangle, Frame::Ellipse] {
-            let mut renderer = Renderer::new(&image, 1.0);
-            let focus = Spot {
-                rect: Rect::new(10, 10, 90, 70),
-                zoom: 1.0,
-                blur: None,
-                frame,
-            };
-            renderer.update(&image, &[], Some(focus), &[], &[]);
-            let output = renderer.output();
-            // Across the left side: the edge, the orange, the edge, and the lit area;
-            // and away from it, the dimmed image. An ellipse curves, so its edges
-            // take a hint of orange.
-            let white = |x| pixel(output, x, 40).iter().all(|&v| v >= 252);
-            assert!(white(10) && white(15), "{frame:?}");
-            assert_eq!(pixel(output, 12, 40), [34, 90, 236, 255], "{frame:?}");
-            assert_eq!(pixel(output, 50, 40), [255; 4], "{frame:?}");
-            assert_eq!(pixel(output, 2, 40), [128, 128, 128, 255], "{frame:?}");
-        }
-    }
-
-    #[test]
-    fn an_ellipse_focus_leaves_its_corners_dim() {
-        let image = stripes();
-        let mut renderer = Renderer::new(&image, 1.0);
-        let focus = Spot {
-            rect: Rect::new(4, 4, 60, 44),
-            zoom: 1.0,
-            blur: None,
-            frame: Frame::Ellipse,
-        };
-        renderer.update(&image, &[], Some(focus), &[], &[]);
-        let output = renderer.output();
-        assert_eq!(pixel(output, 5, 5), [128, 128, 128, 255]);
-        assert_eq!(pixel(output, 32, 24), pixel(&image, 32, 24));
-        assert_eq!(pixel(output, 33, 24), pixel(&image, 33, 24));
-    }
-
-    #[test]
     fn what_is_drawn_whole_is_fully_inside() {
         let bounds = Rect::new(0, 0, 200, 200);
         let rects = [
@@ -1037,21 +920,14 @@ mod tests {
             Rect::new(10, 50, 190, 52),
         ];
         for rect in rects {
-            for frame in [Frame::Soft, Frame::Rectangle, Frame::Ellipse] {
-                for zoom in [1.0, 1.5] {
-                    let spot = Spot {
-                        rect,
-                        zoom,
-                        blur: None,
-                        frame,
-                    };
-                    let light = Light::new(spot, bounds, 1.25);
-                    for y in bounds.top - 1..=bounds.bottom {
-                        for x in light.inner(y) {
-                            let point = (x as f32 + 0.5, y as f32 + 0.5);
-                            let distance = light.edge.distance(point);
-                            assert!(distance <= -0.5 + 1e-4, "{spot:?} {x},{y}: {distance}");
-                        }
+            for zoom in [1.0, 1.5] {
+                let spot = Spot { rect, zoom };
+                let light = Light::new(spot, bounds, 1.25);
+                for y in bounds.top - 1..=bounds.bottom {
+                    for x in light.inner(y) {
+                        let point = (x as f32 + 0.5, y as f32 + 0.5);
+                        let distance = light.edge.distance(point);
+                        assert!(distance <= -0.5 + 1e-4, "{spot:?} {x},{y}: {distance}");
                     }
                 }
             }
@@ -1064,11 +940,9 @@ mod tests {
         let mark = |left, top| Step {
             rect: Rect::new(left, top, left + 12, top + 12),
         };
-        let hazy = |zoom, level| Spot {
+        let hazy = |zoom| Spot {
             rect: Rect::new(20, 20, 36, 36),
             zoom,
-            blur: Some(level),
-            frame: Frame::Soft,
         };
         let figure = |form, from, to| Figure {
             form,
@@ -1098,8 +972,6 @@ mod tests {
                 Some(Spot {
                     rect: Rect::new(20, 20, 40, 40),
                     zoom: 1.5,
-                    blur: None,
-                    frame: Frame::Ellipse,
                 }),
                 &[square, arrow],
                 &[mark(30, 4), mark(2, 30)],
@@ -1109,8 +981,6 @@ mod tests {
                 Some(Spot {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 2.0,
-                    blur: None,
-                    frame: Frame::Rectangle,
                 }),
                 &[ring, arrow],
                 &[mark(2, 30)],
@@ -1118,13 +988,10 @@ mod tests {
             (
                 &[Blur {
                     rect: Rect::new(10, 10, 30, 30),
-                    level: 2,
                 }],
                 Some(Spot {
                     rect: Rect::new(30, 10, 50, 30),
                     zoom: 1.0,
-                    blur: None,
-                    frame: Frame::Ellipse,
                 }),
                 &[figure(Form::Arrow, (8, 40), (8, 40)), ring],
                 &[mark(2, 30), mark(40, 30)],
@@ -1132,25 +999,25 @@ mod tests {
             // A blur moving away from the image's corner, under a haze.
             (
                 &[blur(Rect::new(0, 0, 20, 20))],
-                Some(hazy(1.0, 0)),
+                Some(hazy(1.0)),
                 &[ring],
                 &[],
             ),
             (
                 &[blur(Rect::new(40, 30, 52, 42))],
-                Some(hazy(1.0, 0)),
+                Some(hazy(1.0)),
                 &[ring],
                 &[],
             ),
             (
                 &[blur(Rect::new(44, 30, 56, 42))],
-                Some(hazy(1.5, 0)),
+                Some(hazy(1.5)),
                 &[],
                 &[],
             ),
             (
                 &[blur(Rect::new(44, 30, 56, 42))],
-                Some(hazy(1.5, 2)),
+                Some(hazy(1.5)),
                 &[arrow],
                 &[],
             ),

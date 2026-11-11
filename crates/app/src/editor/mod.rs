@@ -24,8 +24,8 @@ use std::{
 };
 
 use kata_editor::{
-    BLUR_LEVELS, Blur, Collage, Document, Edits, FOCUS_ZOOM, Figure, Focus, Form, Image, Placement,
-    Rect, Renderer, STEP_SIZES, Shape, Spot, Step,
+    Blur, Collage, Document, Edits, FOCUS_ZOOM, Figure, Focus, Form, Image, Placement, Rect,
+    Renderer, STEP_SIZES, Shape, Spot, Step,
 };
 use kata_ui::{
     Graphics,
@@ -86,8 +86,6 @@ use toolbar::{Part, Tool, Toolbar};
 
 /// The title bar's height, in DIPs.
 const TITLE_BAR: f32 = 48.0;
-/// How strongly Kata blurs: the strongest level, so nothing under it can be read.
-const BLUR: usize = BLUR_LEVELS - 1;
 /// The least room around the capture.
 const MARGIN: f32 = 24.0;
 /// The least of the capture a resized window keeps showing.
@@ -1111,17 +1109,12 @@ impl Editor {
         let rect = solid(Rect::new(start.0, start.1, start.0, start.1)).moved_inside(&bounds);
         let shape = match self.toolbar.tool() {
             Tool::Blur => {
-                self.edits.blurs.push(Blur { rect, level: BLUR });
+                self.edits.blurs.push(Blur { rect });
                 Shape::Blur(self.edits.blurs.len() - 1)
             }
             Tool::Focus => {
                 // There's one focus at most: a new one replaces it.
-                self.edits.focus = Some(Focus {
-                    rect,
-                    // It shows one part alone: what's around it is blurred.
-                    blur: Some(BLUR),
-                    frame: kata_editor::Frame::Soft,
-                });
+                self.edits.focus = Some(Focus { rect });
                 self.zoom = Animation::idle(1.0);
                 Shape::Focus
             }
@@ -1958,8 +1951,8 @@ impl Editor {
     fn radius(&self, shape: Shape) -> f32 {
         match shape {
             Shape::Blur(_) => 0.0,
-            Shape::Focus => self.edits.focus.map_or(0.0, |focus| {
-                let corner = focus.spot().corner(self.whole(), self.capture_scale);
+            Shape::Focus => self.edits.focus.map_or(0.0, |_| {
+                let corner = Spot::corner(self.capture_scale);
                 corner * self.view.zoom
             }),
             Shape::Figure(index) => self

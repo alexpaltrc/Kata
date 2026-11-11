@@ -18,8 +18,7 @@ mod render;
 
 pub use collage::{Collage, Divider, Placement, Side, Slot};
 pub use document::{
-    BLUR_LEVELS, Blur, Document, Edits, FOCUS_ZOOM, Figure, Focus, Form, Frame, STEP_SIZES, Shape,
-    Spot, Step,
+    Blur, Document, Edits, FOCUS_ZOOM, Figure, Focus, Form, STEP_SIZES, Shape, Spot, Step,
 };
 pub use geometry::Rect;
 pub use image::Image;

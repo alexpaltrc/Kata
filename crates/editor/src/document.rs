@@ -2,11 +2,8 @@ use std::sync::Arc;
 
 use crate::collage::{Collage, Placement, Side};
 use crate::figure::{self, LINE, Trace};
-use crate::geometry::{center, ellipse};
 use crate::{Image, Rect, marker::STEP_SIZE};
 
-/// How strongly each blur level hides what's under it: Soft, Medium, Strong.
-pub const BLUR_LEVELS: usize = 3;
 /// How much a focus magnifies what it lights: enough to lift it off the capture,
 /// and little enough to cover no more than its edges do.
 pub const FOCUS_ZOOM: f32 = 1.25;
@@ -21,28 +18,13 @@ const FOCUS_CORNER: f32 = 8.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Blur {
     pub rect: Rect,
-    /// Below `BLUR_LEVELS`.
-    pub level: usize,
 }
 
-/// How a focus's lit area is framed: softly, its corners rounded, or by a line of
-/// Kata's ink around a rectangle or an ellipse.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Frame {
-    #[default]
-    Soft,
-    Rectangle,
-    Ellipse,
-}
-
-/// The one area that stays lit while the rest of the image darkens, and blurs if
-/// asked.
+/// The one area that stays lit, and sharp, while the rest of the image darkens and
+/// blurs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Focus {
     pub rect: Rect,
-    /// The blur level around it, if it blurs what's around.
-    pub blur: Option<usize>,
-    pub frame: Frame,
 }
 
 impl Focus {
@@ -50,21 +32,16 @@ impl Focus {
         Spot {
             rect: self.rect,
             zoom: FOCUS_ZOOM,
-            blur: self.blur,
-            frame: self.frame,
         }
     }
 }
 
-/// A focus as drawn: the area it lights, how much it magnifies it, how it blurs
-/// what's around and how it's framed. The zoom is free so it can animate between
-/// levels.
+/// A focus as drawn: the area it lights and how much it magnifies it. The zoom is
+/// free so it can animate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spot {
     pub rect: Rect,
     pub zoom: f32,
-    pub blur: Option<usize>,
-    pub frame: Frame,
 }
 
 impl Spot {
@@ -81,39 +58,15 @@ impl Spot {
         Rect::new(left, top, right, bottom)
     }
 
-    /// Whether pixel `x`, `y` is in the lit area: in its ellipse, when it's one.
+    /// Whether pixel `x`, `y` is in the lit area.
     pub fn covers(&self, x: i32, y: i32, bounds: Rect) -> bool {
-        let lit = self.lit(bounds);
-        let point = (x as f32 + 0.5, y as f32 + 0.5);
-        lit.contains(x, y)
-            && (self.frame != Frame::Ellipse || ellipse(point, center(lit), radii(lit)) <= 0.0)
+        self.lit(bounds).contains(x, y)
     }
 
-    /// The line of Kata's ink around a framed focus, as thick as a figure's on a
-    /// capture of `bounds` taken at display `scale`. Its outer edge is the lit area's,
-    /// so that edge hides under it.
-    pub fn border(&self, bounds: Rect, scale: f32) -> Option<Figure> {
-        let form = match self.frame {
-            Frame::Soft => return None,
-            Frame::Rectangle => Form::Rectangle,
-            Frame::Ellipse => Form::Ellipse,
-        };
-        let lit = self.lit(bounds);
-        Some(Figure {
-            form,
-            from: (lit.left, lit.top),
-            to: (lit.right - 1, lit.bottom - 1),
-            line: Figure::line(bounds, scale),
-        })
-    }
-
-    /// The radius of the lit area's corners, in pixels: as round as its border's, and
-    /// none for an ellipse.
-    pub fn corner(&self, bounds: Rect, scale: f32) -> f32 {
-        match self.border(bounds, scale) {
-            Some(border) => border.corner(),
-            None => FOCUS_CORNER * scale,
-        }
+    /// The radius of the lit area's corners, in pixels, on a capture taken at display
+    /// `scale`.
+    pub fn corner(scale: f32) -> f32 {
+        FOCUS_CORNER * scale
     }
 
     /// The area that, magnified by `zoom`, fills `lit`.
@@ -127,11 +80,6 @@ impl Spot {
         let (top, bottom) = shrink(lit.top, lit.height());
         Rect::new(left, top, right, bottom)
     }
-}
-
-/// Half the width and height of `rect`.
-pub(crate) fn radii(rect: Rect) -> (f32, f32) {
-    (rect.width() as f32 / 2.0, rect.height() as f32 / 2.0)
 }
 
 /// A numbered marker that shows the order to follow. Steps count from 1, in the
@@ -370,7 +318,7 @@ impl Edits {
         let blurs = self.blurs.iter().filter_map(|blur| {
             let carry = carry(middle(blur.rect))?;
             let rect = carry.rect(blur.rect).intersect(&carry.space)?;
-            Some(Blur { rect, ..*blur })
+            Some(Blur { rect })
         });
         let focus = self.focus.and_then(|focus| {
             let lit = focus.spot().lit(bounds);
@@ -378,7 +326,6 @@ impl Edits {
             carry.rect(lit).intersect(&carry.space)?;
             Some(Focus {
                 rect: carry.rect(focus.rect),
-                ..focus
             })
         });
         let figures = self.figures.iter().filter_map(|figure| {
@@ -696,7 +643,6 @@ mod tests {
         Edits {
             blurs: vec![Blur {
                 rect: Rect::new(left, 0, left + 10, 10),
-                level: 1,
             }],
             focus: None,
             ..Edits::default()
@@ -855,12 +801,7 @@ mod tests {
     #[test]
     fn lit_grows_around_the_center_and_stays_inside() {
         let bounds = Rect::new(0, 0, 100, 100);
-        let spot = |rect, zoom| Spot {
-            rect,
-            zoom,
-            blur: None,
-            frame: Frame::Soft,
-        };
+        let spot = |rect, zoom| Spot { rect, zoom };
         assert_eq!(
             spot(Rect::new(40, 40, 60, 60), 2.0).lit(bounds),
             Rect::new(30, 30, 70, 70)
@@ -879,17 +820,13 @@ mod tests {
             blurs: vec![
                 Blur {
                     rect: Rect::new(0, 0, 50, 50),
-                    level: 0,
                 },
                 Blur {
                     rect: Rect::new(20, 20, 70, 70),
-                    level: 0,
                 },
             ],
             focus: Some(Focus {
                 rect: Rect::new(40, 40, 50, 50),
-                blur: None,
-                frame: Frame::Soft,
             }),
             steps: vec![Step {
                 rect: Rect::new(44, 44, 60, 60),
@@ -905,63 +842,18 @@ mod tests {
     }
 
     #[test]
-    fn an_ellipse_focus_is_reached_only_inside_its_ellipse() {
-        let bounds = Rect::new(0, 0, 100, 100);
-        let mut edits = Edits {
-            focus: Some(Focus {
-                rect: Rect::new(20, 20, 80, 60),
-                blur: None,
-                frame: Frame::Ellipse,
-            }),
-            ..Edits::default()
-        };
-        assert_eq!(edits.shape_at(50, 21, 0.0, bounds), Some(Shape::Focus));
-        assert_eq!(edits.shape_at(21, 21, 0.0, bounds), None);
-        if let Some(focus) = &mut edits.focus {
-            focus.frame = Frame::Rectangle;
-        }
-        assert_eq!(edits.shape_at(21, 21, 0.0, bounds), Some(Shape::Focus));
-    }
-
-    #[test]
-    fn a_framed_focus_is_bordered_along_its_edge() {
-        let bounds = Rect::new(0, 0, 400, 300);
-        let spot = |frame| Spot {
-            rect: Rect::new(40, 30, 200, 130),
-            zoom: 1.0,
-            blur: None,
-            frame,
-        };
-        assert_eq!(spot(Frame::Soft).border(bounds, 1.0), None);
-        for frame in [Frame::Rectangle, Frame::Ellipse] {
-            let border = spot(frame).border(bounds, 1.0).unwrap();
-            assert_eq!(border.rect(), spot(frame).lit(bounds));
-            assert_eq!(border.line, Figure::line(bounds, 1.0));
-        }
-        // Its corners are as round as its border's, and an ellipse has none.
-        let rectangle = spot(Frame::Rectangle);
-        let border = rectangle.border(bounds, 1.0).unwrap();
-        assert_eq!(rectangle.corner(bounds, 1.0), border.corner());
-        assert_eq!(spot(Frame::Ellipse).corner(bounds, 1.0), 0.0);
-        assert_eq!(spot(Frame::Soft).corner(bounds, 2.0), FOCUS_CORNER * 2.0);
-    }
-
-    #[test]
     fn reshaping_a_focus_lights_the_new_outline() {
         let bounds = Rect::new(0, 0, 200, 200);
         let mut edits = Edits {
             blurs: Vec::new(),
             focus: Some(Focus {
                 rect: Rect::new(10, 10, 30, 30),
-                blur: Some(1),
-                frame: Frame::Soft,
             }),
             ..Edits::default()
         };
         let outline = Rect::new(100, 60, 160, 120);
         edits.reshape(Shape::Focus, outline, bounds);
         assert_eq!(edits.outline(Shape::Focus, bounds), Some(outline));
-        assert_eq!(edits.focus.map(|focus| focus.blur), Some(Some(1)));
     }
 
     #[test]
@@ -979,8 +871,6 @@ mod tests {
         let mut edits = blurred(0);
         edits.focus = Some(Focus {
             rect: Rect::new(0, 0, 10, 10),
-            blur: None,
-            frame: Frame::Soft,
         });
         edits.remove(Shape::Blur(3));
         edits.remove(Shape::Focus);
@@ -1034,10 +924,7 @@ mod tests {
     fn a_figure_is_under_its_line_but_not_what_it_surrounds() {
         let bounds = Rect::new(0, 0, 100, 100);
         let edits = Edits {
-            blurs: vec![Blur {
-                rect: bounds,
-                level: 0,
-            }],
+            blurs: vec![Blur { rect: bounds }],
             figures: vec![Figure {
                 form: Form::Rectangle,
                 from: (10, 10),
@@ -1110,13 +997,7 @@ mod tests {
     #[test]
     fn source_undoes_lit() {
         let rect = Rect::new(40, 30, 60, 70);
-        let lit = Spot {
-            rect,
-            zoom: 1.5,
-            blur: None,
-            frame: Frame::Soft,
-        }
-        .lit(Rect::new(0, 0, 200, 200));
+        let lit = Spot { rect, zoom: 1.5 }.lit(Rect::new(0, 0, 200, 200));
         assert_eq!(Spot::source(lit, 1.5), rect);
     }
 }
