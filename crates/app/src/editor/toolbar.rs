@@ -134,6 +134,7 @@ pub enum Part {
     Form,
     Crop,
     Name,
+    Add,
     Folder,
 }
 
@@ -180,6 +181,8 @@ pub struct Toolbar {
     forms: Dock,
     name: Name,
     folder: IconButton,
+    /// Takes another capture, from its island before the dock.
+    add: IconButton,
     caption: Caption,
     /// That the capture saved itself, which the folder button says the first few
     /// times.
@@ -252,6 +255,7 @@ impl Toolbar {
             forms: Dock::arced(forms, settings.form),
             name: Name::new(fonts, names)?,
             folder: IconButton::new(fonts.icon('\u{E838}', 16.0)?, strings.open_file_location),
+            add: IconButton::new(fonts.icon('\u{E710}', 16.0)?, strings.new_capture),
             caption: Caption::new(fonts, strings.caption)?,
             saved: None,
             check: Animation::idle(logo::CHECKING),
@@ -298,6 +302,13 @@ impl Toolbar {
         Area::new(left, self.dock_top(), ISLAND, self.tools.height())
     }
 
+    /// The island before the dock that holds the button for another capture: as the
+    /// folder's, on the other side.
+    fn add_island(&self) -> Area {
+        let left = (self.window.0 - self.tools.width()) / 2.0 - ISLAND_GAP - ISLAND;
+        Area::new(left, self.dock_top(), ISLAND, self.tools.height())
+    }
+
     /// The capture saved itself: the folder button's check draws itself again.
     pub fn saved(&mut self) {
         self.check = Animation::clock(logo::CHECKING);
@@ -319,6 +330,12 @@ impl Toolbar {
         let island = self.island();
         let inset = (ISLAND - IconButton::WIDTH) / 2.0;
         self.folder.round(
+            island.left + inset,
+            island.top + inset,
+            island.height - 2.0 * inset,
+        );
+        let island = self.add_island();
+        self.add.round(
             island.left + inset,
             island.top + inset,
             island.height - 2.0 * inset,
@@ -364,6 +381,7 @@ impl Toolbar {
         self.part_at(point).is_some()
             || (self.open).is_some_and(|tool| self.options_area(tool).contains(point))
             || self.island().contains(point)
+            || self.add_island().contains(point)
             || (self.hint.target() > 0.0 && self.hint_area().contains(point))
     }
 
@@ -397,6 +415,7 @@ impl Toolbar {
             Part::Form => &mut self.forms,
             Part::Crop => &mut self.crop,
             Part::Name => &mut self.name,
+            Part::Add => &mut self.add,
             Part::Folder => &mut self.folder,
         }
     }
@@ -506,6 +525,11 @@ impl Toolbar {
                 _ if self.owner(part).is_some() => {}
                 Part::Crop => {}
                 Part::Folder => self.draw_folder(painter, now),
+                Part::Add => {
+                    let island = self.add_island();
+                    painter.flyout(island, island.height / 2.0);
+                    self.add.draw(painter, now);
+                }
                 _ => self.get(part).draw(painter, now),
             }
         }
@@ -851,7 +875,7 @@ impl Toolbar {
         if self.hint.target() > 0.0 {
             parts.push(Part::Crop);
         }
-        parts.extend([Part::Name, Part::Folder]);
+        parts.extend([Part::Name, Part::Add, Part::Folder]);
         parts
     }
 
@@ -862,6 +886,7 @@ impl Toolbar {
             Part::Form => &self.forms,
             Part::Crop => &self.crop,
             Part::Name => &self.name,
+            Part::Add => &self.add,
             Part::Folder => &self.folder,
         }
     }

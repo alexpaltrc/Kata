@@ -2,6 +2,7 @@
 //! in focus, numbers the steps to follow and points things out with shapes. Each
 //! change reaches the clipboard and the capture's file.
 
+mod add;
 mod arrange;
 mod canvas;
 mod crop;
@@ -133,7 +134,7 @@ pub fn open(graphics: &Graphics, owner: HWND, capture: Capture, tool_names: bool
     close();
     let output = Output::new(owner, capture.image.clone());
     let back = hand_back.then_some(owner);
-    match unsafe { create(graphics, capture, output, tool_names, back) } {
+    match unsafe { create(graphics, capture, output, tool_names, back, owner) } {
         Ok(hwnd) => OPEN.set(Some(hwnd)),
         Err(error) => report("editor", &error),
     }
@@ -141,6 +142,16 @@ pub fn open(graphics: &Graphics, owner: HWND, capture: Capture, tool_names: bool
 
 pub fn is_open() -> bool {
     OPEN.get().is_some()
+}
+
+/// Whether an editor that asked for a capture to dock took `image`, just captured.
+pub fn take(image: &Image) -> bool {
+    add::take(image)
+}
+
+/// Shows again the editor that got out of the way of a capture it asked for.
+pub fn resume() {
+    add::resume();
 }
 
 pub fn close() {
@@ -155,6 +166,7 @@ unsafe fn create(
     output: Output,
     tool_names: bool,
     hand_back: Option<HWND>,
+    owner: HWND,
 ) -> Result<HWND> {
     let fonts = Fonts::new(graphics)?;
     let settings = EditorSettings::load();
@@ -263,6 +275,9 @@ unsafe fn create(
             tracking: false,
             unpublished: false,
             hand_back,
+            owner,
+            placing: false,
+            adding: None,
             access: Access::new(hwnd),
         };
         // The first frame is ready before the window shows.
@@ -493,6 +508,12 @@ struct Editor {
     unpublished: bool,
     /// The window that gets a thumbnail of the capture as the editor closes, if any.
     hand_back: Option<HWND>,
+    /// Kata's resident window, which takes the captures.
+    owner: HWND,
+    /// Whether the button for another capture is being dragged to where one would
+    /// land; and where the capture asked for lands once taken.
+    placing: bool,
+    adding: Option<Point>,
     access: Access,
 }
 
@@ -590,6 +611,7 @@ impl Editor {
                 }
             }
             dock::DOCK => return Some(LRESULT(self.docking(wparam, lparam) as isize)),
+            add::ADD => return Some(LRESULT(self.added(lparam) as isize)),
             reframe::FRAMED => self.framed_ahead(),
             // The last changes still reach the clipboard, and the name the file.
             WM_DESTROY => {
@@ -851,6 +873,8 @@ impl Editor {
             return false;
         };
         match gesture {
+            // Off its place, the button for another capture shows where one lands.
+            Gesture::Control(Part::Add) => self.adding_moved(point),
             Gesture::Control(part) => {
                 // The name, dragged far enough, carries the file away.
                 if part == Part::Name
@@ -957,6 +981,7 @@ impl Editor {
         };
         let _ = unsafe { ReleaseCapture() };
         match gesture {
+            Gesture::Control(Part::Add) if self.placing => self.adding_released(point),
             Gesture::Control(part) => {
                 if self.toolbar.control(part).release(point) {
                     self.activated(part);
@@ -1003,7 +1028,10 @@ impl Editor {
             return;
         };
         match gesture {
-            Gesture::Control(part) => self.toolbar.control(part).cancel(),
+            Gesture::Control(part) => {
+                self.adding_canceled();
+                self.toolbar.control(part).cancel();
+            }
             Gesture::Divide { .. } => self.let_go_divider(false),
             Gesture::Pan { .. } => self.cancel_pan(),
             _ => {}
@@ -1200,6 +1228,7 @@ impl Editor {
             Part::StepSize | Part::Form => self.option_changed(part),
             Part::Crop => self.crop(),
             Part::Name => self.start_naming(),
+            Part::Add => self.add_capture(None),
             Part::Folder => {
                 settings::hinted(Hint::Saved, true);
                 self.output.show();

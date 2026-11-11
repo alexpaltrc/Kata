@@ -59,6 +59,8 @@ pub const SCREEN_KEY: u32 = WM_APP + 5;
 pub const EDITED: u32 = WM_APP + 6;
 /// The first capture was weighed, with Kata and with Windows: see `weight`.
 pub const WEIGHED: u32 = WM_APP + 7;
+/// Something of Premium's was asked for with no free tries left: Premium shows.
+pub const OFFER: u32 = WM_APP + 8;
 const CLASS: PCWSTR = w!("Kata");
 /// Captures started from the tray or the main window wait for it to fade away first.
 const CAPTURE_TIMER: usize = 1;
@@ -238,6 +240,7 @@ impl App {
                 None => return false,
             },
             SHOW => self.show(Page::Home),
+            OFFER => self.show(Page::Premium),
             CAPTURE => self.capture_soon(),
             KEYS_CHANGED => {
                 let settings = Settings::load();
@@ -290,12 +293,21 @@ impl App {
             Ok(shot) => shot,
             Err(error) => {
                 report("capture", &error);
+                editor::resume();
                 return;
             }
         };
         let Some((area, image, shown)) = overlay::select(&shot) else {
+            editor::resume();
             return;
         };
+        // An editor that asked for it to dock takes it.
+        if editor::take(&image) {
+            if Settings::load().sound {
+                sound::play();
+            }
+            return;
+        }
         if settings::welcome_done() {
             weight::compare(self.hwnd, image.clone());
             self.first = Some(First {
@@ -326,6 +338,7 @@ impl App {
         } else {
             let thumbnail = first.then(|| Thumbnail::of(&capture.image));
             drop(export::Output::new(self.hwnd, capture.image));
+            editor::resume();
             if let Some(first) = &mut self.first {
                 first.thumbnail = thumbnail;
                 self.ready();

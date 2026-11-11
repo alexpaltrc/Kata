@@ -21,6 +21,7 @@ use windows::Win32::{
 };
 
 use super::{Editor, FLIGHT, View, WHITE, crop::along};
+use crate::settings::Perk;
 use crate::{
     card::{self, Pose},
     import::Phase,
@@ -240,6 +241,46 @@ impl Editor {
         docks
     }
 
+    /// A capture yet to be taken is to be placed: the zone shows where it would
+    /// land, with no card, as there's nothing of it to show.
+    pub(super) fn expect(&mut self, at: Point) {
+        self.settle();
+        self.leave_reframing();
+        // As this one for its shape: the captures share the space alike.
+        let whole = self.whole();
+        let pixels = vec![0; (whole.width() * whole.height()) as usize * Image::BYTES_PER_PIXEL];
+        let image = Image::new(whole.width() as u32, whole.height() as u32, pixels);
+        self.incoming = Some(Incoming {
+            image: Arc::new(image),
+            bitmap: None,
+            at,
+            shown: Animation::idle(0.0),
+            glint: Animation::idle(1.0),
+            place: None,
+            zone: None,
+        });
+        self.over(at);
+        self.invalidate();
+    }
+
+    /// Follows the pointer placing a capture yet to be taken. Returns whether it
+    /// would dock there.
+    pub(super) fn expected_at(&mut self, at: Point) -> bool {
+        self.over(at)
+    }
+
+    /// Stops placing a capture yet to be taken.
+    pub(super) fn unexpect(&mut self) {
+        self.leave();
+    }
+
+    /// Docks `image`, just taken, where it was placed, at `at`. Returns whether it
+    /// fit there.
+    pub(super) fn dock_at(&mut self, image: Arc<Image>, at: Point) -> bool {
+        self.enter(image, at);
+        self.drop_incoming()
+    }
+
     /// The capture left, or the drag was given up: its card and the zone fade.
     fn leave(&mut self) {
         if let Some(incoming) = &mut self.incoming {
@@ -260,9 +301,16 @@ impl Editor {
             self.leave();
             return false;
         };
+        // Joining captures is Premium's, past its free tries.
+        if !Perk::Joining.allowed() {
+            self.leave();
+            self.offer_premium();
+            return false;
+        }
         let Some(incoming) = self.incoming.take() else {
             return false;
         };
+        Perk::Joining.used();
         let card = Pose::held(self.size_of(&incoming.image), incoming.at);
         let zone = (incoming.zone.as_ref()).map(|zone| self.zone_area(zone, now));
         let before = self.before();
