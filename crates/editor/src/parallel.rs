@@ -2,9 +2,22 @@
 
 use std::{
     num::NonZero,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
 };
+
+/// What every worker does before its work, if the app says: on Windows, Kata has
+/// them give way to its windows, which this crate knows nothing of.
+static FIRST: OnceLock<fn()> = OnceLock::new();
+
+/// Has every worker do `first` before its work, from now on. Only the first call
+/// counts.
+pub fn before_work(first: fn()) {
+    let _ = FIRST.set(first);
+}
 
 /// How many pieces of work run at once.
 pub fn width() -> usize {
@@ -23,6 +36,9 @@ pub fn each<T: Send>(count: usize, work: impl Fn(usize) -> T + Sync) -> Vec<T> {
         let workers: Vec<_> = (0..threads)
             .map(|_| {
                 scope.spawn(|| {
+                    if let Some(first) = FIRST.get() {
+                        first();
+                    }
                     let mut mine = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);

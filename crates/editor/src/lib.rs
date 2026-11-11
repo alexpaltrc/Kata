@@ -22,4 +22,5 @@ pub use document::{
 };
 pub use geometry::Rect;
 pub use image::Image;
+pub use parallel::before_work;
 pub use render::Renderer;

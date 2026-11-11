@@ -613,6 +613,7 @@ impl Editor {
             reframe::FRAMED => self.framed_ahead(),
             // The last changes still reach the clipboard, and the name the file.
             WM_DESTROY => {
+                add::forget(self.hwnd);
                 import::refuse(self.hwnd);
                 self.finish_naming();
                 self.keep_framing();

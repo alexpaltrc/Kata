@@ -42,6 +42,14 @@ pub fn take(image: &Image) -> bool {
     taken
 }
 
+/// Forgets that `hwnd`'s editor asked for a capture, as it closes: its handle may
+/// go to another window.
+pub fn forget(hwnd: HWND) {
+    if AWAITING.get() == Some(hwnd) {
+        AWAITING.set(None);
+    }
+}
+
 /// Shows again the editor that got out of the way of a capture, when none came of
 /// it or it went elsewhere.
 pub fn resume() {

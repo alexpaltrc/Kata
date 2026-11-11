@@ -8,10 +8,12 @@
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     Graphics::Gdi::InvalidateRect,
+    UI::Input::KeyboardAndMouse::VK_F4,
     UI::WindowsAndMessaging::{
         HTCLOSE, HTMAXBUTTON, HTMINBUTTON, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE,
         SC_RESTORE, SIZE_MAXIMIZED, WA_INACTIVE, WM_ACTIVATE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
         WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SIZE, WM_SYSCOMMAND,
+        WM_SYSKEYDOWN,
     },
 };
 use windows::core::Result;
@@ -156,6 +158,9 @@ impl Caption {
                 self.maximized = wparam.0 == SIZE_MAXIMIZED as usize;
                 return None;
             }
+            // Alt + F4 closes the window, as in any other, though it has no menu to
+            // say so.
+            WM_SYSKEYDOWN if wparam.0 == usize::from(VK_F4.0) => self.act(hwnd, CLOSES),
             access::ACT => {
                 let button = wparam.0.checked_sub(FIRST)?;
                 self.act(hwnd, button);

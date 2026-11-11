@@ -31,7 +31,13 @@ use windows::{
     ApplicationModel::Package,
     Win32::{
         Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM},
-        System::{LibraryLoader::GetModuleHandleW, Ole::OleInitialize, Threading::CreateMutexW},
+        System::{
+            LibraryLoader::GetModuleHandleW,
+            Ole::OleInitialize,
+            Threading::{
+                CreateMutexW, GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+            },
+        },
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
             WindowsAndMessaging::{
@@ -86,6 +92,11 @@ fn main() -> Result<()> {
     };
     theme::follow_system_theme_in_menus();
     sound::prepare();
+    // Compressing a capture takes every core for a moment: its workers give way to
+    // the windows, so editing stays smooth while a capture saves.
+    kata_editor::before_work(|| unsafe {
+        let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    });
 
     let app = RefCell::new(None);
     let hwnd = unsafe { create_window(&app, &name)? };
