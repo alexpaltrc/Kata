@@ -29,7 +29,8 @@ use windows::{
         UI::{
             Controls::{WM_MOUSEHOVER, WM_MOUSELEAVE},
             Input::KeyboardAndMouse::{
-                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_ESCAPE, VK_SHIFT, VK_SNAPSHOT, VK_TAB,
+                ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_ESCAPE, VK_RETURN, VK_SHIFT,
+                VK_SNAPSHOT, VK_TAB,
             },
             Shell::{
                 FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem,
@@ -39,10 +40,10 @@ use windows::{
                 DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos, HTCAPTION, HTCLIENT,
                 IsIconic, PostMessageW, SIZE_MINIMIZED, SW_RESTORE, SW_SHOW, SetForegroundWindow,
                 SetWindowLongPtrW, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CAPTURECHANGED,
-                WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED, WM_ERASEBKGND,
-                WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE,
-                WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+                WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_DWMCOLORIZATIONCOLORCHANGED,
+                WM_ERASEBKGND, WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_KEYUP,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT,
+                WM_SETTINGCHANGE, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
             },
         },
     },
@@ -290,6 +291,9 @@ impl Main {
             WM_LBUTTONUP => self.release(self.point(lparam)),
             // Another window took the pointer.
             WM_CAPTURECHANGED => self.cancel(),
+            // While a code is entered, every key goes to it.
+            WM_KEYDOWN if self.pages.is_entering() => self.code_key(key),
+            WM_CHAR if self.pages.is_entering() => self.code_typed(wparam.0 as u32),
             // While the shortcut waits for a new one, every key goes to it.
             WM_KEYDOWN | WM_SYSKEYDOWN if self.pages.is_listening() => self.shortcut_key(key),
             // Print Screen only reports going up.
@@ -304,6 +308,7 @@ impl Main {
             WM_ACTIVATE => {
                 if wparam.0 as u32 & 0xffff == WA_INACTIVE {
                     self.stop_listening();
+                    self.pages.leave_code();
                     self.invalidate();
                 }
                 return None;
@@ -410,6 +415,9 @@ impl Main {
         if part != Some(Part::Shortcut) {
             self.stop_listening();
         }
+        if part != Some(Part::Code) {
+            self.pages.leave_code();
+        }
         if let Some(part) = part {
             self.pages.control(part).press(point);
             self.pressed = Some(part);
@@ -502,13 +510,8 @@ impl Main {
             }
             // Buying isn't there yet: in Kata Dev, getting Premium only shows how it
             // would be to have it.
-            Part::GetPremium if channel::is_dev() => {
-                settings::set_premium(true);
-                if let Err(error) = self.pages.set_premium(true) {
-                    report("window", &error);
-                }
-                self.go(Page::Premium);
-            }
+            Part::GetPremium if channel::is_dev() => self.got_premium(),
+            Part::Code => self.pages.enter_code(),
             Part::StayFree => {
                 let back = std::mem::replace(&mut self.premium_from, Page::Home);
                 self.go(back);
@@ -599,6 +602,46 @@ impl Main {
         self.invalidate();
     }
 
+    /// Premium is the user's from now on: its page says so, from its start.
+    fn got_premium(&mut self) {
+        settings::set_premium(true);
+        self.pages.leave_code();
+        if let Err(error) = self.pages.set_premium(true) {
+            report("window", &error);
+        }
+        self.go(Page::Premium);
+    }
+
+    /// Follows `key` while a code is entered: Esc gives up, and Enter on what isn't
+    /// a code shakes the field. A code that is one needs no Enter.
+    fn code_key(&mut self, key: VIRTUAL_KEY) {
+        if key == VK_ESCAPE {
+            self.pages.leave_code();
+        } else if key == VK_RETURN {
+            self.pages.refuse_code();
+        }
+        self.invalidate();
+    }
+
+    /// Adds what was typed, or pasted with Ctrl + V, to the code, and takes away its
+    /// last letter with Backspace. Once it's a code, Premium is the user's.
+    fn code_typed(&mut self, unit: u32) {
+        let mut code = self.pages.code().to_owned();
+        match char::from_u32(unit) {
+            Some('\u{8}') => drop(code.pop()),
+            Some('\u{16}') => code.push_str(&export::paste_text(self.hwnd).unwrap_or_default()),
+            Some(letter) => code.push(letter),
+            None => {}
+        }
+        if let Err(error) = self.pages.set_code(&code) {
+            report("window", &error);
+        }
+        if settings::redeems(self.pages.code()) {
+            self.got_premium();
+        }
+        self.invalidate();
+    }
+
     /// Stops waiting for a new shortcut and brings back the saved one.
     fn stop_listening(&mut self) {
         if self.pages.is_listening() {
@@ -632,6 +675,7 @@ impl Main {
             return;
         }
         self.stop_listening();
+        self.pages.leave_code();
         self.pages.hover(self.page, None);
         self.pages.refocus();
         self.direction = if page > self.page { 1.0 } else { -1.0 };

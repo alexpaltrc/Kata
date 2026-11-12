@@ -2,6 +2,7 @@
 
 mod button;
 mod caption;
+mod code;
 mod dock;
 mod hue;
 mod icon_button;
@@ -17,6 +18,7 @@ use std::time::Instant;
 
 pub use button::Button;
 pub use caption::Caption;
+pub use code::Code;
 pub use dock::{Dock, Item};
 pub use hue::Hue;
 pub use icon_button::IconButton;

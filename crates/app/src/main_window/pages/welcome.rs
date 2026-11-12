@@ -46,6 +46,8 @@ const GLYPH_GAP: f32 = 12.0;
 const PERKS_END: f32 = 8.0;
 const CHOICE_GAP: f32 = 24.0;
 const BUTTON_GAP: f32 = 8.0;
+/// Before the way to enter a code, under the ways on.
+const CODE_GAP: f32 = 8.0;
 
 /// While the window or the page comes in, nothing else moves.
 const LEAD: f32 = 0.25;
@@ -136,7 +138,9 @@ impl Pages {
         let heading = PADDING + self.premium_adds.height + ADDS_GAP;
         let perks = heading + self.perks.len() as f32 * self.perk_row() + PERKS_END;
         let above = self.all_free.height + LINE_GAP + self.forever.height + PERKS_GAP;
-        self.premium_top = top(above + perks + CHOICE_GAP + HEIGHT);
+        // The way to enter a code goes once Premium is the user's.
+        let code = if self.premium { 0.0 } else { CODE_GAP + HEIGHT };
+        self.premium_top = top(above + perks + CHOICE_GAP + HEIGHT + code);
         self.perks_card = Area::new(
             PADDING,
             self.premium_top + above,
@@ -156,6 +160,7 @@ impl Pages {
             button.widen(width);
             button.place(left + index as f32 * (width + BUTTON_GAP), top);
         }
+        self.code.place(room.0 / 2.0, top + HEIGHT + CODE_GAP);
     }
 
     /// How tall each of Premium's perks is.
@@ -322,6 +327,7 @@ impl Pages {
             self.stay_free.draw(painter, now);
             if !self.premium {
                 self.get_premium.draw(painter, now);
+                self.code.draw(painter, now);
             }
         });
     }

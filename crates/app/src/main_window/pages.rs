@@ -12,7 +12,7 @@ use kata_ui::{
     Graphics,
     access::Element,
     controls::{
-        self, Button, Caption, Control, HEIGHT, Hue, IconButton, Info, Segments, Shortcut,
+        self, Button, Caption, Code, Control, HEIGHT, Hue, IconButton, Info, Segments, Shortcut,
         Swatches, Toggle,
     },
     figure::Figure,
@@ -40,6 +40,8 @@ const BAR_GAP: f32 = 8.0;
 /// Around the cards, and inside them.
 const PADDING: f32 = 16.0;
 const CARD: f32 = 64.0;
+/// The longest a code can be.
+const CODE_LENGTH: usize = 20;
 /// Above and below Premium's card in Settings; the rim that says it's the user's;
 /// and Kata's orange, for its crown.
 const CARD_TOP: f32 = 8.0;
@@ -119,6 +121,7 @@ pub enum Part {
     GoOn,
     StayFree,
     GetPremium,
+    Code,
     Capture,
     OpenSettings,
     Back,
@@ -183,6 +186,9 @@ pub struct Pages {
     perks_card: Area,
     stay_free: Button,
     get_premium: Button,
+    /// The way to enter a code that gives Premium, and the code as typed so far.
+    code: Code,
+    code_text: String,
     /// Where Premium's parts start.
     premium_top: f32,
 
@@ -285,6 +291,8 @@ impl Pages {
             perks_card: Area::default(),
             stay_free: Button::standard(fonts.label(text.stay_free)?),
             get_premium: Button::standard(fonts.label(text.get_premium)?),
+            code: Code::new(fonts.label(text.have_code)?, fonts.label(text.enter_code)?),
+            code_text: String::new(),
             premium_top: 0.0,
             premium: false,
             crown: crown(graphics)?,
@@ -447,7 +455,7 @@ impl Pages {
     fn parts(&self, page: Page) -> Vec<Part> {
         let shown = |part: &Part| match part {
             Part::Premium => self.premium_card().is_some(),
-            Part::GetPremium => !self.premium,
+            Part::GetPremium | Part::Code => !self.premium,
             // A hue to pick only while the color is the user's own.
             Part::Hue => self.ink.selected() == INKS.len(),
             _ => true,
@@ -565,6 +573,7 @@ impl Pages {
             Part::GoOn => &mut self.go_on,
             Part::StayFree => &mut self.stay_free,
             Part::GetPremium => &mut self.get_premium,
+            Part::Code => &mut self.code,
             Part::Capture => &mut self.capture,
             Part::OpenSettings => &mut self.open_settings,
             Part::Back => &mut self.back,
@@ -589,6 +598,7 @@ impl Pages {
             Part::GoOn => &self.go_on,
             Part::StayFree => &self.stay_free,
             Part::GetPremium => &self.get_premium,
+            Part::Code => &self.code,
             Part::Capture => &self.capture,
             Part::OpenSettings => &self.open_settings,
             Part::Back => &self.back,
@@ -859,6 +869,48 @@ impl Pages {
         self.shortcut.is_listening()
     }
 
+    /// Turns the way to enter a code into its field, empty.
+    pub fn enter_code(&mut self) {
+        self.code_text.clear();
+        self.code.open();
+    }
+
+    /// Gives up on entering a code.
+    pub fn leave_code(&mut self) {
+        self.code_text.clear();
+        self.code.close();
+    }
+
+    pub fn is_entering(&self) -> bool {
+        self.code.is_entering()
+    }
+
+    /// The code as typed so far.
+    pub fn code(&self) -> &str {
+        &self.code_text
+    }
+
+    /// Has the field show `code`: its letters and digits, in capitals, as far as
+    /// they fit.
+    pub fn set_code(&mut self, code: &str) -> Result<()> {
+        let kept = code.chars().filter(char::is_ascii_alphanumeric);
+        self.code_text = kept
+            .map(|letter| letter.to_ascii_uppercase())
+            .take(CODE_LENGTH)
+            .collect();
+        let typed = match self.code_text.is_empty() {
+            true => None,
+            false => Some(self.fonts.label(&self.code_text)?),
+        };
+        self.code.show(typed);
+        Ok(())
+    }
+
+    /// Shakes the field: what's typed isn't a code.
+    pub fn refuse_code(&mut self) {
+        self.code.refuse();
+    }
+
     pub fn set_folder(&mut self, folder: &Path) -> Result<()> {
         folder.clone_into(&mut self.folder);
         self.trim_folder()
@@ -945,7 +997,7 @@ fn parts(page: Page) -> &'static [Part] {
     match page {
         Page::Welcome => &[Part::FirstCapture],
         Page::Ready => &[Part::ReadyKeys, Part::GoOn],
-        Page::Premium => &[Part::StayFree, Part::GetPremium],
+        Page::Premium => &[Part::StayFree, Part::GetPremium, Part::Code],
         Page::Home => &[Part::Capture, Part::OpenSettings],
         Page::Settings => &[
             Part::Back,

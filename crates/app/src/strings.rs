@@ -31,6 +31,9 @@ pub struct Strings {
     pub perk_guides: [&'static str; 3],
     pub stay_free: &'static str,
     pub get_premium: &'static str,
+    /// The way to enter a code that gives Premium, and what its empty field says.
+    pub have_code: &'static str,
+    pub enter_code: &'static str,
     /// Premium's card in Settings: what it's called, what it costs in a line, and the
     /// way to its page. Then the same, once it's the user's.
     pub premium_card: [&'static str; 3],
@@ -172,6 +175,8 @@ static SPANISH: Strings = Strings {
     ],
     stay_free: "Seguir gratis",
     get_premium: "Obtener Premium",
+    have_code: "Tengo un código",
+    enter_code: "Escribe tu código",
     premium_card: ["Kata Premium", "Un solo pago, tuyo para siempre", "Obtener"],
     premium_owned: [
         "Eres Premium",
@@ -258,6 +263,8 @@ static ENGLISH: Strings = Strings {
     ],
     stay_free: "Continue for free",
     get_premium: "Get Premium",
+    have_code: "I have a code",
+    enter_code: "Enter your code",
     premium_card: ["Kata Premium", "One payment, yours forever", "Get"],
     premium_owned: [
         "You're Premium",

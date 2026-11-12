@@ -215,6 +215,28 @@ pub fn premium() -> bool {
     channel::is_dev() && read(w!("Premium"), 0) != 0
 }
 
+/// What the codes that give Premium come to, digested: the codes themselves are
+/// kept nowhere.
+const CODES: [u64; 1] = [0x35c4_19aa_8d2f_e325];
+/// How many times over a code is digested.
+const ROUNDS: usize = 4096;
+
+/// Whether `code` is one that gives Premium.
+pub fn redeems(code: &str) -> bool {
+    CODES.contains(&digest(code))
+}
+
+/// FNV-1a over `code`, again and again.
+fn digest(code: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for _ in 0..ROUNDS {
+        for byte in code.bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    hash
+}
+
 /// Remembers whether Premium is the user's.
 pub fn set_premium(premium: bool) {
     write(w!("Premium"), usize::from(premium));
@@ -284,4 +306,15 @@ fn read(name: PCWSTR, default: usize) -> usize {
 
 fn write(name: PCWSTR, value: usize) {
     registry::write_dword(KEY, name, value as u32);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redeems;
+
+    #[test]
+    fn what_is_not_a_code_gives_nothing() {
+        assert!(!redeems(""));
+        assert!(!redeems("KATA"));
+    }
 }

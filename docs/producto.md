@@ -112,6 +112,7 @@ Kata no se vende hasta tener la bienvenida y al menos cinco idiomas: español, i
   - **Color a medida** en formas y pasos. Gratis, cinco.
   - **Juntar varias capturas en una.**
 - **Probar antes de pagar.** Cada una de las tres se puede usar gratis tres veces, sin registro ni reloj: elegir un atajo propio, elegir un color propio y juntar una captura. Ajustes dice cuántas pruebas quedan bajo el atajo y el color. Al acabarse, usarla lleva a la página de Premium. Mientras Kata no se vende, las pruebas solo cuentan en Kata Dev; en Kata todo es gratis.
+- **Un código también da Premium**, para regalarlo a quien no usa la Microsoft Store. En la página de Premium, bajo los dos botones, dice «Tengo un código»: un clic lo vuelve un campo, y al escribir o pegar un código válido Premium queda activado al instante, sin pulsar Intro. `Intro` con uno que no vale sacude el campo; `Esc` o un clic fuera lo cierran. Los códigos no están escritos en el código de Kata: solo se guarda su huella (`settings::redeems`), así que no se leen en el repositorio ni en el programa.
 - **Precio justo en cada país.** El precio de referencia se ajusta al poder adquisitivo de cada país con una sola cifra pública para todos: el nivel de precios del Banco Mundial (indicador `PA.NUS.PPPC.RF`, cuánto cuestan las cosas allí comparado con Estados Unidos). Partner Center permite fijar un precio distinto en cada mercado; se redondea a un precio que se lea bien en la moneda local.
 
 ## Fuera de alcance por ahora
