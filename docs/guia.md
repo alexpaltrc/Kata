@@ -142,7 +142,7 @@ Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inic
 |---|---|---|
 | Atajo | `Ctrl + Mayús + S` | Un clic y se pulsa el nuevo. Lleva `Ctrl` o `Alt`, salvo `Impr Pant`, que puede ir solo. Si otra app lo usa, lo avisa. |
 | Haz de Kata tu app de capturas | Apagado | Las teclas de captura de Windows, `Impr Pant` y `Win + Mayús + S`, abren la captura de Kata en vez de Recortes. El icono «i» de al lado lo explica. |
-| Abrir el editor al capturar | Encendido | Apagado, la captura solo se copia y se guarda. |
+| Al capturar | Editor | La captura siempre se copia y se guarda. Con **Nada**, solo eso. Con **Aviso**, aparece un momento en la esquina de la pantalla: un clic en ella la abre en el editor, y si no, se va sola. Con **Editor**, se abre en el editor. |
 | Mostrar los nombres de las herramientas | Apagado | El nombre de cada herramienta, siempre debajo de su icono. |
 | Sonido | Encendido | El toque al capturar. |
 | Carpeta de guardado | `Imágenes\Kata` | **Cambiar** abre el selector de carpetas de Windows. |

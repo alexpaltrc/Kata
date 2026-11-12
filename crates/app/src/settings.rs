@@ -16,8 +16,8 @@ pub struct Settings {
     /// Whether Print Screen and Win + Shift + S start Kata's captures instead of
     /// Windows' own.
     pub screen_keys: bool,
-    /// Whether each new capture opens in the editor.
-    pub open_editor: bool,
+    /// What follows each new capture.
+    pub after: After,
     /// Whether the editor names its tools under their icons.
     pub tool_names: bool,
     /// Whether a sound confirms each capture.
@@ -29,6 +29,30 @@ pub struct Settings {
     pub ink: usize,
     /// That hue, in degrees.
     pub hue: usize,
+}
+
+/// What follows a capture, which is always copied and saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum After {
+    /// Nothing more: it's ready to paste.
+    Nothing,
+    /// The capture shows as a card in a corner for a moment, and a click on it
+    /// opens it in the editor.
+    Notice,
+    /// It opens in the editor.
+    Editor,
+}
+
+impl After {
+    pub const ALL: [Self; 3] = [Self::Nothing, Self::Notice, Self::Editor];
+
+    /// As it was last chosen. Before there was a notice, the editor opened or it
+    /// didn't: that choice carries over.
+    fn load() -> Self {
+        let editor = read(w!("OpenEditor"), 1) != 0;
+        let before = if editor { Self::Editor } else { Self::Nothing };
+        Self::ALL[read(w!("AfterCapture"), before as usize).min(2)]
+    }
 }
 
 /// The colors the shapes and the steps come in for free, as `0xRRGGBB`: Kata's
@@ -120,7 +144,7 @@ impl Settings {
                 .and_then(Hotkey::decode)
                 .unwrap_or_default(),
             screen_keys: read(w!("ScreenKeys"), 0) != 0,
-            open_editor: read(w!("OpenEditor"), 1) != 0,
+            after: After::load(),
             tool_names: read(w!("ToolNames"), 0) != 0,
             sound: read(w!("Sound"), 1) != 0,
             folder: registry::read_string(KEY, w!("Folder")).map(PathBuf::from),
@@ -132,7 +156,7 @@ impl Settings {
     pub fn save(&self) {
         registry::write_dword(KEY, w!("Hotkey"), self.hotkey.encode());
         write(w!("ScreenKeys"), usize::from(self.screen_keys));
-        write(w!("OpenEditor"), usize::from(self.open_editor));
+        write(w!("AfterCapture"), self.after as usize);
         write(w!("ToolNames"), usize::from(self.tool_names));
         write(w!("Sound"), usize::from(self.sound));
         write(w!("Ink"), self.ink);

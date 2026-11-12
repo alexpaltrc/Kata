@@ -12,7 +12,8 @@ use kata_ui::{
     Graphics,
     access::Element,
     controls::{
-        self, Button, Caption, Control, HEIGHT, Hue, IconButton, Info, Shortcut, Swatches, Toggle,
+        self, Button, Caption, Control, HEIGHT, Hue, IconButton, Info, Segments, Shortcut,
+        Swatches, Toggle,
     },
     figure::Figure,
     logo,
@@ -25,7 +26,7 @@ use windows::core::Result;
 use crate::{
     channel,
     hotkey::Hotkey,
-    settings::{INKS, Perk, Settings, tinted},
+    settings::{After, INKS, Perk, Settings, tinted},
     strings::strings,
 };
 pub use welcome::Ready;
@@ -125,7 +126,7 @@ pub enum Part {
     Shortcut,
     ScreenKeysInfo,
     ScreenKeys,
-    OpenEditor,
+    After,
     ToolNames,
     Ink,
     Hue,
@@ -224,7 +225,9 @@ pub struct Pages {
     prompts: [Label; 3],
     screen_keys: Toggle,
     screen_keys_info: Info,
-    open_editor: Toggle,
+    /// What follows a capture: its title and its three choices.
+    after_title: Label,
+    after: Segments,
     tool_names: Toggle,
     sound: Toggle,
     folder_title: Label,
@@ -337,7 +340,13 @@ impl Pages {
                 fonts.icon('\u{E946}', 16.0)?,
                 fonts.wrapped(text.screen_keys_help, Info::TEXT_WIDTH)?,
             ),
-            open_editor: Toggle::new(fonts.label(text.open_editor)?, settings.open_editor),
+            after_title: fonts.label(text.after)?,
+            after: Segments::new(
+                (text.afters.iter())
+                    .map(|word| fonts.label(word))
+                    .collect::<Result<_>>()?,
+                settings.after as usize,
+            ),
             tool_names: Toggle::new(fonts.label(text.tool_names)?, settings.tool_names),
             sound: Toggle::new(fonts.label(text.sound)?, settings.sound),
             folder_title: fonts.label(text.folder)?,
@@ -360,7 +369,7 @@ impl Pages {
             self.welcome_width(),
             self.shortcut_title.width + PADDING + self.shortcut.width(),
             self.screen_keys.width() + INFO_GAP + Info::SIZE,
-            self.open_editor.width(),
+            self.after_title.width + PADDING + self.after.width(),
             self.tool_names.width(),
             self.sound.width(),
             self.folder_title.width + PADDING + self.change_folder.width(),
@@ -401,6 +410,8 @@ impl Pages {
             ink,
             folder,
         ] = self.rows();
+        self.after
+            .place(open_editor.right() - PADDING, open_editor.middle());
         self.ink.place(ink.right() - PADDING, ink.middle());
         let colors = ink.right() - PADDING - self.ink.width();
         self.hue.place(colors - HUE_GAP, ink.middle());
@@ -410,7 +421,6 @@ impl Pages {
             (&mut self.screen_keys, screen_keys),
             (&mut self.sound, sound),
             (&mut self.startup, startup),
-            (&mut self.open_editor, open_editor),
             (&mut self.tool_names, tool_names),
         ] {
             // After the row's glyph.
@@ -562,7 +572,7 @@ impl Pages {
             Part::Shortcut => &mut self.shortcut,
             Part::ScreenKeysInfo => &mut self.screen_keys_info,
             Part::ScreenKeys => &mut self.screen_keys,
-            Part::OpenEditor => &mut self.open_editor,
+            Part::After => &mut self.after,
             Part::ToolNames => &mut self.tool_names,
             Part::Ink => &mut self.ink,
             Part::Hue => &mut self.hue,
@@ -586,7 +596,7 @@ impl Pages {
             Part::Shortcut => &self.shortcut,
             Part::ScreenKeysInfo => &self.screen_keys_info,
             Part::ScreenKeys => &self.screen_keys,
-            Part::OpenEditor => &self.open_editor,
+            Part::After => &self.after,
             Part::ToolNames => &self.tool_names,
             Part::Ink => &self.ink,
             Part::Hue => &self.hue,
@@ -666,7 +676,7 @@ impl Pages {
                 for (row, icon) in rows.iter().zip(&self.row_icons) {
                     painter.text(icon, row.left + PADDING, row.middle(), palette.text);
                 }
-                let [shortcut, .., ink, folder] = rows;
+                let [shortcut, _, _, _, after, .., ink, folder] = rows;
                 // A title, over how many free tries are left when they count.
                 let titled = |title: &Label, tries: &Option<Label>, row: Area| {
                     let lines = title.height + tries.as_ref().map_or(0.0, |tries| tries.height);
@@ -680,6 +690,7 @@ impl Pages {
                 };
                 titled(&self.shortcut_title, &self.shortcut_tries, shortcut);
                 titled(&self.ink_title, &self.ink_tries, ink);
+                titled(&self.after_title, &None, after);
                 // The folder's title and path, one above the other.
                 let (title, path) = (&self.folder_title, &self.folder_path);
                 let top = folder.middle() - (title.height + path.height) / 2.0;
@@ -866,8 +877,9 @@ impl Pages {
         on
     }
 
-    pub fn open_editor(&self) -> bool {
-        self.open_editor.is_on()
+    /// What follows a capture, as chosen.
+    pub fn after(&self) -> After {
+        After::ALL[self.after.selected()]
     }
 
     pub fn tool_names(&self) -> bool {
@@ -944,7 +956,7 @@ fn parts(page: Page) -> &'static [Part] {
             Part::ScreenKeys,
             Part::Sound,
             Part::Startup,
-            Part::OpenEditor,
+            Part::After,
             Part::ToolNames,
             // Before the colors, which it sits beside.
             Part::Hue,

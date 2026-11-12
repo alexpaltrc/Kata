@@ -138,6 +138,22 @@ pub fn open(graphics: &Graphics, owner: HWND, capture: Capture, tool_names: bool
     }
 }
 
+/// Opens `capture`, already on the clipboard and saving through `output`, in the
+/// editor. The capture already open, if any, closes first.
+pub fn open_saved(
+    graphics: &Graphics,
+    owner: HWND,
+    capture: Capture,
+    output: Output,
+    tool_names: bool,
+) {
+    close();
+    match unsafe { create(graphics, capture, output, tool_names, None, owner) } {
+        Ok(hwnd) => OPEN.set(Some(hwnd)),
+        Err(error) => report("editor", &error),
+    }
+}
+
 pub fn is_open() -> bool {
     OPEN.get().is_some()
 }

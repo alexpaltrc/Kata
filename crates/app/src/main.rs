@@ -9,6 +9,7 @@ mod export;
 mod hotkey;
 mod import;
 mod main_window;
+mod notice;
 mod overlay;
 mod registry;
 mod screen_keys;
@@ -25,7 +26,7 @@ use card::Thumbnail;
 use kata_ui::{Graphics, theme, window};
 use main_window::{Page, Ready};
 use screen_keys::ScreenKeys;
-use settings::Settings;
+use settings::{After, Settings};
 use tray::Tray;
 use windows::{
     ApplicationModel::Package,
@@ -70,6 +71,8 @@ pub const WEIGHED: u32 = WM_APP + 7;
 pub const OFFER: u32 = WM_APP + 8;
 /// The editor asks for the settings: the main window shows them.
 pub const SETTINGS: u32 = WM_APP + 9;
+/// The notice of a capture ended: with a nonzero `WPARAM`, by a click on it.
+pub const NOTICE: u32 = WM_APP + 10;
 const CLASS: PCWSTR = w!("Kata");
 /// Captures started from the tray or the main window wait for it to fade away first.
 const CAPTURE_TIMER: usize = 1;
@@ -209,6 +212,9 @@ struct App {
     /// Whether the main window asked for the capture under way, and comes back
     /// after it.
     home: bool,
+    /// The capture its notice shows, already saving, which a click on the notice
+    /// opens in the editor.
+    noticed: Option<(editor::Capture, export::Output)>,
 }
 
 /// What the welcome's Ready says about the first capture, as it comes in.
@@ -236,6 +242,7 @@ impl App {
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
             first: None,
             home: false,
+            noticed: None,
         })
     }
 
@@ -263,6 +270,15 @@ impl App {
             SHOW => self.show(Page::Home),
             OFFER => self.show(Page::Premium),
             SETTINGS => self.show(Page::Settings),
+            NOTICE => {
+                // Left alone, its capture is done with: it's saved, and ready to paste.
+                if let Some((capture, output)) = self.noticed.take()
+                    && wparam.0 != 0
+                {
+                    let names = Settings::load().tool_names;
+                    editor::open_saved(&self.graphics, self.hwnd, capture, output, names);
+                }
+            }
             CAPTURE => self.capture_for(wparam.0 != 0),
             KEYS_CHANGED => {
                 let settings = Settings::load();
@@ -353,7 +369,10 @@ impl App {
             sound::play();
         }
         let first = self.first.is_some();
-        if settings.open_editor {
+        // The notice of the capture before goes, with what it held.
+        notice::close();
+        self.noticed = None;
+        if settings.after == After::Editor {
             editor::open(
                 &self.graphics,
                 self.hwnd,
@@ -364,7 +383,11 @@ impl App {
             );
         } else {
             let thumbnail = first.then(|| Thumbnail::of(&capture.image));
-            drop(export::Output::new(self.hwnd, capture.image));
+            let output = export::Output::new(self.hwnd, capture.image.clone());
+            if settings.after == After::Notice {
+                notice::show(&self.graphics, self.hwnd, &capture.image, capture.area);
+                self.noticed = Some((capture, output));
+            }
             editor::resume();
             if let Some(first) = &mut self.first {
                 first.thumbnail = thumbnail;
@@ -420,6 +443,7 @@ impl Drop for App {
     fn drop(&mut self) {
         // Closing the main window may give the hotkey back, so it goes first.
         main_window::close();
+        notice::close();
         hotkey::unregister(self.hwnd);
         // The editor's last changes are written before Kata exits.
         editor::close();

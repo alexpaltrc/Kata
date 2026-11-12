@@ -543,8 +543,8 @@ impl Main {
                 self.settings.hue = self.pages.ink().1;
                 self.settings.save();
             }
-            Part::OpenEditor | Part::ToolNames | Part::Sound => {
-                self.settings.open_editor = self.pages.open_editor();
+            Part::After | Part::ToolNames | Part::Sound => {
+                self.settings.after = self.pages.after();
                 self.settings.tool_names = self.pages.tool_names();
                 self.settings.sound = self.pages.sound();
                 self.settings.save();

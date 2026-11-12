@@ -58,13 +58,13 @@ La barra de título mide 48 píxeles de alto, la más alta de las dos que usa Wi
 
 ## Ajustes
 
-Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inicio. Los ajustes van en tres grupos con título, cada uno en una tarjeta con una línea fina entre sus filas y un icono al principio de cada fila: **Capturar** (atajo, app de capturas, sonido, iniciar con Windows), **Editar** (abrir el editor, nombres de las herramientas) y **Guardar** (carpeta).
+Cada cambio se aplica y se guarda al instante. `Esc` o la flecha vuelven al inicio. Los ajustes van en tres grupos con título, cada uno en una tarjeta con una línea fina entre sus filas y un icono al principio de cada fila: **Capturar** (atajo, app de capturas, sonido, iniciar con Windows), **Editar** (qué pasa al capturar, nombres de las herramientas, color) y **Guardar** (carpeta).
 
 | Ajuste | Por defecto | Cómo funciona |
 |---|---|---|
 | Atajo | `Ctrl + Mayús + S` | Un clic y se pulsa el nuevo. Lleva `Ctrl` o `Alt`, salvo `Impr Pant`, que puede ir solo. Si otra app lo usa, lo avisa. `Esc` cancela. |
 | Haz de Kata tu app de capturas | Desactivado | Las teclas de captura de Windows, `Impr Pant` (sola o con `Alt`, `Win`, `Ctrl` o `Mayús`) y `Win + Mayús + S`, abren el recorte de Kata en vez de Recortes. Se llama igual que en Lista. Apagado, vuelven a Windows al instante. Lo explica el icono «i» de al lado, al dejar el cursor quieto encima. |
-| Abrir el editor al capturar | Activado | Apagado, la captura solo se copia y se guarda. |
+| Al capturar | Editor | Tres opciones en una fila, y la captura siempre se copia y se guarda. **Nada:** solo eso. **Aviso:** la captura aparece un momento como una tarjeta en la esquina inferior derecha de su pantalla, y un clic en ella la abre en el editor; si nadie la toca, se va sola a los 5 s. Es una ventana propia, no una notificación de Windows, así que sale también con «No molestar» y no deja nada en el centro de notificaciones. **Editor:** se abre en el editor. |
 | Mostrar los nombres de las herramientas | Desactivado | El nombre de cada herramienta, siempre a la vista debajo de su icono. |
 | Color de formas y pasos | Naranja | Cinco colores listos: naranja, rojo, rosa, azul y verde, igual de vivos y con el blanco del número siempre legible. El sexto es de Premium: un tono a elegir entre todos, con un deslizador, que Kata mantiene vivo y nunca tan claro que el número se pierda. Vale para las capturas que se editen después. |
 | Sonido | Activado | Al encenderlo suena, para oírlo. |
