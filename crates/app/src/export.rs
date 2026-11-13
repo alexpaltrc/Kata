@@ -606,7 +606,14 @@ fn reserve_file() -> io::Result<(String, PathBuf)> {
     );
     for path in candidates(&folder, &taken) {
         match File::create_new(&path) {
-            Ok(_) => return Ok((taken, path)),
+            // A second capture in the same second is taken at "… (2)", so what it's
+            // called still follows when it was taken.
+            Ok(_) => {
+                let taken = path
+                    .file_stem()
+                    .map_or(taken, |stem| stem.to_string_lossy().into_owned());
+                return Ok((taken, path));
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
         }
