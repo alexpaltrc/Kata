@@ -384,9 +384,9 @@ impl Prices {
         for (literal, &count) in prices.literals.iter_mut().zip(&counts.literals) {
             *literal = price(count, total);
         }
-        for length in MIN_MATCH..=MAX_MATCH {
+        for (length, cost) in prices.lengths.iter_mut().enumerate().skip(MIN_MATCH) {
             let (symbol, extra_bits, _) = length_symbol(length as u16);
-            prices.lengths[length] = price(counts.literals[257 + symbol], total) + BIT * extra_bits;
+            *cost = price(counts.literals[257 + symbol], total) + BIT * extra_bits;
         }
         for (symbol, distance) in prices.distances.iter_mut().enumerate() {
             let extra_bits = (symbol as u32).saturating_sub(2) / 2;
